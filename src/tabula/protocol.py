@@ -8,6 +8,7 @@ TABULA_DIR = Path(".tabula")
 ARTIFACT_DIR = TABULA_DIR / "artifacts"
 INJECTION_PATH = TABULA_DIR / "prompt-injection.txt"
 MCP_CONFIG_PATH = TABULA_DIR / "codex-mcp.toml"
+AGENTS_SIDECAR_PATH = TABULA_DIR / "AGENTS.tabula.md"
 
 AGENTS_PROTOCOL_BEGIN = "<!-- TABULA_PROTOCOL:BEGIN -->"
 AGENTS_PROTOCOL_END = "<!-- TABULA_PROTOCOL:END -->"
@@ -34,6 +35,7 @@ class ProjectPaths:
 class BootstrapResult:
     paths: ProjectPaths
     git_initialized: bool
+    agents_preserved: bool
 
 
 def _protocol_block(artifacts_rel: Path, injection_rel: Path) -> str:
@@ -54,17 +56,6 @@ def _protocol_block(artifacts_rel: Path, injection_rel: Path) -> str:
         "",
     ]
     return "\n".join(lines)
-
-
-def _upsert_protocol_block(existing: str, block: str) -> str:
-    if AGENTS_PROTOCOL_BEGIN in existing and AGENTS_PROTOCOL_END in existing:
-        prefix, remainder = existing.split(AGENTS_PROTOCOL_BEGIN, 1)
-        _, suffix = remainder.split(AGENTS_PROTOCOL_END, 1)
-        merged = prefix.rstrip() + "\n\n" + block + suffix.lstrip("\n")
-        return merged
-    if not existing.strip():
-        return block
-    return existing.rstrip() + "\n\n" + block
 
 
 def _ensure_gitignore(project_dir: Path) -> None:
@@ -109,11 +100,13 @@ def bootstrap_project(
     artifacts_dir = (project_dir / artifacts_rel).resolve()
     injection_path = (project_dir / injection_rel).resolve()
     mcp_config_path = (project_dir / mcp_config_rel).resolve()
+    agents_sidecar_path = (project_dir / AGENTS_SIDECAR_PATH).resolve()
     agents_path = (project_dir / "AGENTS.md").resolve()
 
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     injection_path.parent.mkdir(parents=True, exist_ok=True)
     mcp_config_path.parent.mkdir(parents=True, exist_ok=True)
+    agents_sidecar_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not injection_path.exists():
         injection_path.write_text(
@@ -138,11 +131,10 @@ def bootstrap_project(
     _ensure_gitignore(project_dir)
 
     block = _protocol_block(artifacts_rel, injection_rel)
-    if agents_path.exists():
-        existing = agents_path.read_text(encoding="utf-8")
-    else:
-        existing = "# AGENTS\n\n"
-    agents_path.write_text(_upsert_protocol_block(existing, block), encoding="utf-8")
+    agents_sidecar_path.write_text(block, encoding="utf-8")
+    agents_preserved = agents_path.exists()
+    if not agents_path.exists():
+        agents_path.write_text("# AGENTS\n\n" + block, encoding="utf-8")
 
     git_initialized = _ensure_git_repo(project_dir)
     return BootstrapResult(
@@ -154,4 +146,5 @@ def bootstrap_project(
             agents_path=agents_path,
         ),
         git_initialized=git_initialized,
+        agents_preserved=agents_preserved,
     )

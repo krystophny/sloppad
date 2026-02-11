@@ -7,7 +7,7 @@ Tabula provides:
 
 - stdio MCP server (`tabula-canvas`) for canvas tools (framed + JSONL compatible)
 - optional local canvas window runtime
-- project bootstrap (`AGENTS.md` + MCP snippet + artifact folders)
+- project bootstrap (non-destructive `AGENTS.md` handling + MCP snippet + artifact folders)
 
 ## Install
 
@@ -20,13 +20,15 @@ python -m pip install -e .[gui]   # optional for local canvas window
 
 ```bash
 tabula bootstrap --project-dir .
-tabula mcp-server --project-dir . --headless --no-canvas
+tabula mcp-server --project-dir . --headless --no-canvas --fresh-canvas
 tabula run --project-dir . "your prompt"
 tabula canvas
 tabula schema
 ```
 
 `tabula run` launches interactive `codex` with inline Tabula MCP configuration and defaults to `--yolo --search`.
+It also requests a fresh canvas process (`--fresh-canvas`) per launch.
+If no `DISPLAY`/`WAYLAND_DISPLAY` is available, it warns and runs headless.
 
 ## Codex MCP integration
 
@@ -39,6 +41,11 @@ args = ["mcp-server", "--project-dir", "/abs/path/to/project"]
 ```
 
 Merge that snippet into `~/.codex/config.toml`.
+
+Bootstrap AGENTS behavior:
+- If `AGENTS.md` does not exist, Tabula creates it with the protocol block.
+- If `AGENTS.md` already exists, Tabula does **not** modify it.
+- Tabula always writes `.tabula/AGENTS.tabula.md` as the protocol sidecar.
 
 ## MCP tools exposed
 

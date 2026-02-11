@@ -456,12 +456,14 @@ def run_mcp_stdio_server(
     *,
     project_dir: Path,
     headless: bool = False,
+    fresh_canvas: bool = False,
     poll_interval_ms: int = 250,
     start_canvas: bool = True,
 ) -> int:
     adapter = CanvasAdapter(
         project_dir=project_dir,
         headless=headless,
+        fresh_canvas=fresh_canvas,
         start_canvas=start_canvas,
         poll_interval_ms=poll_interval_ms,
     )

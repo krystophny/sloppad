@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,12 +47,14 @@ class CanvasAdapter:
         project_dir: Path,
         start_canvas: bool = True,
         headless: bool = False,
+        fresh_canvas: bool = False,
         poll_interval_ms: int = 250,
         env: Mapping[str, str] | None = None,
     ) -> None:
         self._project_dir = project_dir.resolve()
         self._start_canvas = start_canvas
         self._headless_override = headless
+        self._fresh_canvas = fresh_canvas
         self._poll_interval_ms = poll_interval_ms
         self._env = env
 
@@ -60,12 +64,80 @@ class CanvasAdapter:
     def _effective_headless(self) -> bool:
         return self._headless_override or not has_display(self._env)
 
+    def _canvas_pid_path(self) -> Path:
+        return self._project_dir / ".tabula" / "canvas.pid"
+
+    @staticmethod
+    def _is_tabula_canvas_pid(pid: int) -> bool:
+        cmdline_path = Path("/proc") / str(pid) / "cmdline"
+        try:
+            raw = cmdline_path.read_bytes()
+        except OSError:
+            return False
+        text = raw.decode("utf-8", errors="ignore")
+        return ("tabula" in text) and ("canvas" in text)
+
+    def _clear_canvas_pid_file(self) -> None:
+        try:
+            self._canvas_pid_path().unlink()
+        except FileNotFoundError:
+            return
+
+    def _write_canvas_pid_file(self, pid: int) -> None:
+        path = self._canvas_pid_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(pid), encoding="utf-8")
+
+    def _terminate_stale_canvas_from_pid_file(self) -> None:
+        path = self._canvas_pid_path()
+        if not path.exists():
+            return
+
+        try:
+            pid = int(path.read_text(encoding="utf-8").strip())
+        except ValueError:
+            self._clear_canvas_pid_file()
+            return
+
+        if pid <= 0 or not self._is_tabula_canvas_pid(pid):
+            self._clear_canvas_pid_file()
+            return
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            self._clear_canvas_pid_file()
+            return
+        except PermissionError:
+            return
+
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                self._clear_canvas_pid_file()
+                return
+            except PermissionError:
+                return
+            time.sleep(0.05)
+
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        self._clear_canvas_pid_file()
+
     def _ensure_canvas_process(self) -> None:
         if self._effective_headless() or not self._start_canvas:
             return
         if self._canvas_proc is not None and self._canvas_proc.poll() is None:
             return
+        if self._fresh_canvas:
+            self._terminate_stale_canvas_from_pid_file()
         self._canvas_proc = launch_canvas_background(self._project_dir, poll_interval_ms=self._poll_interval_ms)
+        if self._canvas_proc.pid > 0:
+            self._write_canvas_pid_file(self._canvas_proc.pid)
 
     def _ensure_session(self, session_id: str) -> SessionRecord:
         if session_id not in self._sessions:
@@ -95,6 +167,7 @@ class CanvasAdapter:
             proc.stdin.flush()
         except (BrokenPipeError, OSError):
             self._canvas_proc = None
+            self._clear_canvas_pid_file()
 
     def _record_event(self, session_id: str, event: CanvasEvent) -> SessionRecord:
         record = self._ensure_session(session_id)

@@ -19,6 +19,7 @@ def test_launch_canvas_background_uses_expected_command(monkeypatch, tmp_path: P
 
     class FakeProc:
         stdin = None
+        pid = 12345
 
         def poll(self):
             return 0
@@ -44,15 +45,16 @@ def test_canvas_process_launch_and_reuse(monkeypatch, tmp_path: Path) -> None:
     class FakeProc:
         stdin = None
 
-        def __init__(self, poll_value: int | None):
+        def __init__(self, poll_value: int | None, pid: int):
             self._poll_value = poll_value
+            self.pid = pid
 
         def poll(self):
             return self._poll_value
 
     def fake_launch(project_dir: Path, *, poll_interval_ms: int = 250):
         launched["count"] += 1
-        return FakeProc(None)
+        return FakeProc(None, 20000 + launched["count"])
 
     monkeypatch.setattr(adapter_module, "launch_canvas_background", fake_launch)
     adapter = CanvasAdapter(
@@ -66,9 +68,39 @@ def test_canvas_process_launch_and_reuse(monkeypatch, tmp_path: Path) -> None:
     adapter.canvas_activate(session_id="s1")
     assert launched["count"] == 1
 
-    adapter._canvas_proc = FakeProc(1)  # type: ignore[attr-defined]
+    adapter._canvas_proc = FakeProc(1, 99999)  # type: ignore[attr-defined]
     adapter.canvas_activate(session_id="s1")
     assert launched["count"] == 2
+
+
+def test_fresh_canvas_mode_terminates_stale_pid_before_launch(monkeypatch, tmp_path: Path) -> None:
+    seen: dict[str, int] = {"cleanup": 0}
+
+    class FakeProc:
+        stdin = None
+        pid = 1234
+
+        def poll(self):
+            return None
+
+    def fake_launch(project_dir: Path, *, poll_interval_ms: int = 250):
+        return FakeProc()
+
+    def fake_cleanup(self):
+        seen["cleanup"] += 1
+
+    monkeypatch.setattr(adapter_module, "launch_canvas_background", fake_launch)
+    monkeypatch.setattr(CanvasAdapter, "_terminate_stale_canvas_from_pid_file", fake_cleanup)
+
+    adapter = CanvasAdapter(
+        project_dir=tmp_path,
+        headless=False,
+        fresh_canvas=True,
+        start_canvas=True,
+        env={"DISPLAY": ":0"},
+    )
+    adapter.canvas_activate(session_id="s1")
+    assert seen["cleanup"] == 1
 
 
 def test_canvas_activate_requires_nonempty_session_id(tmp_path: Path) -> None:

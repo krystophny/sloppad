@@ -8,25 +8,18 @@ import pytest
 import tabula.protocol as protocol
 
 
-def test_upsert_replaces_existing_protocol_block() -> None:
-    existing = (
-        "# AGENTS\n\n"
-        f"{protocol.AGENTS_PROTOCOL_BEGIN}\n"
-        "old block\n"
-        f"{protocol.AGENTS_PROTOCOL_END}\n"
-        "tail\n"
-    )
-    block = f"{protocol.AGENTS_PROTOCOL_BEGIN}\nnew block\n{protocol.AGENTS_PROTOCOL_END}\n"
-    merged = protocol._upsert_protocol_block(existing, block)
-    assert "new block" in merged
-    assert "old block" not in merged
-    assert "tail" in merged
+def test_bootstrap_preserves_existing_agents_and_writes_sidecar(tmp_path) -> None:
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text("# AGENTS\n\ncustom\n", encoding="utf-8")
 
-
-def test_upsert_with_empty_existing_returns_block() -> None:
-    block = f"{protocol.AGENTS_PROTOCOL_BEGIN}\nx\n{protocol.AGENTS_PROTOCOL_END}\n"
-    merged = protocol._upsert_protocol_block("   \n", block)
-    assert merged == block
+    result = protocol.bootstrap_project(tmp_path)
+    assert result.agents_preserved is True
+    assert agents.read_text(encoding="utf-8") == "# AGENTS\n\ncustom\n"
+    sidecar = tmp_path / ".tabula" / "AGENTS.tabula.md"
+    assert sidecar.exists()
+    text = sidecar.read_text(encoding="utf-8")
+    assert protocol.AGENTS_PROTOCOL_BEGIN in text
+    assert protocol.AGENTS_PROTOCOL_END in text
 
 
 def test_ensure_gitignore_idempotent_when_patterns_present(tmp_path: Path) -> None:

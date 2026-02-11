@@ -67,6 +67,7 @@ def test_given_bootstrap_mode_when_invoked_then_project_is_prepared(monkeypatch,
     class _Result:
         paths: _Paths
         git_initialized: bool
+        agents_preserved: bool
 
     def fake_bootstrap(project_dir: Path):
         return _Result(
@@ -76,6 +77,7 @@ def test_given_bootstrap_mode_when_invoked_then_project_is_prepared(monkeypatch,
                 mcp_config_path=project_dir / ".tabula" / "codex-mcp.toml",
             ),
             git_initialized=True,
+            agents_preserved=False,
         )
 
     monkeypatch.setattr("tabula.cli.bootstrap_project", fake_bootstrap)
@@ -84,6 +86,7 @@ def test_given_bootstrap_mode_when_invoked_then_project_is_prepared(monkeypatch,
 
     assert rc == 0
     assert "project prepared:" in out
+    assert "tabula sidecar protocol:" in out
     assert "mcp config snippet:" in out
     assert "git initialized" in out
 
@@ -100,6 +103,40 @@ def test_given_bootstrap_runtime_failure_when_invoked_then_error_and_nonzero(mon
     assert "bootstrap failed hard" in err
 
 
+def test_given_bootstrap_with_existing_agents_when_invoked_then_preserved_message_printed(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    @dataclass(frozen=True)
+    class _Paths:
+        project_dir: Path
+        agents_path: Path
+        mcp_config_path: Path
+
+    @dataclass(frozen=True)
+    class _Result:
+        paths: _Paths
+        git_initialized: bool
+        agents_preserved: bool
+
+    def fake_bootstrap(project_dir: Path):
+        return _Result(
+            paths=_Paths(
+                project_dir=project_dir,
+                agents_path=project_dir / "AGENTS.md",
+                mcp_config_path=project_dir / ".tabula" / "codex-mcp.toml",
+            ),
+            git_initialized=False,
+            agents_preserved=True,
+        )
+
+    monkeypatch.setattr("tabula.cli.bootstrap_project", fake_bootstrap)
+    rc = main(["bootstrap", "--project-dir", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "existing AGENTS.md is preserved; tabula protocol is in sidecar" in out
+
+
 def test_given_mcp_server_mode_when_invoked_then_bootstrap_and_server_runner_are_called(monkeypatch, tmp_path: Path) -> None:
     @dataclass(frozen=True)
     class _Paths:
@@ -111,6 +148,7 @@ def test_given_mcp_server_mode_when_invoked_then_bootstrap_and_server_runner_are
     class _Result:
         paths: _Paths
         git_initialized: bool
+        agents_preserved: bool
 
     calls: dict[str, object] = {}
 
@@ -122,11 +160,20 @@ def test_given_mcp_server_mode_when_invoked_then_bootstrap_and_server_runner_are
                 mcp_config_path=(project_dir / ".tabula" / "codex-mcp.toml").resolve(),
             ),
             git_initialized=False,
+            agents_preserved=False,
         )
 
-    def fake_run_server(*, project_dir: Path, headless: bool, poll_interval_ms: int, start_canvas: bool) -> int:
+    def fake_run_server(
+        *,
+        project_dir: Path,
+        headless: bool,
+        fresh_canvas: bool,
+        poll_interval_ms: int,
+        start_canvas: bool,
+    ) -> int:
         calls["project_dir"] = project_dir
         calls["headless"] = headless
+        calls["fresh_canvas"] = fresh_canvas
         calls["poll"] = poll_interval_ms
         calls["start_canvas"] = start_canvas
         return 11
@@ -138,8 +185,62 @@ def test_given_mcp_server_mode_when_invoked_then_bootstrap_and_server_runner_are
     assert rc == 11
     assert calls["project_dir"] == tmp_path.resolve()
     assert calls["headless"] is True
+    assert calls["fresh_canvas"] is False
     assert calls["poll"] == 777
     assert calls["start_canvas"] is False
+
+
+def test_given_mcp_server_with_fresh_canvas_flag_when_invoked_then_runner_receives_fresh_canvas(
+    monkeypatch, tmp_path: Path
+) -> None:
+    @dataclass(frozen=True)
+    class _Paths:
+        project_dir: Path
+        agents_path: Path
+        mcp_config_path: Path
+
+    @dataclass(frozen=True)
+    class _Result:
+        paths: _Paths
+        git_initialized: bool
+        agents_preserved: bool
+
+    calls: dict[str, object] = {}
+
+    def fake_bootstrap(project_dir: Path):
+        return _Result(
+            paths=_Paths(
+                project_dir=project_dir.resolve(),
+                agents_path=(project_dir / "AGENTS.md").resolve(),
+                mcp_config_path=(project_dir / ".tabula" / "codex-mcp.toml").resolve(),
+            ),
+            git_initialized=False,
+            agents_preserved=False,
+        )
+
+    def fake_run_server(
+        *,
+        project_dir: Path,
+        headless: bool,
+        fresh_canvas: bool,
+        poll_interval_ms: int,
+        start_canvas: bool,
+    ) -> int:
+        calls["project_dir"] = project_dir
+        calls["headless"] = headless
+        calls["fresh_canvas"] = fresh_canvas
+        calls["poll"] = poll_interval_ms
+        calls["start_canvas"] = start_canvas
+        return 17
+
+    monkeypatch.setattr("tabula.cli.bootstrap_project", fake_bootstrap)
+    monkeypatch.setattr("tabula.cli.run_mcp_stdio_server", fake_run_server)
+
+    rc = main(["mcp-server", "--project-dir", str(tmp_path), "--fresh-canvas"])
+    assert rc == 17
+    assert calls["fresh_canvas"] is True
+    assert calls["headless"] is False
+    assert calls["start_canvas"] is True
 
 
 def test_given_mcp_server_bootstrap_failure_when_invoked_then_nonzero(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -164,6 +265,7 @@ def test_given_run_mode_when_invoked_then_codex_launches_with_inline_mcp_yolo_an
     class _Result:
         paths: _Paths
         git_initialized: bool
+        agents_preserved: bool
 
     seen: dict[str, object] = {}
 
@@ -176,6 +278,7 @@ def test_given_run_mode_when_invoked_then_codex_launches_with_inline_mcp_yolo_an
                 mcp_config_path=resolved / ".tabula" / "codex-mcp.toml",
             ),
             git_initialized=False,
+            agents_preserved=False,
         )
 
     class _RunResult:
@@ -216,6 +319,7 @@ def test_given_run_mode_when_invoked_then_codex_launches_with_inline_mcp_yolo_an
     assert "mcp_servers.tabula-canvas.args=" in args_override
     assert "--headless" in args_override
     assert "--no-canvas" in args_override
+    assert "--fresh-canvas" in args_override
     assert "777" in args_override
 
 
@@ -230,6 +334,7 @@ def test_given_run_mode_when_codex_missing_then_nonzero_and_hint(monkeypatch, tm
     class _Result:
         paths: _Paths
         git_initialized: bool
+        agents_preserved: bool
 
     def fake_bootstrap(project_dir: Path):
         resolved = project_dir.resolve()
@@ -240,6 +345,7 @@ def test_given_run_mode_when_codex_missing_then_nonzero_and_hint(monkeypatch, tm
                 mcp_config_path=resolved / ".tabula" / "codex-mcp.toml",
             ),
             git_initialized=False,
+            agents_preserved=False,
         )
 
     def fake_run(_cmd):
@@ -252,6 +358,45 @@ def test_given_run_mode_when_codex_missing_then_nonzero_and_hint(monkeypatch, tm
     err = capsys.readouterr().err
     assert rc == 1
     assert "codex CLI not found on PATH" in err
+
+
+def test_given_run_mode_without_display_when_canvas_expected_then_headless_warning(monkeypatch, tmp_path: Path, capsys) -> None:
+    @dataclass(frozen=True)
+    class _Paths:
+        project_dir: Path
+        agents_path: Path
+        mcp_config_path: Path
+
+    @dataclass(frozen=True)
+    class _Result:
+        paths: _Paths
+        git_initialized: bool
+        agents_preserved: bool
+
+    def fake_bootstrap(project_dir: Path):
+        resolved = project_dir.resolve()
+        return _Result(
+            paths=_Paths(
+                project_dir=resolved,
+                agents_path=resolved / "AGENTS.md",
+                mcp_config_path=resolved / ".tabula" / "codex-mcp.toml",
+            ),
+            git_initialized=False,
+            agents_preserved=False,
+        )
+
+    class _RunResult:
+        returncode = 0
+
+    monkeypatch.setattr("tabula.cli.bootstrap_project", fake_bootstrap)
+    monkeypatch.setattr("tabula.cli.subprocess.run", lambda _cmd: _RunResult())
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    rc = main(["run", "--project-dir", str(tmp_path)])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "tabula-canvas will run headless" in err
 
 
 def test_given_no_args_when_invoked_then_help_and_exit_2(capsys) -> None:

@@ -9,11 +9,13 @@ def test_given_new_project_when_bootstrapped_then_git_agents_mcp_and_binary_igno
     result = bootstrap_project(tmp_path)
 
     assert result.git_initialized is True
+    assert result.agents_preserved is False
     assert (tmp_path / ".git").exists()
     assert (tmp_path / ".gitignore").exists()
     assert (tmp_path / ".tabula" / "artifacts").exists()
     assert (tmp_path / ".tabula" / "prompt-injection.txt").exists()
     assert (tmp_path / ".tabula" / "codex-mcp.toml").exists()
+    assert (tmp_path / ".tabula" / "AGENTS.tabula.md").exists()
     assert (tmp_path / "AGENTS.md").exists()
 
     agents = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
@@ -34,18 +36,20 @@ def test_given_new_project_when_bootstrapped_then_git_agents_mcp_and_binary_igno
     assert ".tabula/artifacts/*.png" in gitignore
 
 
-def test_given_existing_agents_when_bootstrapped_then_protocol_block_is_upserted_without_losing_custom_text(
+def test_given_existing_agents_when_bootstrapped_then_existing_agents_is_preserved_and_sidecar_is_written(
     tmp_path: Path,
 ) -> None:
     custom = "# AGENTS\n\nCustom section\n\n"
     (tmp_path / "AGENTS.md").write_text(custom, encoding="utf-8")
 
-    bootstrap_project(tmp_path)
+    result = bootstrap_project(tmp_path)
+    assert result.agents_preserved is True
     content = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    sidecar = (tmp_path / ".tabula" / "AGENTS.tabula.md").read_text(encoding="utf-8")
 
-    assert "Custom section" in content
-    assert content.count(AGENTS_PROTOCOL_BEGIN) == 1
-    assert content.count(AGENTS_PROTOCOL_END) == 1
+    assert content == custom
+    assert AGENTS_PROTOCOL_BEGIN in sidecar
+    assert AGENTS_PROTOCOL_END in sidecar
 
 
 def test_given_existing_git_repo_when_bootstrapped_then_does_not_reinitialize(tmp_path: Path) -> None:

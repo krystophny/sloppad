@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--project-dir", type=Path, default=Path("."))
     p_mcp.add_argument("--headless", action="store_true")
     p_mcp.add_argument("--no-canvas", action="store_true")
+    p_mcp.add_argument("--fresh-canvas", action="store_true")
     p_mcp.add_argument("--poll-ms", type=int, default=250)
 
     p_run = sub.add_parser("run", help="launch interactive codex with tabula MCP preconfigured")
@@ -64,13 +66,16 @@ def _cmd_bootstrap(project_dir: Path) -> int:
 
     print(f"project prepared: {result.paths.project_dir}")
     print(f"agents protocol: {result.paths.agents_path}")
+    print(f"tabula sidecar protocol: {(result.paths.project_dir / '.tabula' / 'AGENTS.tabula.md')}")
     print(f"mcp config snippet: {result.paths.mcp_config_path}")
+    if result.agents_preserved:
+        print("existing AGENTS.md is preserved; tabula protocol is in sidecar")
     if result.git_initialized:
         print("git initialized")
     return 0
 
 
-def _cmd_mcp_server(project_dir: Path, headless: bool, no_canvas: bool, poll_ms: int) -> int:
+def _cmd_mcp_server(project_dir: Path, headless: bool, no_canvas: bool, fresh_canvas: bool, poll_ms: int) -> int:
     try:
         bootstrap = bootstrap_project(project_dir)
     except RuntimeError as exc:
@@ -80,6 +85,7 @@ def _cmd_mcp_server(project_dir: Path, headless: bool, no_canvas: bool, poll_ms:
     return run_mcp_stdio_server(
         project_dir=bootstrap.paths.project_dir,
         headless=headless,
+        fresh_canvas=fresh_canvas,
         poll_interval_ms=poll_ms,
         start_canvas=not no_canvas,
     )
@@ -113,6 +119,14 @@ def _cmd_run(
         mcp_args.append("--headless")
     if no_canvas:
         mcp_args.append("--no-canvas")
+    mcp_args.append("--fresh-canvas")
+
+    if (not headless) and (not no_canvas):
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            print(
+                "warning: no DISPLAY/WAYLAND_DISPLAY detected; tabula-canvas will run headless",
+                file=sys.stderr,
+            )
 
     codex_cmd = [
         "codex",
@@ -151,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bootstrap":
         return _cmd_bootstrap(args.project_dir)
     if args.command == "mcp-server":
-        return _cmd_mcp_server(args.project_dir, args.headless, args.no_canvas, args.poll_ms)
+        return _cmd_mcp_server(args.project_dir, args.headless, args.no_canvas, args.fresh_canvas, args.poll_ms)
     if args.command == "run":
         return _cmd_run(
             args.project_dir,
