@@ -32,8 +32,7 @@ def test_given_new_project_when_bootstrapped_then_git_agents_mcp_and_binary_igno
     assert '--project-dir' in mcp_cfg
 
     gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
-    assert ".tabula/artifacts/*.pdf" in gitignore
-    assert ".tabula/artifacts/*.png" in gitignore
+    assert ".tabula/artifacts/" in gitignore
 
 
 def test_given_existing_agents_when_bootstrapped_then_existing_agents_is_preserved_and_sidecar_is_written(

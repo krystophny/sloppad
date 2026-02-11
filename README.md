@@ -49,6 +49,8 @@ Bootstrap AGENTS behavior:
 - If `AGENTS.md` does not exist, Tabula creates it with the protocol block.
 - If `AGENTS.md` already exists, Tabula does **not** modify it.
 - Tabula always writes `.tabula/AGENTS.tabula.md` as the protocol sidecar.
+- Protocol default: keep editable source files in project workspace; use `.tabula/artifacts/` only for render/output artifacts.
+- Bootstrap always ensures `.tabula/artifacts/` is gitignored.
 
 ## MCP tools exposed
 

@@ -38,7 +38,7 @@ def test_ensure_gitignore_appends_with_separator(tmp_path: Path) -> None:
     gitignore.write_text("custom\n", encoding="utf-8")
     protocol._ensure_gitignore(tmp_path)
     text = gitignore.read_text(encoding="utf-8")
-    assert "custom\n\n.tabula/artifacts/*.pdf" in text
+    assert "custom\n\n.tabula/artifacts/" in text
 
 
 def test_bootstrap_raises_when_git_init_fails(tmp_path: Path, monkeypatch) -> None:
