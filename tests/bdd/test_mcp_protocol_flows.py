@@ -26,8 +26,8 @@ def _call(server: TabulaMcpServer, request: dict[str, object]) -> dict[str, obje
     return response
 
 
-def test_given_single_line_json_when_read_message_then_parsed() -> None:
-    stream = io.BytesIO(b'{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}\n')
+def test_given_framed_message_when_read_message_then_parsed() -> None:
+    stream = io.BytesIO(_frame({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}}))
     parsed = read_message(stream)
     assert parsed is not None
     assert parsed["method"] == "ping"
@@ -241,33 +241,6 @@ def test_write_message_flushes_when_supported() -> None:
     parsed = read_message(stream)
     assert parsed is not None
     assert parsed["id"] == 1
-
-
-def test_write_message_supports_jsonl_mode() -> None:
-    stream = io.BytesIO()
-    write_message(stream, {"jsonrpc": "2.0", "id": 2, "result": {}}, framed=False)
-    stream.seek(0)
-    line = stream.readline().decode("utf-8")
-    payload = json.loads(line)
-    assert payload["id"] == 2
-
-
-def test_given_jsonl_input_when_run_forever_then_server_replies_in_jsonl(tmp_path: Path) -> None:
-    adapter = CanvasAdapter(project_dir=tmp_path, headless=True, start_canvas=False)
-    in_payload = {"jsonrpc": "2.0", "id": 31, "method": "ping", "params": {}}
-    stream_in = io.BytesIO((json.dumps(in_payload) + "\n").encode("utf-8"))
-    stream_out = io.BytesIO()
-    server = TabulaMcpServer(adapter, input_stream=stream_in, output_stream=stream_out)
-
-    rc = server.run_forever()
-    assert rc == 0
-    stream_out.seek(0)
-    line = stream_out.readline().decode("utf-8")
-    assert line.strip().startswith("{")
-    assert "Content-Length" not in line
-    payload = json.loads(line)
-    assert payload["id"] == 31
-    assert payload["result"] == {}
 
 
 def test_run_mcp_stdio_server_constructs_adapter_and_runs(monkeypatch, tmp_path: Path) -> None:

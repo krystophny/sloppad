@@ -46,7 +46,7 @@ def _protocol_block(artifacts_rel: Path, injection_rel: Path) -> str:
         f"1. Read extra instructions from `{injection_rel.as_posix()}` and apply them.",
         f"2. Keep generated artifacts under `{artifacts_rel.as_posix()}` unless user explicitly overrides.",
         "3. Use MCP server `tabula-canvas` for all canvas operations; do not rely on filesystem event logs.",
-        "4. MCP tools: `canvas_activate`, `canvas_render_text`, `canvas_render_image`, `canvas_render_pdf`, `canvas_clear`, `canvas_status`.",
+        "4. MCP tools: `canvas_activate`, `canvas_render_text`, `canvas_render_image`, `canvas_render_pdf`, `canvas_clear`, `canvas_status`, `canvas_history`.",
         "5. Keep interaction terminal-first; do not replace the terminal with a custom REPL.",
         "6. Do not commit binary artifacts from `.tabula/artifacts/*` unless explicitly requested.",
         "",

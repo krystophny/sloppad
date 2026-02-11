@@ -22,17 +22,10 @@ class RpcError(Exception):
         super().__init__(message)
 
 
-def _read_message_with_mode(stream: BinaryIO) -> tuple[dict[str, Any] | None, str]:
+def _read_framed_message(stream: BinaryIO) -> dict[str, Any] | None:
     first_line = stream.readline()
     if not first_line:
-        return None, "framed"
-
-    stripped = first_line.lstrip()
-    if stripped.startswith(b"{"):
-        try:
-            return json.loads(first_line.decode("utf-8")), "jsonl"
-        except json.JSONDecodeError as exc:  # pragma: no cover
-            raise RpcError(-32700, f"invalid json: {exc.msg}") from exc
+        return None
 
     headers: dict[str, str] = {}
     line = first_line
@@ -65,22 +58,18 @@ def _read_message_with_mode(stream: BinaryIO) -> tuple[dict[str, Any] | None, st
 
     if not isinstance(payload, dict):
         raise RpcError(-32600, "request must be an object")
-    return payload, "framed"
-
-
-def read_message(stream: BinaryIO) -> dict[str, Any] | None:
-    payload, _mode = _read_message_with_mode(stream)
     return payload
 
 
-def write_message(stream: BinaryIO, payload: dict[str, Any], *, framed: bool = True) -> None:
+def read_message(stream: BinaryIO) -> dict[str, Any] | None:
+    return _read_framed_message(stream)
+
+
+def write_message(stream: BinaryIO, payload: dict[str, Any]) -> None:
     encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    if framed:
-        header = f"Content-Length: {len(encoded)}\r\n\r\n".encode("utf-8")
-        stream.write(header)
-        stream.write(encoded)
-    else:
-        stream.write(encoded + b"\n")
+    header = f"Content-Length: {len(encoded)}\r\n\r\n".encode("utf-8")
+    stream.write(header)
+    stream.write(encoded)
     if hasattr(stream, "flush"):
         stream.flush()
 
@@ -215,18 +204,14 @@ class TabulaMcpServer:
         self.adapter = adapter
         self.input_stream = input_stream or sys.stdin.buffer
         self.output_stream = output_stream or sys.stdout.buffer
-        self._wire_mode: str | None = None
 
     def _write(self, payload: dict[str, Any]) -> None:
-        mode = self._wire_mode or "framed"
-        write_message(self.output_stream, payload, framed=(mode == "framed"))
+        write_message(self.output_stream, payload)
 
     def run_forever(self) -> int:
         while True:
             try:
-                message, wire_mode = _read_message_with_mode(self.input_stream)
-                if self._wire_mode is None:
-                    self._wire_mode = wire_mode
+                message = read_message(self.input_stream)
             except RpcError as exc:
                 self._write(
                     {
