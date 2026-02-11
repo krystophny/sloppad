@@ -170,6 +170,16 @@ def _tool_definitions() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "canvas_selection",
+            "description": "Get selected text info (line numbers + text) for current text artifact.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"session_id": {"type": "string", "minLength": 1}},
+                "required": ["session_id"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "canvas_history",
             "description": "Get recent in-memory event history for a canvas session.",
             "inputSchema": {
@@ -368,6 +378,9 @@ class TabulaMcpServer:
 
         if name == "canvas_status":
             return self.adapter.canvas_status(session_id=_require_str(args, "session_id"))
+
+        if name == "canvas_selection":
+            return self.adapter.canvas_selection(session_id=_require_str(args, "session_id"))
 
         if name == "canvas_history":
             session_id = _require_str(args, "session_id")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 import types
 
@@ -94,7 +95,68 @@ def _import_window_with_fake_pyside(monkeypatch, *, has_qtpdf: bool):
             self._text = text
 
     class FakeQPlainTextEdit(FakeWidget):
-        pass
+        class FakeBlock:
+            def __init__(self, number: int) -> None:
+                self._number = number
+
+            def blockNumber(self) -> int:
+                return self._number
+
+        class FakeDocument:
+            def __init__(self, editor) -> None:
+                self._editor = editor
+
+            def findBlock(self, pos: int):
+                text = self._editor._text
+                pos = max(0, min(int(pos), len(text)))
+                return FakeQPlainTextEdit.FakeBlock(text[:pos].count("\n"))
+
+        class FakeTextCursor:
+            def __init__(self, editor) -> None:
+                self._editor = editor
+                self._start = 0
+                self._end: int | None = None
+
+            def hasSelection(self) -> bool:
+                return self._end is not None and self._end > self._start
+
+            def selectionStart(self) -> int:
+                return self._start
+
+            def selectionEnd(self) -> int:
+                return self._end if self._end is not None else self._start
+
+            def selectedText(self) -> str:
+                if not self.hasSelection():
+                    return ""
+                text = self._editor._text[self._start : self.selectionEnd()]
+                return text.replace("\n", "\u2029")
+
+            def setSelection(self, start: int, end: int) -> None:
+                length = len(self._editor._text)
+                s = max(0, min(int(start), length))
+                e = max(s, min(int(end), length))
+                self._start = s
+                self._end = e
+
+            def clearSelection(self) -> None:
+                self._end = None
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.selectionChanged = _Signal()
+            self._cursor = FakeQPlainTextEdit.FakeTextCursor(self)
+            self._document = FakeQPlainTextEdit.FakeDocument(self)
+
+        def setPlainText(self, text: str) -> None:
+            super().setPlainText(text)
+            self._cursor.clearSelection()
+
+        def textCursor(self):
+            return self._cursor
+
+        def document(self):
+            return self._document
 
     class FakeQStackedWidget(FakeWidget):
         def __init__(self) -> None:
@@ -299,6 +361,49 @@ def test_window_pdf_unavailable_branch_with_mocked_imports(monkeypatch) -> None:
     )
     assert window.stack.current_widget is window.pdf_view
     assert "QtPdf unavailable" in window.status_label.text()
+
+
+def test_window_emits_selection_feedback_with_line_numbers(monkeypatch) -> None:
+    window_module, _ = _import_window_with_fake_pyside(monkeypatch, has_qtpdf=False)
+    output: list[str] = []
+
+    class FakeStdout:
+        def write(self, text: str) -> int:
+            output.append(text)
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    monkeypatch.setattr(window_module.sys, "stdout", FakeStdout())
+    window = window_module.CanvasWindow(poll_interval_ms=50)
+    window.apply_event(
+        TextArtifactEvent(
+            event_id="e1",
+            ts="2026-02-11T12:00:00Z",
+            kind="text_artifact",
+            title="doc",
+            text="alpha\nbravo\ncharlie",
+        )
+    )
+
+    cursor = window.text_view.textCursor()
+    cursor.setSelection(6, 11)  # "bravo"
+    window.text_view.selectionChanged.emit()
+    payload = json.loads(output[-1])
+    assert payload["kind"] == "text_selection"
+    assert payload["event_id"] == "e1"
+    assert payload["line_start"] == 2
+    assert payload["line_end"] == 2
+    assert payload["text"] == "bravo"
+
+    cursor.clearSelection()
+    window.text_view.selectionChanged.emit()
+    payload2 = json.loads(output[-1])
+    assert payload2["kind"] == "text_selection"
+    assert payload2["line_start"] is None
+    assert payload2["line_end"] is None
+    assert payload2["text"] is None
 
 
 def test_run_canvas_reuses_existing_qapplication_instance(monkeypatch) -> None:

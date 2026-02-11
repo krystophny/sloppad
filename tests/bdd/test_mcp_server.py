@@ -40,6 +40,7 @@ def test_tools_list_exposes_canvas_tools(tmp_path) -> None:
     assert "canvas_render_pdf" in names
     assert "canvas_clear" in names
     assert "canvas_status" in names
+    assert "canvas_selection" in names
     assert "canvas_history" in names
 
 
@@ -76,6 +77,18 @@ def test_tools_call_render_text_updates_state_and_history(tmp_path) -> None:
         },
     )
     assert status["result"]["structuredContent"]["mode"] == "review"
+    assert status["result"]["structuredContent"]["selection"]["has_selection"] is False
+
+    selection = _call(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": {"name": "canvas_selection", "arguments": {"session_id": "s1"}},
+        },
+    )
+    assert selection["result"]["structuredContent"]["selection"]["has_selection"] is False
 
     history = _call(
         server,

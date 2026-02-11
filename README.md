@@ -58,11 +58,13 @@ Bootstrap AGENTS behavior:
 - `canvas_render_pdf`
 - `canvas_clear`
 - `canvas_status`
+- `canvas_selection`
 - `canvas_history`
 
 Canvas state is MCP-first and in-memory; no filesystem event log is required.
 UX scope for this MVP is only `prompt` and `review` canvas modes.
 `canvas_activate`/`canvas_status` also report `canvas_process_alive` and `canvas_launch_error` for startup diagnostics.
+When users select text in the canvas text view, selection metadata (line range + text) is exposed via `canvas_status.selection` and `canvas_selection`.
 
 ## Tests
 

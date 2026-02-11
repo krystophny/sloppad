@@ -197,6 +197,17 @@ def test_given_all_tool_happy_paths_when_called_then_status_and_mode_progression
         },
     )
     assert history["result"]["structuredContent"]["count"] == 2
+    selection = _call(
+        server,
+        {
+            "jsonrpc": "2.0",
+            "id": 111,
+            "method": "tools/call",
+            "params": {"name": "canvas_selection", "arguments": {"session_id": "s1"}},
+        },
+    )
+    assert selection["result"]["isError"] is False
+    assert selection["result"]["structuredContent"]["selection"]["has_selection"] is False
 
     cleared = _call(
         server,

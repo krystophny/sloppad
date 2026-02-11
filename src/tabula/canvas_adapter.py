@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -34,9 +35,17 @@ def launch_canvas_background(project_dir: Path, *, poll_interval_ms: int = 250) 
         cmd,
         cwd=project_dir,
         stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+
+@dataclass
+class TextSelection:
+    event_id: str
+    line_start: int
+    line_end: int
+    text: str
 
 
 @dataclass
@@ -44,6 +53,7 @@ class SessionRecord:
     state: CanvasState
     activated: bool
     history: list[CanvasEvent] = field(default_factory=list)
+    selection: TextSelection | None = None
 
 
 class CanvasAdapter:
@@ -65,7 +75,10 @@ class CanvasAdapter:
         self._env = env
 
         self._sessions: dict[str, SessionRecord] = {}
+        self._event_to_session: dict[str, str] = {}
         self._canvas_proc: subprocess.Popen[bytes] | None = None
+        self._canvas_feedback_thread: threading.Thread | None = None
+        self._canvas_feedback_pid: int | None = None
         self._canvas_launch_error: str | None = None
 
     def _effective_headless(self) -> bool:
@@ -155,6 +168,7 @@ class CanvasAdapter:
             time.sleep(0.05)
         if self._canvas_proc.poll() is None:
             self._canvas_launch_error = None
+            self._start_canvas_feedback_reader()
             return
 
         exit_code = self._canvas_proc.poll()
@@ -175,6 +189,95 @@ class CanvasAdapter:
 
     def _canvas_process_alive(self) -> bool:
         return self._canvas_proc is not None and self._canvas_proc.poll() is None
+
+    def _start_canvas_feedback_reader(self) -> None:
+        proc = self._canvas_proc
+        if proc is None or proc.stdout is None:
+            return
+        if self._canvas_feedback_pid == proc.pid and self._canvas_feedback_thread is not None:
+            if self._canvas_feedback_thread.is_alive():
+                return
+
+        self._canvas_feedback_pid = proc.pid
+        self._canvas_feedback_thread = threading.Thread(
+            target=self._canvas_feedback_reader_loop,
+            args=(proc,),
+            daemon=True,
+        )
+        self._canvas_feedback_thread.start()
+
+    def _canvas_feedback_reader_loop(self, proc: subprocess.Popen[bytes]) -> None:
+        if proc.stdout is None:
+            return
+        while True:
+            try:
+                raw = proc.stdout.readline()
+            except OSError:
+                return
+            if not raw:
+                return
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            self._handle_canvas_feedback_line(line)
+
+    def _handle_canvas_feedback_line(self, line: str) -> None:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(payload, dict):
+            return
+        if payload.get("kind") != "text_selection":
+            return
+
+        event_id = payload.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            return
+
+        line_start = payload.get("line_start")
+        line_end = payload.get("line_end")
+        text = payload.get("text")
+
+        if line_start is None or line_end is None or text is None:
+            self._apply_text_selection_feedback(event_id=event_id, line_start=None, line_end=None, text=None)
+            return
+
+        if not isinstance(line_start, int) or line_start < 1:
+            return
+        if not isinstance(line_end, int) or line_end < line_start:
+            return
+        if not isinstance(text, str):
+            return
+
+        self._apply_text_selection_feedback(event_id=event_id, line_start=line_start, line_end=line_end, text=text)
+
+    def _apply_text_selection_feedback(
+        self,
+        *,
+        event_id: str,
+        line_start: int | None,
+        line_end: int | None,
+        text: str | None,
+    ) -> None:
+        session_id = self._event_to_session.get(event_id)
+        if session_id is None:
+            return
+
+        record = self._ensure_session(session_id)
+        active = record.state.active_event
+        if active is None or active.kind != "text_artifact" or active.event_id != event_id:
+            return
+
+        if line_start is None or line_end is None or text is None or text == "":
+            record.selection = None
+            return
+        record.selection = TextSelection(
+            event_id=event_id,
+            line_start=line_start,
+            line_end=line_end,
+            text=text,
+        )
 
     def _ensure_session(self, session_id: str) -> SessionRecord:
         if session_id not in self._sessions:
@@ -209,9 +312,30 @@ class CanvasAdapter:
     def _record_event(self, session_id: str, event: CanvasEvent) -> SessionRecord:
         record = self._ensure_session(session_id)
         record.state = reduce_state(record.state, event)
+        record.selection = None
         record.history.append(event)
+        self._event_to_session[event.event_id] = session_id
         self._emit_to_canvas(event)
         return record
+
+    @staticmethod
+    def _selection_payload(record: SessionRecord) -> dict[str, object]:
+        selection = record.selection
+        if selection is None:
+            return {
+                "has_selection": False,
+                "event_id": None,
+                "line_start": None,
+                "line_end": None,
+                "text": None,
+            }
+        return {
+            "has_selection": True,
+            "event_id": selection.event_id,
+            "line_start": selection.line_start,
+            "line_end": selection.line_end,
+            "text": selection.text,
+        }
 
     def canvas_activate(self, *, session_id: str, mode_hint: str | None = None) -> dict[str, object]:
         if not session_id.strip():
@@ -227,6 +351,7 @@ class CanvasAdapter:
             "headless": self._effective_headless(),
             "mode": record.state.mode,
             "mode_hint": mode_hint,
+            "selection": self._selection_payload(record),
             "canvas_process_alive": self._canvas_process_alive(),
             "canvas_launch_error": self._canvas_launch_error,
         }
@@ -312,8 +437,20 @@ class CanvasAdapter:
             "active_kind": kind,
             "history_size": len(record.history),
             "headless": self._effective_headless(),
+            "selection": self._selection_payload(record),
             "canvas_process_alive": self._canvas_process_alive(),
             "canvas_launch_error": self._canvas_launch_error,
+        }
+
+    def canvas_selection(self, *, session_id: str) -> dict[str, object]:
+        record = self._ensure_session(session_id)
+        active_event = record.state.active_event
+        event_id = active_event.event_id if active_event is not None else None
+        return {
+            "session_id": session_id,
+            "mode": record.state.mode,
+            "active_event_id": event_id,
+            "selection": self._selection_payload(record),
         }
 
     def canvas_history(self, *, session_id: str, limit: int = 20) -> dict[str, object]:

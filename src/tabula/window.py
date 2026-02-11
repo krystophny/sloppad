@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import threading
@@ -40,6 +41,7 @@ class CanvasWindow(QMainWindow):
         self._state = CanvasState()
         self._incoming: queue.SimpleQueue[CanvasEvent] = queue.SimpleQueue()
         self._errors: queue.SimpleQueue[str] = queue.SimpleQueue()
+        self._active_text_event_id: str | None = None
 
         root = QWidget(self)
         layout = QVBoxLayout(root)
@@ -61,6 +63,7 @@ class CanvasWindow(QMainWindow):
 
         self.text_view = QPlainTextEdit()
         self.text_view.setReadOnly(True)
+        self.text_view.selectionChanged.connect(self._on_text_selection_changed)
         self.stack.addWidget(self.text_view)
 
         self.image_label = QLabel("image")
@@ -110,17 +113,20 @@ class CanvasWindow(QMainWindow):
         self.mode_label.setText(f"mode: {self._state.mode}")
 
         if event.kind == "clear_canvas":
+            self._active_text_event_id = None
             self.stack.setCurrentWidget(self.blank_label)
             self.status_label.setText("status: canvas cleared")
             return
 
         if event.kind == "text_artifact":
+            self._active_text_event_id = event.event_id
             self.text_view.setPlainText(event.text)
             self.stack.setCurrentWidget(self.text_view)
             self.status_label.setText(f"status: text artifact '{event.title}'")
             return
 
         if event.kind == "image_artifact":
+            self._active_text_event_id = None
             pixmap = QPixmap(event.path)
             if pixmap.isNull():
                 self.status_label.setText(f"status: failed to load image {event.path}")
@@ -131,6 +137,7 @@ class CanvasWindow(QMainWindow):
             return
 
         if event.kind == "pdf_artifact":
+            self._active_text_event_id = None
             if HAS_QTPDF and self.pdf_document is not None:
                 self.pdf_document.load(event.path)
                 if self.pdf_document.status() == QPdfDocument.Status.Ready:
@@ -141,6 +148,51 @@ class CanvasWindow(QMainWindow):
             else:
                 self.stack.setCurrentWidget(self.pdf_view)
                 self.status_label.setText("status: QtPdf unavailable")
+
+    def _emit_feedback(self, payload: dict[str, object]) -> None:
+        try:
+            sys.stdout.write(json.dumps(payload, separators=(",", ":"), ensure_ascii=True) + "\n")
+            sys.stdout.flush()
+        except OSError:
+            return
+
+    def _on_text_selection_changed(self) -> None:
+        if self._active_text_event_id is None:
+            return
+
+        cursor = self.text_view.textCursor()
+        if not cursor.hasSelection():
+            self._emit_feedback(
+                {
+                    "kind": "text_selection",
+                    "event_id": self._active_text_event_id,
+                    "line_start": None,
+                    "line_end": None,
+                    "text": None,
+                }
+            )
+            return
+
+        start = int(cursor.selectionStart())
+        end_exclusive = int(cursor.selectionEnd())
+        if end_exclusive <= start:
+            return
+
+        end_inclusive = end_exclusive - 1
+        doc = self.text_view.document()
+        line_start = int(doc.findBlock(start).blockNumber()) + 1
+        line_end = int(doc.findBlock(end_inclusive).blockNumber()) + 1
+        selected_text = str(cursor.selectedText()).replace("\u2029", "\n")
+
+        self._emit_feedback(
+            {
+                "kind": "text_selection",
+                "event_id": self._active_text_event_id,
+                "line_start": line_start,
+                "line_end": line_end,
+                "text": selected_text,
+            }
+        )
 
     def poll_once(self) -> None:
         while True:

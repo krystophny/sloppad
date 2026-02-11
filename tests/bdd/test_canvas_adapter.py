@@ -16,10 +16,12 @@ def test_given_headless_adapter_when_activate_then_status_reports_prompt_and_hea
     assert activation["active"] is True
     assert activation["headless"] is True
     assert activation["mode_hint"] == "review"
+    assert activation["selection"]["has_selection"] is False
     assert activation["canvas_process_alive"] is False
     assert activation["canvas_launch_error"] is None
     assert status["mode"] == "prompt"
     assert status["headless"] is True
+    assert status["selection"]["has_selection"] is False
     assert status["canvas_process_alive"] is False
     assert status["canvas_launch_error"] is None
 

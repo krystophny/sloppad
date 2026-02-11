@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ def test_launch_canvas_background_uses_expected_command(monkeypatch, tmp_path: P
 
     class FakeProc:
         stdin = None
+        stdout = io.BytesIO()
         stderr = io.BytesIO()
         pid = 12345
 
@@ -41,7 +43,7 @@ def test_launch_canvas_background_uses_expected_command(monkeypatch, tmp_path: P
     cmd = seen["cmd"]
     assert cmd[1:4] == ["-m", "tabula", "canvas"]
     assert "--poll-ms" in cmd
-    assert seen["stdout"] == adapter_module.subprocess.DEVNULL
+    assert seen["stdout"] == adapter_module.subprocess.PIPE
     assert seen["stderr"] == adapter_module.subprocess.PIPE
 
 
@@ -50,6 +52,7 @@ def test_canvas_process_launch_and_reuse(monkeypatch, tmp_path: Path) -> None:
 
     class FakeProc:
         stdin = None
+        stdout = io.BytesIO()
         stderr = io.BytesIO()
 
         def __init__(self, poll_value: int | None, pid: int):
@@ -85,6 +88,7 @@ def test_fresh_canvas_mode_terminates_stale_pid_before_launch(monkeypatch, tmp_p
 
     class FakeProc:
         stdin = None
+        stdout = io.BytesIO()
         stderr = io.BytesIO()
         pid = 1234
 
@@ -114,6 +118,7 @@ def test_fresh_canvas_mode_terminates_stale_pid_before_launch(monkeypatch, tmp_p
 def test_canvas_launch_failure_is_reported_in_activation_and_status(monkeypatch, tmp_path: Path) -> None:
     class FakeProc:
         stdin = None
+        stdout = io.BytesIO()
         stderr = io.BytesIO(b"ModuleNotFoundError: No module named 'PySide6'")
         pid = 777
 
@@ -165,3 +170,78 @@ def test_history_limit_must_be_positive(tmp_path: Path) -> None:
     adapter = CanvasAdapter(project_dir=tmp_path, headless=True, start_canvas=False)
     with pytest.raises(ValueError):
         adapter.canvas_history(session_id="s1", limit=0)
+
+
+def test_text_selection_feedback_updates_status_and_selection_tool(tmp_path: Path) -> None:
+    adapter = CanvasAdapter(project_dir=tmp_path, headless=True, start_canvas=False)
+    render = adapter.canvas_render_text(session_id="s1", title="draft", markdown_or_text="a\nb\nc")
+
+    adapter._handle_canvas_feedback_line(
+        json.dumps(
+            {
+                "kind": "text_selection",
+                "event_id": render["artifact_id"],
+                "line_start": 2,
+                "line_end": 2,
+                "text": "b",
+            }
+        )
+    )
+
+    status = adapter.canvas_status(session_id="s1")
+    selection = adapter.canvas_selection(session_id="s1")
+    assert status["selection"]["has_selection"] is True
+    assert status["selection"]["line_start"] == 2
+    assert status["selection"]["line_end"] == 2
+    assert status["selection"]["text"] == "b"
+    assert selection["selection"]["has_selection"] is True
+    assert selection["selection"]["text"] == "b"
+
+
+def test_text_selection_feedback_is_ignored_for_non_active_event(tmp_path: Path) -> None:
+    adapter = CanvasAdapter(project_dir=tmp_path, headless=True, start_canvas=False)
+    first = adapter.canvas_render_text(session_id="s1", title="first", markdown_or_text="one")
+    adapter.canvas_render_text(session_id="s1", title="second", markdown_or_text="two")
+
+    adapter._handle_canvas_feedback_line(
+        json.dumps(
+            {
+                "kind": "text_selection",
+                "event_id": first["artifact_id"],
+                "line_start": 1,
+                "line_end": 1,
+                "text": "one",
+            }
+        )
+    )
+    assert adapter.canvas_selection(session_id="s1")["selection"]["has_selection"] is False
+
+
+def test_text_selection_feedback_can_clear_selection(tmp_path: Path) -> None:
+    adapter = CanvasAdapter(project_dir=tmp_path, headless=True, start_canvas=False)
+    render = adapter.canvas_render_text(session_id="s1", title="draft", markdown_or_text="abc")
+    adapter._handle_canvas_feedback_line(
+        json.dumps(
+            {
+                "kind": "text_selection",
+                "event_id": render["artifact_id"],
+                "line_start": 1,
+                "line_end": 1,
+                "text": "a",
+            }
+        )
+    )
+    assert adapter.canvas_selection(session_id="s1")["selection"]["has_selection"] is True
+
+    adapter._handle_canvas_feedback_line(
+        json.dumps(
+            {
+                "kind": "text_selection",
+                "event_id": render["artifact_id"],
+                "line_start": None,
+                "line_end": None,
+                "text": None,
+            }
+        )
+    )
+    assert adapter.canvas_selection(session_id="s1")["selection"]["has_selection"] is False
