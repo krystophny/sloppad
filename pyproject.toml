@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tabula"
 version = "0.1.0"
-description = "Minimal canvas mode prototype with strict JSONL events"
+description = "Codex-first MCP canvas adapter with optional local canvas window"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Tabula" }]

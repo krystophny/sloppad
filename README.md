@@ -21,9 +21,12 @@ python -m pip install -e .[gui]   # optional for local canvas window
 ```bash
 tabula bootstrap --project-dir .
 tabula mcp-server --project-dir . --headless --no-canvas
+tabula run --project-dir . "your prompt"
 tabula canvas
 tabula schema
 ```
+
+`tabula run` launches interactive `codex` with inline Tabula MCP configuration and defaults to `--yolo --search`.
 
 ## Codex MCP integration
 

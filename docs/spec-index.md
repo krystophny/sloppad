@@ -30,7 +30,7 @@ Canonical behavior is code + tests. This file only points to source-of-truth loc
 - `tests/unit/test_protocol_internal.py`
 - `tests/bdd/test_protocol_bootstrap.py`
 
-6. CLI surface (`canvas`, `schema`, `bootstrap`, `mcp-server`)
+6. CLI surface (`canvas`, `schema`, `bootstrap`, `mcp-server`, `run`)
 - `src/tabula/cli.py`
 - `tests/bdd/test_cli_usage_modes.py`
 
