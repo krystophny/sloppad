@@ -46,8 +46,18 @@ class LocalPtyTransport(PtyTransport):
         if pid == 0:
             try:
                 os.chdir(cwd)
+                os.environ["TERM"] = "xterm-256color"
                 shell = os.environ.get("SHELL", "/bin/bash")
-                os.execvp(shell, ["-" + os.path.basename(shell)])
+                shell_name = os.path.basename(shell)
+                # Keep an interactive prompt, but avoid shell startup files that
+                # commonly rewrite PATH and break deterministic command resolution.
+                if shell_name in {"bash", "rbash"}:
+                    args = [shell_name, "--noprofile", "--norc", "-i"]
+                elif shell_name == "zsh":
+                    args = [shell_name, "-f", "-i"]
+                else:
+                    args = [shell_name, "-i"]
+                os.execvp(shell, args)
             except BaseException:
                 os._exit(1)
         os.set_blocking(master_fd, False)
