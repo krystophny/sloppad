@@ -209,11 +209,12 @@ async function launchAI() {
 
   openCanvasWs();
 
+  const mcpUrl = `http://127.0.0.1:${9420}/mcp`;
   let cmd;
   if (assistant === 'codex') {
-    cmd = 'codex --no-alt-screen --yolo --search\n';
+    cmd = `tabula run --assistant codex --mcp-url ${mcpUrl}\n`;
   } else {
-    cmd = 'claude\n';
+    cmd = `tabula run --assistant claude --mcp-url ${mcpUrl}\n`;
   }
 
   if (state.terminalWs.readyState === WebSocket.OPEN) {

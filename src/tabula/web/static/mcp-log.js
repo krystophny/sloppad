@@ -1,3 +1,5 @@
+import { esc } from './utils.js';
+
 const MAX_ENTRIES = 200;
 let entries = [];
 let visible = false;
@@ -71,8 +73,3 @@ function renderLog() {
   container.scrollTop = container.scrollHeight;
 }
 
-function esc(str) {
-  const d = document.createElement('span');
-  d.textContent = str;
-  return d.innerHTML;
-}

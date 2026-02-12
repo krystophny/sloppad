@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -53,10 +54,12 @@ def _hash_password(password: str, salt: str) -> str:
 
 
 class Store:
+    """SQLite store — must only be called from the aiohttp event loop thread."""
+
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._migrate()
@@ -93,7 +96,7 @@ class Store:
         row = self._conn.execute("SELECT pw_hash, pw_salt FROM admin WHERE id=1").fetchone()
         if row is None:
             return False
-        return _hash_password(password, row["pw_salt"]) == row["pw_hash"]
+        return hmac.compare_digest(_hash_password(password, row["pw_salt"]), row["pw_hash"])
 
     def add_host(self, *, name: str, hostname: str, port: int = 22, username: str, key_path: str = "", project_dir: str = "~") -> HostConfig:
         if not name.strip():
@@ -120,8 +123,14 @@ class Store:
         return [HostConfig(**dict(r)) for r in rows]
 
     def update_host(self, host_id: int, **fields: Any) -> HostConfig:
-        allowed = {"name", "hostname", "port", "username", "key_path", "project_dir"}
-        updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        _FIELD_TYPES = {"name": str, "hostname": str, "port": int, "username": str, "key_path": str, "project_dir": str}
+        updates: dict[str, Any] = {}
+        for k, v in fields.items():
+            if k not in _FIELD_TYPES or v is None:
+                continue
+            if not isinstance(v, _FIELD_TYPES[k]):
+                raise ValueError(f"{k} must be {_FIELD_TYPES[k].__name__}")
+            updates[k] = v
         if not updates:
             return self.get_host(host_id)
         set_clause = ", ".join(f"{k}=?" for k in updates)

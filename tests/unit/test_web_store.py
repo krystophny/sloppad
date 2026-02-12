@@ -97,6 +97,24 @@ def test_host_to_dict(tmp_path: Path) -> None:
     store.close()
 
 
+def test_update_host_rejects_wrong_types(tmp_path: Path) -> None:
+    store = Store(tmp_path / "test.db")
+    host = store.add_host(name="dev", hostname="h", username="u")
+    with pytest.raises(ValueError, match="port must be int"):
+        store.update_host(host.id, port="not-a-number")
+    with pytest.raises(ValueError, match="hostname must be str"):
+        store.update_host(host.id, hostname=123)
+    store.close()
+
+
+def test_update_host_ignores_unknown_fields(tmp_path: Path) -> None:
+    store = Store(tmp_path / "test.db")
+    host = store.add_host(name="dev", hostname="h", username="u")
+    updated = store.update_host(host.id, unknown_field="value")
+    assert updated.hostname == "h"
+    store.close()
+
+
 def test_store_persists_across_instances(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     store1 = Store(db_path)

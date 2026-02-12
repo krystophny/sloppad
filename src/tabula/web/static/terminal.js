@@ -60,6 +60,3 @@ export function writeToTerminal(data) {
   if (terminal) terminal.write(data);
 }
 
-export function getTerminal() {
-  return terminal;
-}

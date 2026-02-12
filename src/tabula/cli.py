@@ -61,7 +61,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_web = sub.add_parser("web", help="launch tabula web server")
     p_web.add_argument("--data-dir", type=Path, default=Path("~/.tabula-web").expanduser())
-    p_web.add_argument("--host", default="0.0.0.0")
+    p_web.add_argument("--host", default="127.0.0.1")
     p_web.add_argument("--port", type=int, default=8420)
 
     p_run = sub.add_parser("run", help="launch interactive assistant with tabula MCP preconfigured")
@@ -136,49 +136,41 @@ def _cmd_mcp_server(project_dir: Path, headless: bool, no_canvas: bool, fresh_ca
     )
 
 
-def _launch_codex(target: Path, mcp_shell: str, prompt: str | None) -> int:
-    cmd = [
-        "codex",
-        "--no-alt-screen",
-        "--yolo",
-        "--search",
-        "-C",
-        str(target),
-        "-c",
-        f"mcp_servers.tabula-canvas.command={json.dumps('bash')}",
-        "-c",
-        f"mcp_servers.tabula-canvas.args={json.dumps(['-lc', mcp_shell])}",
-    ]
+def _launch_assistant(cmd: list[str], *, name: str, prompt: str | None, cwd: Path | None = None) -> int:
     if prompt:
         cmd.append(prompt)
     try:
-        return subprocess.run(cmd).returncode
+        return subprocess.run(cmd, cwd=cwd).returncode
     except FileNotFoundError:
-        print("codex CLI not found on PATH", file=sys.stderr)
+        print(f"{name} CLI not found on PATH", file=sys.stderr)
         return 1
 
 
-def _launch_claude(target: Path, mcp_shell: str, prompt: str | None) -> int:
-    claude_mcp_config = {
-        "mcpServers": {
-            "tabula-canvas": {
-                "command": "bash",
-                "args": ["-lc", mcp_shell],
-            }
-        }
-    }
-    cmd = [
-        "claude",
-        "--mcp-config",
-        json.dumps(claude_mcp_config, separators=(",", ":")),
+def _codex_stdio_cmd(target: Path, mcp_shell: str) -> list[str]:
+    return [
+        "codex", "--no-alt-screen", "--yolo", "--search",
+        "-C", str(target),
+        "-c", f"mcp_servers.tabula-canvas.command={json.dumps('bash')}",
+        "-c", f"mcp_servers.tabula-canvas.args={json.dumps(['-lc', mcp_shell])}",
     ]
-    if prompt:
-        cmd.append(prompt)
-    try:
-        return subprocess.run(cmd, cwd=target).returncode
-    except FileNotFoundError:
-        print("claude CLI not found on PATH", file=sys.stderr)
-        return 1
+
+
+def _claude_stdio_cmd(mcp_shell: str) -> list[str]:
+    cfg = {"mcpServers": {"tabula-canvas": {"command": "bash", "args": ["-lc", mcp_shell]}}}
+    return ["claude", "--mcp-config", json.dumps(cfg, separators=(",", ":"))]
+
+
+def _codex_http_cmd(target: Path, mcp_url: str) -> list[str]:
+    return [
+        "codex", "--no-alt-screen", "--yolo", "--search",
+        "-C", str(target),
+        "-c", f"mcp_servers.tabula-canvas.url={json.dumps(mcp_url)}",
+    ]
+
+
+def _claude_http_cmd(mcp_url: str) -> list[str]:
+    cfg = {"mcpServers": {"tabula-canvas": {"url": mcp_url}}}
+    return ["claude", "--mcp-config", json.dumps(cfg, separators=(",", ":"))]
 
 
 def _cmd_serve(project_dir: Path, host: str, port: int) -> int:
@@ -231,7 +223,7 @@ def _cmd_run(
     target = bootstrap.paths.project_dir
 
     if mcp_url:
-        return _run_with_http_mcp(target, assistant=assistant, mcp_url=mcp_url, prompt=prompt)
+        return _dispatch_assistant(assistant, target=target, mcp_url=mcp_url, prompt=prompt)
 
     mcp_args = [
         "-m",
@@ -260,62 +252,29 @@ def _cmd_run(
         mcp_args=mcp_args,
         env=dict(os.environ),
     )
+    return _dispatch_assistant(assistant, target=target, mcp_shell=mcp_shell, prompt=prompt)
+
+
+def _dispatch_assistant(
+    assistant: str,
+    *,
+    target: Path,
+    mcp_shell: str | None = None,
+    mcp_url: str | None = None,
+    prompt: str | None = None,
+) -> int:
     if assistant == "codex":
-        return _launch_codex(target, mcp_shell, prompt)
+        if mcp_url:
+            cmd = _codex_http_cmd(target, mcp_url)
+        else:
+            cmd = _codex_stdio_cmd(target, mcp_shell)
+        return _launch_assistant(cmd, name="codex", prompt=prompt)
     if assistant == "claude":
-        return _launch_claude(target, mcp_shell, prompt)
-
-    print(f"unsupported assistant: {assistant}", file=sys.stderr)
-    return 1
-
-
-def _launch_codex_http(target: Path, mcp_url: str, prompt: str | None) -> int:
-    cmd = [
-        "codex",
-        "--no-alt-screen",
-        "--yolo",
-        "--search",
-        "-C",
-        str(target),
-        "-c",
-        f"mcp_servers.tabula-canvas.url={json.dumps(mcp_url)}",
-    ]
-    if prompt:
-        cmd.append(prompt)
-    try:
-        return subprocess.run(cmd).returncode
-    except FileNotFoundError:
-        print("codex CLI not found on PATH", file=sys.stderr)
-        return 1
-
-
-def _launch_claude_http(target: Path, mcp_url: str, prompt: str | None) -> int:
-    claude_mcp_config = {
-        "mcpServers": {
-            "tabula-canvas": {
-                "url": mcp_url,
-            }
-        }
-    }
-    cmd = [
-        "claude",
-        "--mcp-config",
-        json.dumps(claude_mcp_config, separators=(",", ":")),
-    ]
-    if prompt:
-        cmd.append(prompt)
-    try:
-        return subprocess.run(cmd, cwd=target).returncode
-    except FileNotFoundError:
-        print("claude CLI not found on PATH", file=sys.stderr)
-        return 1
-
-
-def _run_with_http_mcp(target: Path, *, assistant: str, mcp_url: str, prompt: str | None) -> int:
-    if assistant == "codex":
-        return _launch_codex_http(target, mcp_url, prompt)
-    if assistant == "claude":
-        return _launch_claude_http(target, mcp_url, prompt)
+        if mcp_url:
+            cmd = _claude_http_cmd(mcp_url)
+        else:
+            cmd = _claude_stdio_cmd(mcp_shell)
+        return _launch_assistant(cmd, name="claude", prompt=prompt, cwd=target)
 
     print(f"unsupported assistant: {assistant}", file=sys.stderr)
     return 1

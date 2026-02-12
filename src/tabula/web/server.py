@@ -13,7 +13,7 @@ from aiohttp import web
 from .ssh import SSHService
 from .store import Store
 
-DEFAULT_HOST = "0.0.0.0"
+DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8420
 SESSION_COOKIE = "tabula_session"
 DAEMON_PORT = 9420
@@ -75,7 +75,7 @@ class TabulaWebApp:
         token = self._new_session_token()
         self._sessions[token] = {"role": "admin"}
         resp = web.json_response({"ok": True})
-        resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="Strict")
+        resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="Strict", secure=request.secure)
         return resp
 
     async def handle_login(self, request: web.Request) -> web.Response:
@@ -86,7 +86,7 @@ class TabulaWebApp:
         token = self._new_session_token()
         self._sessions[token] = {"role": "admin"}
         resp = web.json_response({"ok": True})
-        resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="Strict")
+        resp.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="Strict", secure=request.secure)
         return resp
 
     async def handle_logout(self, request: web.Request) -> web.Response:
@@ -170,6 +170,20 @@ class TabulaWebApp:
         self._tunnel_ports.pop(session_id, None)
         return web.json_response({"ok": True})
 
+    @staticmethod
+    async def _pty_reader(process: Any, ws: web.WebSocketResponse) -> None:
+        try:
+            while not process.stdout.at_eof():
+                data = await process.stdout.read(4096)
+                if not data:
+                    break
+                if isinstance(data, bytes):
+                    await ws.send_bytes(data)
+                else:
+                    await ws.send_str(data)
+        except (asyncio.CancelledError, ConnectionResetError):
+            pass
+
     async def handle_terminal_ws(self, request: web.Request) -> web.WebSocketResponse:
         if not self._check_auth(request):
             raise web.HTTPUnauthorized(text="unauthorized")
@@ -184,21 +198,7 @@ class TabulaWebApp:
         self._terminal_ws[session_id] = ws
 
         process = await self._ssh.open_pty(session_id)
-
-        async def _read_pty() -> None:
-            try:
-                while not process.stdout.at_eof():
-                    data = await process.stdout.read(4096)
-                    if not data:
-                        break
-                    if isinstance(data, bytes):
-                        await ws.send_bytes(data)
-                    else:
-                        await ws.send_str(data)
-            except (asyncio.CancelledError, ConnectionResetError):
-                pass
-
-        read_task = asyncio.create_task(_read_pty())
+        read_task = asyncio.create_task(self._pty_reader(process, ws))
 
         try:
             async for msg in ws:
@@ -235,7 +235,7 @@ class TabulaWebApp:
 
         safe_dir = shlex.quote(project_dir)
         await ssh_session.conn.run(
-            f"cd {safe_dir} && nohup python -m tabula serve --port {DAEMON_PORT} > /tmp/tabula-serve.log 2>&1 &",
+            f"cd {safe_dir} && nohup python3 -m tabula serve --port {DAEMON_PORT} > /tmp/tabula-serve.log 2>&1 &",
             check=False,
             timeout=5,
         )
@@ -244,17 +244,18 @@ class TabulaWebApp:
         self._tunnel_ports[session_id] = tunnel_port
 
         healthy = False
-        deadline = asyncio.get_event_loop().time() + DAEMON_STARTUP_TIMEOUT
-        while asyncio.get_event_loop().time() < deadline:
-            try:
-                async with aiohttp.ClientSession() as cs:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + DAEMON_STARTUP_TIMEOUT
+        async with aiohttp.ClientSession() as cs:
+            while loop.time() < deadline:
+                try:
                     async with cs.get(f"http://127.0.0.1:{tunnel_port}/health", timeout=aiohttp.ClientTimeout(total=2)) as resp:
                         if resp.status == 200:
                             healthy = True
                             break
-            except Exception:
-                pass
-            await asyncio.sleep(DAEMON_HEALTH_POLL_INTERVAL)
+                except Exception:
+                    pass
+                await asyncio.sleep(DAEMON_HEALTH_POLL_INTERVAL)
 
         if not healthy:
             raise web.HTTPBadGateway(text="remote daemon did not start in time")
@@ -302,7 +303,10 @@ class TabulaWebApp:
             async with aiohttp.ClientSession() as cs:
                 async with cs.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status != 200:
-                        return web.Response(status=resp.status, text=await resp.text())
+                        return web.Response(
+                            status=resp.status, text=await resp.text(),
+                            content_type=resp.content_type or "text/plain",
+                        )
                     body = await resp.read()
                     return web.Response(body=body, content_type=resp.content_type or "application/octet-stream")
         except Exception as exc:

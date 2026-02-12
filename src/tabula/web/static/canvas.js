@@ -1,5 +1,7 @@
 import { marked } from './vendor/marked.esm.js';
 
+marked.setOptions({ breaks: true });
+
 const els = {};
 
 function getEls() {
@@ -13,6 +15,20 @@ function getEls() {
     els.mode = document.getElementById('canvas-mode');
   }
   return els;
+}
+
+function sanitizeHtml(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const dangerous = doc.querySelectorAll('script,iframe,object,embed,link[rel="import"],form');
+  dangerous.forEach(el => el.remove());
+  doc.querySelectorAll('*').forEach(el => {
+    for (const attr of [...el.attributes]) {
+      if (attr.name.startsWith('on') || attr.value.trim().toLowerCase().startsWith('javascript:')) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  return doc.body.innerHTML;
 }
 
 function hideAll() {
@@ -29,7 +45,7 @@ export function renderCanvas(event) {
   if (event.kind === 'text_artifact') {
     hideAll();
     e.text.style.display = '';
-    e.text.innerHTML = marked.parse(event.text || '');
+    e.text.innerHTML = sanitizeHtml(marked.parse(event.text || ''));
     e.title.textContent = event.title || 'Text';
     e.mode.textContent = 'review';
     e.mode.className = 'badge review';
@@ -49,7 +65,11 @@ export function renderCanvas(event) {
     e.pdf.style.display = '';
     const pdfState = (window._tabulaApp || {}).getState ? window._tabulaApp.getState() : {};
     const pdfSid = pdfState.sessionId || '';
-    e.pdf.innerHTML = `<iframe src="/api/files/${pdfSid}/${encodeURIComponent(event.path)}" style="width:100%;height:100%;border:none;"></iframe>`;
+    e.pdf.innerHTML = '';
+    const iframe = document.createElement('iframe');
+    iframe.src = `/api/files/${encodeURIComponent(pdfSid)}/${encodeURIComponent(event.path)}`;
+    iframe.style.cssText = 'width:100%;height:100%;border:none;';
+    e.pdf.appendChild(iframe);
     e.title.textContent = event.title || 'PDF';
     e.mode.textContent = 'review';
     e.mode.className = 'badge review';

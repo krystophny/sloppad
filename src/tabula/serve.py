@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
+import threading
 from pathlib import Path
 
 from aiohttp import web
@@ -20,6 +21,7 @@ class TabulaServeApp:
         self._project_dir = project_dir.resolve()
         self._ws_clients: set[web.WebSocketResponse] = set()
         self._pending_events: list[CanvasEvent] = []
+        self._event_lock = threading.Lock()
         self._mcp_server = TabulaMcpServer(
             CanvasAdapter(
                 project_dir=self._project_dir,
@@ -34,13 +36,15 @@ class TabulaServeApp:
         return self._mcp_server.adapter
 
     def _queue_event(self, event: CanvasEvent) -> None:
-        self._pending_events.append(event)
+        with self._event_lock:
+            self._pending_events.append(event)
 
     async def _broadcast_pending_events(self) -> None:
-        if not self._pending_events:
-            return
-        events = self._pending_events[:]
-        self._pending_events.clear()
+        with self._event_lock:
+            if not self._pending_events:
+                return
+            events = self._pending_events[:]
+            self._pending_events.clear()
         dead: list[web.WebSocketResponse] = []
         for event in events:
             payload = json.dumps(event_to_payload(event), separators=(",", ":"))

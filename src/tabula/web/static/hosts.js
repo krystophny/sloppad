@@ -1,4 +1,5 @@
 import { showMain } from './app.js';
+import { esc } from './utils.js';
 
 export async function loadHosts() {
   const container = document.getElementById('hosts-list');
@@ -67,8 +68,3 @@ export function initHostsView() {
   });
 }
 
-function esc(str) {
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
-}

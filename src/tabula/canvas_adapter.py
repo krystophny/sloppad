@@ -334,8 +334,8 @@ class CanvasAdapter:
             self._event_to_session[event.event_id] = session_id
             if event.kind == "clear_canvas":
                 self._prune_stale_event_mappings(session_id, record)
-            self._emit_to_canvas(event)
-            return record
+        self._emit_to_canvas(event)
+        return record
 
     @staticmethod
     def _selection_payload(record: SessionRecord) -> dict[str, object]:
