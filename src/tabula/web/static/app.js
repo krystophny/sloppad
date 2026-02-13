@@ -183,9 +183,6 @@ function openTerminal() {
     term.onData(data => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     });
-    term.onBinary(data => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
-    });
     term.onResize(({ cols, rows }) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }));
@@ -194,11 +191,7 @@ function openTerminal() {
   };
 
   ws.onmessage = (event) => {
-    if (event.data instanceof ArrayBuffer) {
-      writeToTerminal(new Uint8Array(event.data));
-    } else {
-      writeToTerminal(event.data);
-    }
+    writeToTerminal(event.data);
   };
 
   ws.onclose = () => {

@@ -14,14 +14,18 @@ TERMINAL_READY_TIMEOUT = 15_000
 MARKER_TIMEOUT = 20_000
 
 _TERM_BUFFER_JS = """() => {
-    const term = window._tabulaTerminal;
-    if (!term) return '';
-    const lines = [];
-    for (let i = 0; i < term.buffer.active.length; i++) {
-        const line = term.buffer.active.getLine(i);
-        if (line) lines.push(line.translateToString(true));
-    }
-    return lines.join('\\n');
+    const el = document.querySelector('.terminal-text');
+    return el ? el.textContent : '';
+}"""
+
+_GARBLED_PATTERN_JS = r"""(text) => {
+    const esc = (text.match(/\x1b/g) || []).length;
+    if (esc > 3) return 'raw ANSI escapes found (' + esc + ')';
+    const ctrl = (text.match(/[\x00-\x08\x0e-\x1f]/g) || []).length;
+    if (ctrl > 3) return 'control chars found (' + ctrl + ')';
+    const bracket = (text.match(/\[[\d;]*[A-Za-z]/g) || []).length;
+    if (bracket > 5) return 'CSI-like fragments found (' + bracket + ')';
+    return '';
 }"""
 
 
@@ -36,14 +40,8 @@ def _login(page: Page, base_url: str) -> None:
 def _wait_terminal_ready(page: Page) -> None:
     page.wait_for_function(
         """() => {
-            const term = window._tabulaTerminal;
-            if (!term) return false;
-            for (let i = 0; i < term.rows; i++) {
-                const line = term.buffer.active.getLine(i);
-                if (line && line.translateToString(true).trim().length > 0)
-                    return true;
-            }
-            return false;
+            const el = document.querySelector('.terminal-text');
+            return el && el.textContent.trim().length > 0;
         }""",
         timeout=TERMINAL_READY_TIMEOUT,
     )
@@ -52,16 +50,10 @@ def _wait_terminal_ready(page: Page) -> None:
 def _wait_for_marker(page: Page, marker: str, timeout: int = MARKER_TIMEOUT) -> None:
     try:
         page.wait_for_function(
-            f"""(marker) => {{
-                const term = window._tabulaTerminal;
-                if (!term) return false;
-                for (let i = 0; i < term.buffer.active.length; i++) {{
-                    const line = term.buffer.active.getLine(i);
-                    if (line && line.translateToString(true).includes(marker))
-                        return true;
-                }}
-                return false;
-            }}""",
+            """(marker) => {
+                const el = document.querySelector('.terminal-text');
+                return el && el.textContent.includes(marker);
+            }""",
             arg=marker,
             timeout=timeout,
         )
@@ -71,6 +63,14 @@ def _wait_for_marker(page: Page, marker: str, timeout: int = MARKER_TIMEOUT) -> 
         raise AssertionError(
             f"marker '{marker}' not found in terminal output tail:\n{tail}"
         ) from exc
+
+
+def _assert_no_garbled_text(page: Page) -> None:
+    buf = page.evaluate(_TERM_BUFFER_JS)
+    garbled = page.evaluate(_GARBLED_PATTERN_JS, buf)
+    if garbled:
+        tail = "\n".join(buf.splitlines()[-30:])
+        raise AssertionError(f"garbled terminal output detected: {garbled}\n{tail}")
 
 
 def _type_in_terminal(page: Page, text: str) -> None:
@@ -114,7 +114,8 @@ def test_local_terminal_renders(page: Page, base_url: str, screenshot_dir: Path)
     _login(page, base_url)
     _wait_terminal_ready(page)
 
-    expect(page.locator("#terminal-container .xterm")).to_be_visible()
+    expect(page.locator("#terminal-container .terminal-text")).to_be_visible()
+    _assert_no_garbled_text(page)
     _screenshot(page, "terminal_prompt.png", screenshot_dir)
 
 
@@ -124,6 +125,7 @@ def test_terminal_echo(page: Page, base_url: str, screenshot_dir: Path) -> None:
 
     _type_in_terminal(page, "echo PLAYWRIGHT_MARKER\n")
     _wait_for_marker(page, "PLAYWRIGHT_MARKER")
+    _assert_no_garbled_text(page)
     _screenshot(page, "terminal_echo.png", screenshot_dir)
 
 
@@ -153,6 +155,7 @@ def test_launch_claude(
     page.select_option("#assistant-select", "claude")
     page.click("#btn-launch-ai")
     _wait_for_marker(page, "MOCK_CLAUDE_OK")
+    _assert_no_garbled_text(page)
     _screenshot(page, "launch_claude.png", screenshot_dir)
 
 
@@ -165,6 +168,7 @@ def test_launch_codex(
     page.select_option("#assistant-select", "codex")
     page.click("#btn-launch-ai")
     _wait_for_marker(page, "MOCK_CODEX_OK")
+    _assert_no_garbled_text(page)
     _screenshot(page, "launch_codex.png", screenshot_dir)
 
 
