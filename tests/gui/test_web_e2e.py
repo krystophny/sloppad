@@ -397,7 +397,9 @@ def test_launch_claude(
 
     page.select_option("#assistant-select", "claude")
     page.click("#btn-launch-ai")
-    _wait_for_marker(page, "MOCK_CLAUDE_OK")
+    _wait_for_marker(page, "MOCK_CLAUDE_READY")
+    _type_in_terminal(page, "playwright interactive check\n")
+    _wait_for_marker(page, "MOCK_CLAUDE_INPUT:playwright interactive check")
     _assert_no_garbled_text(page)
     _screenshot(page, "launch_claude.png", screenshot_dir)
 

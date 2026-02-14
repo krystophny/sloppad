@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .canvas_adapter import has_display
 from .events import event_schema
+from .mcp_http_bridge import run_mcp_http_bridge
 from .mcp_server import run_mcp_stdio_server
 from .protocol import bootstrap_project
 
@@ -53,6 +54,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--no-canvas", action="store_true")
     p_mcp.add_argument("--fresh-canvas", action="store_true")
     p_mcp.add_argument("--poll-ms", type=int, default=250)
+
+    p_mcp_bridge = sub.add_parser("mcp-http-bridge", help="bridge stdio MCP traffic to an HTTP MCP endpoint")
+    p_mcp_bridge.add_argument("--mcp-url", required=True)
 
     p_serve = sub.add_parser("serve", help="run tabula HTTP daemon with streamable MCP")
     p_serve.add_argument("--project-dir", type=Path, default=Path("."))
@@ -135,6 +139,10 @@ def _cmd_mcp_server(project_dir: Path, headless: bool, no_canvas: bool, fresh_ca
         poll_interval_ms=poll_ms,
         start_canvas=not no_canvas,
     )
+
+
+def _cmd_mcp_http_bridge(mcp_url: str) -> int:
+    return run_mcp_http_bridge(mcp_url=mcp_url)
 
 
 def _launch_assistant(cmd: list[str], *, name: str, prompt: str | None, cwd: Path | None = None) -> int:
@@ -307,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_bootstrap(args.project_dir)
     if args.command == "mcp-server":
         return _cmd_mcp_server(args.project_dir, args.headless, args.no_canvas, args.fresh_canvas, args.poll_ms)
+    if args.command == "mcp-http-bridge":
+        return _cmd_mcp_http_bridge(args.mcp_url)
     if args.command == "serve":
         return _cmd_serve(args.project_dir, args.host, args.port)
     if args.command == "web":

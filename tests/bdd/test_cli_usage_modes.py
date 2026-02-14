@@ -200,6 +200,21 @@ def test_given_mcp_server_bootstrap_failure_when_invoked_then_nonzero(monkeypatc
     assert "mcp bootstrap failed" in err
 
 
+def test_given_mcp_http_bridge_mode_when_invoked_then_bridge_runner_is_called(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_bridge(*, mcp_url: str) -> int:
+        calls["mcp_url"] = mcp_url
+        return 23
+
+    monkeypatch.setattr("tabula.cli.run_mcp_http_bridge", fake_bridge)
+
+    rc = main(["mcp-http-bridge", "--mcp-url", "http://127.0.0.1:9420/mcp"])
+
+    assert rc == 23
+    assert calls["mcp_url"] == "http://127.0.0.1:9420/mcp"
+
+
 def test_given_run_mode_when_invoked_then_codex_launches_with_inline_mcp_yolo_and_search(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, object] = {}
 

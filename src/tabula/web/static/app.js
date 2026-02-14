@@ -25,6 +25,23 @@ function showView(viewId) {
   document.getElementById(viewId).style.display = '';
 }
 
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function buildClaudeCommand(mcpUrl) {
+  const bridge = `exec python -m tabula mcp-http-bridge --mcp-url ${shellSingleQuote(mcpUrl)}`;
+  const cfg = JSON.stringify({
+    mcpServers: {
+      'tabula-canvas': {
+        command: 'bash',
+        args: ['-lc', bridge],
+      },
+    },
+  });
+  return `claude --mcp-config ${shellSingleQuote(cfg)}\n`;
+}
+
 export function showMain() {
   showView('view-main');
   if (state.localSession) {
@@ -288,11 +305,11 @@ async function launchAI() {
     openCanvasWs();
   }
 
-  const mcpUrl = state.mcpUrl || `http://127.0.0.1:${state.tunnelPort}/mcp`;
+  // Commands run inside the PTY host, so they should use the host-local daemon port.
+  const mcpUrl = state.mcpUrl || 'http://127.0.0.1:9420/mcp';
   let cmd;
   if (assistant === 'claude') {
-    const cfg = JSON.stringify({mcpServers: {'tabula-canvas': {url: mcpUrl}}});
-    cmd = `claude --mcp-config '${cfg}'\n`;
+    cmd = buildClaudeCommand(mcpUrl);
   } else {
     cmd = `codex --no-alt-screen --yolo --search -c 'mcp_servers.tabula-canvas.url=${JSON.stringify(mcpUrl)}'\n`;
   }
