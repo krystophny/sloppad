@@ -78,6 +78,74 @@ def _type_in_terminal(page: Page, text: str) -> None:
     page.keyboard.type(text, delay=30)
 
 
+def _send_terminal_raw(page: Page, text: str) -> None:
+    page.evaluate(
+        """(text) => {
+            const app = window._tabulaApp;
+            if (!app || typeof app.getState !== 'function') {
+                throw new Error('tabula app state not available');
+            }
+            const ws = app.getState().terminalWs;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                throw new Error('terminal websocket is not open');
+            }
+            ws.send(text);
+        }""",
+        text,
+    )
+
+
+def _terminal_scroll_metrics(page: Page) -> dict:
+    return page.evaluate(
+        """() => {
+            const el = document.getElementById('terminal-container');
+            if (!el) throw new Error('terminal container not found');
+            const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            return {
+                scrollTop: el.scrollTop,
+                scrollHeight: el.scrollHeight,
+                clientHeight: el.clientHeight,
+                distanceFromBottom,
+            };
+        }"""
+    )
+
+
+def _wait_terminal_near_bottom(page: Page, max_distance: int = 32) -> None:
+    page.wait_for_function(
+        """(maxDistance) => {
+            const el = document.getElementById('terminal-container');
+            if (!el) return false;
+            const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+            return distance <= maxDistance;
+        }""",
+        arg=max_distance,
+        timeout=10_000,
+    )
+
+
+def _scroll_terminal_to_top(page: Page) -> None:
+    page.evaluate(
+        """() => {
+            const el = document.getElementById('terminal-container');
+            if (!el) throw new Error('terminal container not found');
+            el.scrollTop = 0;
+            el.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }"""
+    )
+
+
+def _scroll_terminal_to_bottom(page: Page) -> None:
+    page.evaluate(
+        """() => {
+            const el = document.getElementById('terminal-container');
+            if (!el) throw new Error('terminal container not found');
+            el.scrollTop = el.scrollHeight;
+            el.dispatchEvent(new Event('scroll', { bubbles: true }));
+        }"""
+    )
+
+
 def _compose_in_terminal(page: Page, text: str) -> None:
     page.click("#terminal-container")
     page.evaluate(
@@ -191,6 +259,63 @@ def test_terminal_resize_on_connect(
     expected = f"{dims['rows']} {dims['cols']}"
     _wait_for_marker(page, expected)
     _screenshot(page, "terminal_resize.png", screenshot_dir)
+
+
+def test_terminal_long_output_scrolls_within_fixed_container(
+    page: Page, base_url: str, screenshot_dir: Path
+) -> None:
+    _login(page, base_url)
+    _wait_terminal_ready(page)
+
+    marker = "PLAYWRIGHT_SCROLL_DENSE_DONE"
+    _send_terminal_raw(
+        page,
+        f"for i in $(seq 1 320); do echo PLAYWRIGHT_SCROLL_LINE_$i; done; echo {marker}\n",
+    )
+    _wait_for_marker(page, marker)
+    _wait_terminal_near_bottom(page)
+
+    metrics = _terminal_scroll_metrics(page)
+    assert metrics["scrollHeight"] > metrics["clientHeight"] + 200
+    assert metrics["distanceFromBottom"] <= 40
+    _screenshot(page, "terminal_scroll_long_output.png", screenshot_dir)
+
+
+def test_terminal_manual_scroll_pauses_then_resumes_autofollow(
+    page: Page, base_url: str, screenshot_dir: Path
+) -> None:
+    _login(page, base_url)
+    _wait_terminal_ready(page)
+
+    initial_marker = "PLAYWRIGHT_SCROLL_MANUAL_READY"
+    _send_terminal_raw(
+        page,
+        f"for i in $(seq 1 220); do echo PLAYWRIGHT_SCROLL_PREP_$i; done; echo {initial_marker}\n",
+    )
+    _wait_for_marker(page, initial_marker)
+    _wait_terminal_near_bottom(page)
+
+    _scroll_terminal_to_top(page)
+    top_metrics = _terminal_scroll_metrics(page)
+    assert top_metrics["distanceFromBottom"] > top_metrics["clientHeight"] // 2
+
+    hold_marker = "PLAYWRIGHT_SCROLL_HOLD_MARKER"
+    _send_terminal_raw(page, f"echo {hold_marker}\n")
+    _wait_for_marker(page, hold_marker)
+    hold_metrics = _terminal_scroll_metrics(page)
+    assert hold_metrics["distanceFromBottom"] > hold_metrics["clientHeight"] // 2
+    _screenshot(page, "terminal_scroll_manual_hold.png", screenshot_dir)
+
+    _scroll_terminal_to_bottom(page)
+    _wait_terminal_near_bottom(page)
+
+    resume_marker = "PLAYWRIGHT_SCROLL_RESUME_MARKER"
+    _send_terminal_raw(page, f"echo {resume_marker}\n")
+    _wait_for_marker(page, resume_marker)
+    _wait_terminal_near_bottom(page)
+    resumed_metrics = _terminal_scroll_metrics(page)
+    assert resumed_metrics["distanceFromBottom"] <= 40
+    _screenshot(page, "terminal_scroll_manual_resume.png", screenshot_dir)
 
 
 def test_launch_claude(
