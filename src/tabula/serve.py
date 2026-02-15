@@ -101,12 +101,22 @@ class TabulaServeApp:
         )
         await response.prepare(request)
         try:
-            while not request.transport.is_closing():
+            while not self._request_disconnected(request):
                 await response.write(b": keepalive\n\n")
                 await asyncio.sleep(30)
         except (ConnectionResetError, asyncio.CancelledError):
             pass
         return response
+
+    @staticmethod
+    def _request_disconnected(request: web.Request) -> bool:
+        transport = getattr(request, "transport", None)
+        if transport is None:
+            return True
+        try:
+            return transport.is_closing()
+        except AttributeError:
+            return True
 
     async def handle_mcp_delete(self, request: web.Request) -> web.Response:
         return web.Response(status=204)

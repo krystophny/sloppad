@@ -15,6 +15,37 @@ async def _make_client(project_dir: Path) -> TestClient:
     return TestClient(TestServer(app))
 
 
+def test_request_disconnected_handles_missing_transport(tmp_path: Path) -> None:
+    app_obj = TabulaServeApp(project_dir=tmp_path)
+
+    class _ReqNoTransport:
+        transport = None
+
+    class _BadTransport:
+        pass
+
+    class _ReqBadTransport:
+        transport = _BadTransport()
+
+    class _Transport:
+        def __init__(self, closing: bool) -> None:
+            self._closing = closing
+
+        def is_closing(self) -> bool:
+            return self._closing
+
+    class _ReqOpen:
+        transport = _Transport(False)
+
+    class _ReqClosed:
+        transport = _Transport(True)
+
+    assert app_obj._request_disconnected(_ReqNoTransport()) is True
+    assert app_obj._request_disconnected(_ReqBadTransport()) is True
+    assert app_obj._request_disconnected(_ReqOpen()) is False
+    assert app_obj._request_disconnected(_ReqClosed()) is True
+
+
 def test_health_returns_ok(tmp_path: Path) -> None:
     async def _run() -> None:
         client = await _make_client(tmp_path)
