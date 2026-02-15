@@ -43,6 +43,10 @@
 
       <div id="workspace">
         <div id="panel-terminal" class="panel">
+          <div id="terminal-header">
+            <span id="terminal-title">Terminal</span>
+            <button id="btn-terminal-minimize" type="button" style="display:none">Minimize</button>
+          </div>
           <div id="terminal-container"></div>
         </div>
         <div id="panel-divider" class="divider"></div>
@@ -58,6 +62,18 @@
             <div id="canvas-pdf" style="display:none"></div>
           </div>
         </div>
+      </div>
+      <div id="mobile-keybar" style="display:none">
+        <button type="button" id="btn-key-ctrl" data-terminal-key="ctrl">Ctrl</button>
+        <button type="button" data-terminal-key="tab">Tab</button>
+        <button type="button" data-terminal-key="esc">Esc</button>
+        <button type="button" data-terminal-key="up">↑</button>
+        <button type="button" data-terminal-key="left">←</button>
+        <button type="button" data-terminal-key="down">↓</button>
+        <button type="button" data-terminal-key="right">→</button>
+      </div>
+      <div id="terminal-pop-row" style="display:none">
+        <button type="button" id="btn-terminal-pop">Show Terminal</button>
       </div>
       <div id="mcp-log-panel" style="display:none">
         <div class="log-header">MCP Activity</div>

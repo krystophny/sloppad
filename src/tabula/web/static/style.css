@@ -115,6 +115,26 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 #panel-terminal { flex: 1.2; }
 #panel-canvas { flex: 0.8; }
 
+#terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+#terminal-title {
+  font-weight: 600;
+}
+
+#btn-terminal-minimize {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.75rem;
+}
+
 #terminal-container {
   flex: 1;
   min-height: 0;
@@ -255,6 +275,39 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 #host-form { display: flex; flex-direction: column; gap: 0.5rem; }
 #host-form label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; color: var(--text-dim); }
 
+#mobile-keybar {
+  display: none;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+#mobile-keybar button {
+  padding: 0.35rem 0.5rem;
+  min-width: 2.4rem;
+  font-size: 0.75rem;
+}
+
+#btn-key-ctrl.is-active {
+  background: var(--success);
+  color: var(--bg);
+}
+
+#terminal-pop-row {
+  display: none;
+  padding: 0.45rem 0.6rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+#btn-terminal-pop {
+  width: 100%;
+}
+
 /* MCP Log */
 #mcp-log-panel {
   border-top: 1px solid var(--border);
@@ -300,6 +353,29 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Responsive */
 @media (max-width: 768px) {
   #workspace { flex-direction: column; }
-  .divider { width: 100%; height: 4px; cursor: row-resize; }
+  .divider {
+    order: 2;
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
+    display: none;
+  }
+  #panel-canvas {
+    order: 1;
+    flex: 1.2;
+    min-height: 160px;
+  }
+  #panel-terminal {
+    order: 3;
+    flex: 0.8;
+    min-height: 120px;
+  }
+  #panel-terminal.mobile-minimized {
+    display: none;
+  }
+  #workspace.terminal-minimized #panel-canvas {
+    flex: 1;
+    min-height: 0;
+  }
   .panel { min-width: 0; min-height: 100px; }
 }

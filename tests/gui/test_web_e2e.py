@@ -574,11 +574,34 @@ def test_canvas_clear_returns_prompt_mode(
 def test_mobile_viewport(page: Page, base_url: str, screenshot_dir: Path) -> None:
     page.set_viewport_size({"width": 375, "height": 812})
     _login(page, base_url)
+    _wait_terminal_ready(page)
 
     direction = page.evaluate(
         "() => getComputedStyle(document.getElementById('workspace')).flexDirection"
     )
     assert direction == "column", f"expected column layout, got {direction}"
+
+    vertical_order = page.evaluate(
+        """() => {
+            const canvasTop = document.getElementById('panel-canvas').getBoundingClientRect().top;
+            const terminalTop = document.getElementById('panel-terminal').getBoundingClientRect().top;
+            return { canvasTop, terminalTop };
+        }"""
+    )
+    assert vertical_order["canvasTop"] < vertical_order["terminalTop"], (
+        f"expected canvas above terminal in mobile layout, got {vertical_order}"
+    )
+
+    expect(page.locator("#mobile-keybar")).to_be_visible()
+    expect(page.locator("#btn-terminal-minimize")).to_be_visible()
+
+    page.click("#btn-terminal-minimize")
+    expect(page.locator("#panel-terminal")).to_be_hidden()
+    expect(page.locator("#terminal-pop-row")).to_be_visible()
+    page.click("#btn-terminal-pop")
+    expect(page.locator("#panel-terminal")).to_be_visible()
+    expect(page.locator("#terminal-pop-row")).to_be_hidden()
+
     _screenshot(page, "mobile_layout.png", screenshot_dir)
 
 

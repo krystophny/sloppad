@@ -14,11 +14,22 @@ const state = {
   connected: false,
   localSession: null,
   mcpUrl: null,
+  mobileTerminalMinimized: false,
 };
 
 export function getState() { return state; }
 
 window._tabulaApp = { getState };
+
+const MOBILE_BREAKPOINT_PX = 768;
+const MOBILE_KEY_PAYLOADS = {
+  tab: '\t',
+  esc: '\u001b',
+  up: '\u001b[A',
+  down: '\u001b[B',
+  left: '\u001b[D',
+  right: '\u001b[C',
+};
 
 function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
@@ -42,8 +53,116 @@ function buildClaudeCommand(mcpUrl) {
   return `claude --dangerously-skip-permissions --mcp-config ${shellSingleQuote(cfg)}\n`;
 }
 
+function isMobileViewport() {
+  return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches;
+}
+
+function terminalApi() {
+  return window._tabulaTerminal || null;
+}
+
+function updateCtrlButtonState(armed) {
+  const btn = document.getElementById('btn-key-ctrl');
+  if (!btn) return;
+  const next = Boolean(armed);
+  btn.classList.toggle('is-active', next);
+  btn.setAttribute('aria-pressed', next ? 'true' : 'false');
+}
+
+function sendTerminalInput(text) {
+  if (state.terminalWs && state.terminalWs.readyState === WebSocket.OPEN) {
+    state.terminalWs.send(text);
+    return true;
+  }
+  const term = terminalApi();
+  if (term && typeof term.send === 'function' && state.connected) {
+    term.send(text);
+    return true;
+  }
+  return false;
+}
+
+function syncMobileTerminalUi() {
+  const mobile = isMobileViewport();
+  const terminalActive = Boolean(state.connected && state.terminalWs);
+  if (!mobile || !terminalActive) {
+    state.mobileTerminalMinimized = false;
+  }
+
+  const minimized = Boolean(mobile && terminalActive && state.mobileTerminalMinimized);
+  const keybar = document.getElementById('mobile-keybar');
+  const popRow = document.getElementById('terminal-pop-row');
+  const panel = document.getElementById('panel-terminal');
+  const workspace = document.getElementById('workspace');
+  const minBtn = document.getElementById('btn-terminal-minimize');
+
+  if (keybar) {
+    keybar.style.display = mobile && terminalActive ? 'flex' : 'none';
+  }
+  if (popRow) {
+    popRow.style.display = minimized ? 'block' : 'none';
+  }
+  if (minBtn) {
+    minBtn.style.display = mobile && terminalActive ? '' : 'none';
+  }
+  if (panel) {
+    panel.classList.toggle('mobile-minimized', minimized);
+  }
+  if (workspace) {
+    workspace.classList.toggle('terminal-minimized', minimized);
+  }
+
+  if (!mobile || !terminalActive) {
+    const term = terminalApi();
+    if (term && typeof term.setCtrlArmed === 'function') {
+      term.setCtrlArmed(false);
+    }
+    updateCtrlButtonState(false);
+  }
+}
+
+function sendCurrentTerminalSize() {
+  const term = terminalApi();
+  if (!term || !state.terminalWs || state.terminalWs.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  state.terminalWs.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+}
+
+function setTerminalMinimized(minimized) {
+  state.mobileTerminalMinimized = Boolean(minimized);
+  syncMobileTerminalUi();
+  if (!state.mobileTerminalMinimized) {
+    const container = document.getElementById('terminal-container');
+    if (container) {
+      container.click();
+    }
+    requestAnimationFrame(() => sendCurrentTerminalSize());
+  }
+}
+
+function handleMobileTerminalKey(event) {
+  const key = event.currentTarget?.dataset?.terminalKey;
+  if (!key) return;
+
+  const term = terminalApi();
+  if (key === 'ctrl') {
+    if (!term || typeof term.toggleCtrlArmed !== 'function') return;
+    const armed = term.toggleCtrlArmed();
+    updateCtrlButtonState(armed);
+    return;
+  }
+
+  const payload = MOBILE_KEY_PAYLOADS[key];
+  if (!payload) return;
+  sendTerminalInput(payload);
+  const container = document.getElementById('terminal-container');
+  if (container) container.click();
+}
+
 export function showMain() {
   showView('view-main');
+  syncMobileTerminalUi();
   if (state.localSession) {
     connectLocalSession();
   } else {
@@ -71,9 +190,11 @@ async function connectLocalSession() {
 
     openTerminal();
     openCanvasWs();
+    syncMobileTerminalUi();
   } catch (e) {
     console.error('local session connect failed:', e);
     refreshHosts();
+    syncMobileTerminalUi();
   }
 }
 
@@ -84,6 +205,7 @@ export function showHosts() {
 
 export function showAuth() {
   showView('view-auth');
+  syncMobileTerminalUi();
 }
 
 function setStatus(text, statusClass) {
@@ -145,9 +267,11 @@ async function connect() {
     document.getElementById('host-select').disabled = true;
 
     openTerminal();
+    syncMobileTerminalUi();
   } catch (e) {
     setStatus('error: ' + e.message, '');
     document.getElementById('btn-connect').disabled = false;
+    syncMobileTerminalUi();
   }
 }
 
@@ -178,17 +302,22 @@ async function disconnect() {
   state.sessionId = null;
   state.hostId = null;
   state.connected = false;
+  state.mobileTerminalMinimized = false;
   setStatus('disconnected', '');
   document.getElementById('btn-connect').style.display = '';
   document.getElementById('btn-connect').disabled = false;
   document.getElementById('btn-disconnect').style.display = 'none';
   document.getElementById('btn-launch-ai').disabled = true;
   document.getElementById('host-select').disabled = false;
+  updateCtrlButtonState(false);
+  syncMobileTerminalUi();
 }
 
 function openTerminal() {
   const container = document.getElementById('terminal-container');
   const term = initTerminal(container);
+  updateCtrlButtonState(false);
+  syncMobileTerminalUi();
 
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${proto}//${location.host}/ws/terminal/${state.sessionId}`;
@@ -205,6 +334,7 @@ function openTerminal() {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }));
       }
     });
+    syncMobileTerminalUi();
   };
 
   ws.onmessage = (event) => {
@@ -223,6 +353,7 @@ function openTerminal() {
   };
 
   ws.onclose = () => {
+    syncMobileTerminalUi();
     if (state.connected) {
       writeToTerminal('\r\n[connection closed]\r\n');
     }
@@ -314,9 +445,7 @@ async function launchAI() {
     cmd = `codex --no-alt-screen --yolo --search -c 'mcp_servers.tabula-canvas.url=${JSON.stringify(mcpUrl)}'\n`;
   }
 
-  if (state.terminalWs.readyState === WebSocket.OPEN) {
-    state.terminalWs.send(cmd);
-  }
+  sendTerminalInput(cmd);
 }
 
 async function logout() {
@@ -370,6 +499,17 @@ async function init() {
   document.getElementById('btn-launch-ai').addEventListener('click', launchAI);
   document.getElementById('btn-hosts').addEventListener('click', showHosts);
   document.getElementById('btn-logout').addEventListener('click', logout);
+  document.getElementById('btn-terminal-minimize').addEventListener('click', () => setTerminalMinimized(true));
+  document.getElementById('btn-terminal-pop').addEventListener('click', () => setTerminalMinimized(false));
+  document.querySelectorAll('#mobile-keybar [data-terminal-key]').forEach((btn) => {
+    btn.addEventListener('click', handleMobileTerminalKey);
+  });
+  window.addEventListener('resize', syncMobileTerminalUi);
+  window.addEventListener('orientationchange', syncMobileTerminalUi);
+  window.addEventListener('tabula-terminal-ctrl', (event) => {
+    updateCtrlButtonState(Boolean(event?.detail?.armed));
+  });
+  syncMobileTerminalUi();
 
   try {
     const resp = await fetch('/api/setup');
@@ -382,9 +522,11 @@ async function init() {
       showMain();
     } else {
       showAuth();
+      syncMobileTerminalUi();
     }
   } catch (e) {
     showAuth();
+    syncMobileTerminalUi();
   }
 }
 

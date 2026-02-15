@@ -21,19 +21,54 @@ let touchStartX = 0;
 let touchStartY = 0;
 let touchTracking = false;
 let touchMoved = false;
+let ctrlArmed = false;
+const CTRL_STATE_EVENT = "tabula-terminal-ctrl";
 const decoder = new TextDecoder();
+
+function emitCtrlState() {
+  window.dispatchEvent(new CustomEvent(CTRL_STATE_EVENT, { detail: { armed: ctrlArmed } }));
+}
+
+function setCtrlArmedState(armed) {
+  const next = Boolean(armed);
+  if (ctrlArmed === next) {
+    return ctrlArmed;
+  }
+  ctrlArmed = next;
+  emitCtrlState();
+  return ctrlArmed;
+}
+
+function encodeControlCharacter(key) {
+  if (!key || key.length !== 1) {
+    return null;
+  }
+  if (key === " ") {
+    return "\u0000";
+  }
+  const upper = key.toUpperCase();
+  if (upper === "?") {
+    return "\u007f";
+  }
+  const code = upper.charCodeAt(0);
+  if (code >= 64 && code <= 95) {
+    return String.fromCharCode(code & 31);
+  }
+  return null;
+}
 
 function keyEventToTerminalData(event) {
   if (event.metaKey) {
     return null;
   }
-  if (event.ctrlKey && event.key.length === 1) {
-    const lower = event.key.toLowerCase();
-    if (lower >= "a" && lower <= "z") {
-      return String.fromCharCode(lower.charCodeAt(0) - 96);
+
+  if ((event.ctrlKey || ctrlArmed) && event.key.length === 1) {
+    const encoded = encodeControlCharacter(event.key);
+    if (ctrlArmed && !event.ctrlKey) {
+      setCtrlArmedState(false);
     }
-    if (lower === " ") {
-      return "\u0000";
+    if (encoded) {
+      return encoded;
     }
   }
 
@@ -145,7 +180,22 @@ function flushInputCaptureValue() {
   if (!text) {
     return false;
   }
-  sendData(text);
+  if (ctrlArmed) {
+    const first = text.charAt(0);
+    const rest = text.slice(1);
+    const encoded = encodeControlCharacter(first);
+    if (encoded) {
+      sendData(encoded);
+    } else {
+      sendData(first);
+    }
+    if (rest) {
+      sendData(rest);
+    }
+    setCtrlArmedState(false);
+  } else {
+    sendData(text);
+  }
   inputCapture.value = "";
   return true;
 }
@@ -318,6 +368,7 @@ export function initTerminal(containerEl) {
   renderScheduled = false;
   isComposing = false;
   compositionCommitPending = false;
+  setCtrlArmedState(false);
 
   pre = document.createElement("pre");
   pre.className = "terminal-text";
@@ -371,6 +422,10 @@ export function initTerminal(containerEl) {
   window._tabulaTerminal = {
     cols,
     rows,
+    send(text) { sendData(text); },
+    setCtrlArmed(armed) { return setCtrlArmedState(armed); },
+    toggleCtrlArmed() { return setCtrlArmedState(!ctrlArmed); },
+    isCtrlArmed() { return ctrlArmed; },
     onData(cb) { dataCallback = cb; },
     onBinary() {},
     onResize(cb) { resizeCallback = cb; },
@@ -414,6 +469,7 @@ export function destroyTerminal() {
   renderScheduled = false;
   isComposing = false;
   compositionCommitPending = false;
+  setCtrlArmedState(false);
   touchTracking = false;
   touchMoved = false;
   window._tabulaTerminal = null;
