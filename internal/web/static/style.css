@@ -332,21 +332,21 @@ body.desktop-canvas-only #panel-canvas {
 #canvas-text pre { background: var(--bg-elevated); padding: 0.75rem; border-radius: 4px; overflow-x: auto; border: 1px solid #000000; }
 #canvas-text pre code { background: none; padding: 0; }
 
-#canvas-text pre code .hl-kw { color: #8b005d; font-weight: 600; }
-#canvas-text pre code .hl-str { color: #0f6b2b; }
-#canvas-text pre code .hl-num { color: #9a4d00; }
-#canvas-text pre code .hl-cmt { color: #5a2f00; font-style: italic; }
+#canvas-text pre code .hl-kw { color: #cf222e; font-weight: 600; }
+#canvas-text pre code .hl-str { color: #0a3069; }
+#canvas-text pre code .hl-num { color: #0550ae; }
+#canvas-text pre code .hl-cmt { color: #6e7781; font-style: italic; }
 
 #canvas-text pre code .hl-diff-line {
   display: block;
   margin: 0 -0.2rem;
   padding: 0 0.2rem;
 }
-#canvas-text pre code .hl-diff-meta { color: #000000; }
-#canvas-text pre code .hl-diff-hunk { color: #7a1fa2; }
-#canvas-text pre code .hl-diff-add { background: rgba(46, 125, 50, 0.14); }
-#canvas-text pre code .hl-diff-del { background: rgba(183, 28, 28, 0.14); }
-#canvas-text pre code .hl-diff-ctx { color: #000000; }
+#canvas-text pre code .hl-diff-meta { color: #57606a; }
+#canvas-text pre code .hl-diff-hunk { color: #8250df; }
+#canvas-text pre code .hl-diff-add { color: #1a7f37; background: #dafbe1; }
+#canvas-text pre code .hl-diff-del { color: #cf222e; background: #ffebe9; }
+#canvas-text pre code .hl-diff-ctx { color: #24292f; }
 
 #canvas-img { max-width: 100%; height: auto; }
 
