@@ -8,3 +8,5 @@ __pycache__/
 .coverage
 
 .tabula/artifacts/
+playwright-report/
+test-results/
