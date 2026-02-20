@@ -114,6 +114,7 @@ const SWIPE_LEFT_ARCHIVE_THRESHOLD_PX = -120;
 const SWIPE_LEFT_DELETE_THRESHOLD_PX = -260;
 const SWIPE_RIGHT_DEFER_THRESHOLD_PX = 120;
 const SWIPE_MAX_TRANSLATE_PX = 320;
+const DETAIL_SWIPE_NAV_THRESHOLD_PX = 90;
 const UNDO_TIMEOUT_MS = Number(window.__TABULA_UNDO_TIMEOUT_MS || 5000);
 
 let pendingUndoAction = null;
@@ -357,8 +358,11 @@ function clearTextInteractionHandlers() {
     window.removeEventListener('pointercancel', e.text._mailPointerUpHandler);
     e.text._mailPointerUpHandler = null;
   }
+  if (e.text._mailDetailKeyDownHandler) {
+    document.removeEventListener('keydown', e.text._mailDetailKeyDownHandler);
+    e.text._mailDetailKeyDownHandler = null;
+  }
   closeDraftPanel();
-  closeOpenPanel();
   e.text.classList.remove('mail-artifact');
   activeMailContext = null;
 }
@@ -547,6 +551,36 @@ async function callMailRead(context, messageID) {
   return payload.message || payload.result?.message || null;
 }
 
+async function callMailMarkRead(context, messageID) {
+  const resp = await fetch('/api/mail/mark-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: context.provider,
+      message_id: messageID,
+      producer_mcp_url: context.producerMcpUrl,
+    }),
+  });
+  let payload = {};
+  const raw = await resp.text();
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (_) {
+      if (!resp.ok) {
+        throw new Error(raw);
+      }
+    }
+  }
+  if (!resp.ok) {
+    throw new Error(typeof payload === 'object' && payload !== null && payload.error ? payload.error : raw || 'mark-read failed');
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('mark-read returned invalid response');
+  }
+  return payload.result || payload;
+}
+
 async function callDraftReply(context, message) {
   const resp = await fetch('/api/mail/draft-reply', {
     method: 'POST',
@@ -583,6 +617,27 @@ function findMailHeader(context, messageID) {
     if (h.id === messageID) return h;
   }
   return null;
+}
+
+function findMailHeaderIndex(context, messageID) {
+  for (let i = 0; i < (context.headers || []).length; i += 1) {
+    if (context.headers[i].id === messageID) return i;
+  }
+  return -1;
+}
+
+function getMailViewState(context) {
+  if (!context.viewState) {
+    context.viewState = {
+      mode: 'list',
+      currentIndex: 0,
+      listScrollTop: 0,
+      detailMessage: null,
+      detailStatus: '',
+      detailStatusTone: 'info',
+    };
+  }
+  return context.viewState;
 }
 
 function openDraftPanel(content, sourceLabel) {
@@ -629,50 +684,11 @@ function firstMailField(message, keys) {
   return '';
 }
 
-function openMailPanel(header, message) {
-  const panel = document.querySelector('[data-mail-open-panel]');
-  if (!panel) return;
-  const subject = panel.querySelector('[data-mail-open-subject]');
-  const from = panel.querySelector('[data-mail-open-from]');
-  const to = panel.querySelector('[data-mail-open-to]');
-  const date = panel.querySelector('[data-mail-open-date]');
-  const body = panel.querySelector('[data-mail-open-body]');
-
-  const subjectText = firstMailField(message, ['Subject', 'subject']) || header?.subject || '(no subject)';
-  const fromText = firstMailField(message, ['Sender', 'sender']) || header?.sender || '-';
-  const toText = firstMailField(message, ['Recipients', 'recipients']) || '-';
-  const dateText = formatMailDate(firstMailField(message, ['Date', 'date']) || header?.date || '');
-  const bodyText = firstMailField(message, ['BodyText', 'body_text', 'plain', 'text', 'Snippet', 'snippet']) || '(no body text available)';
-
-  if (subject) subject.textContent = subjectText;
-  if (from) from.textContent = fromText;
-  if (to) to.textContent = toText;
-  if (date) date.textContent = dateText || '-';
-  if (body) body.textContent = bodyText;
-  panel.hidden = false;
-}
-
-function closeOpenPanel() {
-  const panel = document.querySelector('[data-mail-open-panel]');
-  if (!panel) return;
-  const subject = panel.querySelector('[data-mail-open-subject]');
-  const from = panel.querySelector('[data-mail-open-from]');
-  const to = panel.querySelector('[data-mail-open-to]');
-  const date = panel.querySelector('[data-mail-open-date]');
-  const body = panel.querySelector('[data-mail-open-body]');
-  if (subject) subject.textContent = '';
-  if (from) from.textContent = '';
-  if (to) to.textContent = '';
-  if (date) date.textContent = '';
-  if (body) body.textContent = '';
-  panel.hidden = true;
-}
-
-function renderMailHeadersHtml(context) {
+function renderMailListHtml(context) {
   const provider = context.provider || 'default';
   const folder = context.folder || '-';
-  const rows = context.headers.map((header) => `
-    <tr data-message-id="${escapeHtml(header.id)}">
+  const rows = context.headers.map((header, idx) => `
+    <tr data-message-id="${escapeHtml(header.id)}" data-mail-index="${idx}">
       <td>${escapeHtml(formatMailDate(header.date))}</td>
       <td>${escapeHtml(header.sender || '(no sender)')}</td>
       <td>${escapeHtml(header.subject || '(no subject)')}</td>
@@ -693,6 +709,10 @@ function renderMailHeadersHtml(context) {
       </td>
     </tr>
   `).join('');
+  const hasRows = context.headers.length > 0;
+  const body = hasRows
+    ? rows
+    : '<tr><td colspan="4"><em>No messages left in this list.</em></td></tr>';
   return `
     <div class="mail-triage-head">
       <div><strong>Provider:</strong> ${escapeHtml(provider)}</div>
@@ -709,20 +729,8 @@ function renderMailHeadersHtml(context) {
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
+      <tbody>${body}</tbody>
     </table>
-    <div class="mail-open-panel" data-mail-open-panel hidden>
-      <div class="mail-open-head">
-        <strong data-mail-open-subject></strong>
-        <button type="button" data-mail-action="open-close">Close</button>
-      </div>
-      <div class="mail-open-meta">
-        <div><strong>From:</strong> <span data-mail-open-from></span></div>
-        <div><strong>To:</strong> <span data-mail-open-to></span></div>
-        <div><strong>Date:</strong> <span data-mail-open-date></span></div>
-      </div>
-      <pre data-mail-open-body></pre>
-    </div>
     <div class="mail-draft-panel" data-mail-draft-panel hidden>
       <div class="mail-draft-head">
         <strong>Draft Reply</strong>
@@ -732,6 +740,70 @@ function renderMailHeadersHtml(context) {
       <div class="mail-draft-actions">
         <button type="button" data-mail-action="draft-copy">Copy</button>
         <button type="button" data-mail-action="draft-cancel">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderMailDetailHtml(context) {
+  const state = getMailViewState(context);
+  const idx = Math.max(0, Math.min(state.currentIndex, context.headers.length - 1));
+  const header = context.headers[idx] || { id: '', date: '', sender: '', subject: '' };
+  const message = state.detailMessage || {};
+  const provider = context.provider || 'default';
+  const folder = context.folder || '-';
+  const subject = firstMailField(message, ['Subject', 'subject']) || header.subject || '(no subject)';
+  const from = firstMailField(message, ['Sender', 'sender']) || header.sender || '-';
+  const to = firstMailField(message, ['Recipients', 'recipients']) || '-';
+  const date = formatMailDate(firstMailField(message, ['Date', 'date']) || header.date || '');
+  const body = firstMailField(message, ['BodyText', 'body_text', 'plain', 'text', 'Snippet', 'snippet']) || '(no body text available)';
+  const isFirst = idx <= 0;
+  const isLast = idx >= context.headers.length - 1;
+
+  return `
+    <div class="mail-detail-view" data-mail-detail-root data-message-id="${escapeHtml(header.id)}">
+      <div class="mail-detail-toolbar">
+        <button type="button" data-mail-action="detail-back">Back to list</button>
+        <div class="mail-detail-nav">
+          <button type="button" data-mail-action="detail-prev" ${isFirst ? 'disabled' : ''}>Prev</button>
+          <span class="mail-detail-position">${escapeHtml(String(idx + 1))} / ${escapeHtml(String(context.headers.length))}</span>
+          <button type="button" data-mail-action="detail-next" ${isLast ? 'disabled' : ''}>Next</button>
+        </div>
+      </div>
+      <div class="mail-triage-head">
+        <div><strong>Provider:</strong> ${escapeHtml(provider)}</div>
+        <div><strong>Folder:</strong> ${escapeHtml(folder)}</div>
+        <div class="mail-capability-hint" data-mail-capability-hint>Provider ${escapeHtml(provider)}: checking defer capability...</div>
+      </div>
+      <h3 class="mail-detail-subject">${escapeHtml(subject)}</h3>
+      <div class="mail-detail-meta">
+        <div><strong>From:</strong> ${escapeHtml(from)}</div>
+        <div><strong>To:</strong> ${escapeHtml(to)}</div>
+        <div><strong>Date:</strong> ${escapeHtml(date || '-')}</div>
+      </div>
+      <div class="mail-detail-actions">
+        <button type="button" data-mail-action="archive">Archive</button>
+        <button type="button" data-mail-action="delete">Delete</button>
+        <button type="button" data-mail-action="defer">Defer</button>
+        <button type="button" data-mail-action="draft-reply">Draft Reply</button>
+      </div>
+      <div class="mail-defer-controls" data-mail-detail-defer-controls hidden>
+        <input type="datetime-local" data-mail-detail-defer-input>
+        <button type="button" data-mail-action="defer-apply">Apply</button>
+        <button type="button" data-mail-action="defer-cancel">Cancel</button>
+      </div>
+      <div class="mail-detail-status ${state.detailStatusTone ? `mail-row-status-${state.detailStatusTone}` : ''}" data-mail-detail-status>${escapeHtml(state.detailStatus || '')}</div>
+      <pre class="mail-detail-body" data-mail-detail-body>${escapeHtml(body)}</pre>
+      <div class="mail-draft-panel" data-mail-draft-panel hidden>
+        <div class="mail-draft-head">
+          <strong>Draft Reply</strong>
+          <span data-mail-draft-source></span>
+        </div>
+        <textarea data-mail-draft-text placeholder="Draft reply will appear here"></textarea>
+        <div class="mail-draft-actions">
+          <button type="button" data-mail-action="draft-copy">Copy</button>
+          <button type="button" data-mail-action="draft-cancel">Cancel</button>
+        </div>
       </div>
     </div>
   `;
@@ -751,16 +823,134 @@ function unlockMailRowActions(row) {
   });
 }
 
+function closeMailDetailDeferControls() {
+  const controls = document.querySelector('[data-mail-detail-defer-controls]');
+  if (!controls) return;
+  controls.hidden = true;
+}
+
+function openMailDetailDeferControls() {
+  const controls = document.querySelector('[data-mail-detail-defer-controls]');
+  const input = document.querySelector('[data-mail-detail-defer-input]');
+  if (!controls || !input) return;
+  controls.hidden = false;
+  input.value = formatLocalDateTimeInput(new Date(Date.now() + 60 * 60 * 1000));
+  if (typeof input.showPicker === 'function') {
+    input.showPicker();
+  } else {
+    input.focus();
+  }
+}
+
+function setMailDetailStatus(context, text, tone = 'info') {
+  const state = getMailViewState(context);
+  state.detailStatus = text || '';
+  state.detailStatusTone = tone || 'info';
+  const status = document.querySelector('[data-mail-detail-status]');
+  if (!status) return;
+  status.textContent = state.detailStatus;
+  status.className = `mail-detail-status ${state.detailStatusTone ? `mail-row-status-${state.detailStatusTone}` : ''}`;
+}
+
+function setMailDetailBusy(busy) {
+  const root = document.querySelector('[data-mail-detail-root]');
+  if (!root) return;
+  root.classList.toggle('mail-row-busy', Boolean(busy));
+  root.querySelectorAll('button').forEach((button) => {
+    if (busy) {
+      if (!Object.prototype.hasOwnProperty.call(button.dataset, 'mailPrevDisabled')) {
+        button.dataset.mailPrevDisabled = button.disabled ? '1' : '0';
+      }
+      button.disabled = true;
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(button.dataset, 'mailPrevDisabled')) {
+      button.disabled = button.dataset.mailPrevDisabled === '1';
+      delete button.dataset.mailPrevDisabled;
+    }
+  });
+}
+
+function updateMailCount(context) {
+  context.count = context.headers.length;
+}
+
+function backToMailList(eventId, context) {
+  const e = getEls();
+  const state = getMailViewState(context);
+  state.mode = 'list';
+  state.detailMessage = null;
+  state.detailStatus = '';
+  state.detailStatusTone = 'info';
+  closeMailDetailDeferControls();
+  closeDraftPanel();
+  renderMailArtifact(eventId, context);
+  requestAnimationFrame(() => {
+    e.text.scrollTop = Math.max(0, state.listScrollTop || 0);
+    const header = context.headers[state.currentIndex];
+    if (!header || typeof CSS === 'undefined' || typeof CSS.escape !== 'function') return;
+    const openBtn = e.text.querySelector(`tr[data-message-id="${CSS.escape(header.id)}"] button[data-mail-action="open"]`);
+    if (openBtn && typeof openBtn.focus === 'function') {
+      openBtn.focus();
+    }
+  });
+}
+
+async function openMailDetailAtIndex(eventId, context, index, row) {
+  if (index < 0 || index >= context.headers.length) return;
+  const state = getMailViewState(context);
+  const header = context.headers[index];
+  if (!header) return;
+
+  if (row) {
+    state.listScrollTop = getEls().text.scrollTop;
+    setMailRowBusy(row, true);
+    setMailRowStatus(row, 'Opening...', 'info');
+  } else {
+    setMailDetailBusy(true);
+    setMailDetailStatus(context, 'Opening...', 'info');
+  }
+
+  try {
+    const message = await callMailRead(context, header.id);
+    if (activeTextEventId !== eventId) return;
+    state.mode = 'detail';
+    state.currentIndex = index;
+    state.detailMessage = message || {};
+    state.detailStatus = 'Opened.';
+    state.detailStatusTone = 'success';
+    renderMailArtifact(eventId, context);
+
+    try {
+      await callMailMarkRead(context, header.id);
+      if (activeTextEventId !== eventId) return;
+      setMailDetailStatus(context, 'Opened. Marked as read.', 'success');
+    } catch (markErr) {
+      if (activeTextEventId !== eventId) return;
+      setMailDetailStatus(context, String(markErr?.message || markErr || 'mark-read failed'), 'warning');
+    }
+  } catch (err) {
+    if (activeTextEventId !== eventId) return;
+    if (row && row.isConnected) {
+      setMailRowStatus(row, String(err?.message || err || 'open failed'), 'error');
+    } else {
+      setMailDetailStatus(context, String(err?.message || err || 'open failed'), 'error');
+    }
+  } finally {
+    if (activeTextEventId !== eventId) return;
+    if (row && row.isConnected) {
+      setMailRowBusy(row, false);
+    }
+    setMailDetailBusy(false);
+  }
+}
+
 function applyMailActionState(row, action, result, untilAt) {
   if (result && result.status === 'stub_not_supported') {
     setMailRowStatus(row, 'Defer is not supported for this provider yet.', 'warning');
     return;
   }
   switch (action) {
-    case 'open':
-      row.classList.add('mail-row-opened');
-      setMailRowStatus(row, 'Opened.', 'success');
-      break;
     case 'archive':
       row.classList.add('mail-row-archived');
       setMailRowStatus(row, 'Archived.', 'success');
@@ -877,12 +1067,23 @@ function setupMailGestureHandlers(eventId, context) {
 
   const onPointerDown = (ev) => {
     if (ev.button !== 0) return;
+    if (ev.target.closest('button, input, textarea, .mail-defer-controls, [data-mail-detail-defer-controls]')) return;
+    const state = getMailViewState(context);
+    if (state.mode === 'detail') {
+      swipe = {
+        kind: 'detail',
+        pointerId: ev.pointerId,
+        startX: ev.clientX,
+        dx: 0,
+      };
+      return;
+    }
     const row = ev.target.closest('tr[data-message-id]');
     if (!row) return;
-    if (ev.target.closest('button, input, .mail-defer-controls')) return;
     if (row.classList.contains('mail-row-busy')) return;
     if (row.querySelector('[data-mail-defer-controls]:not([hidden])')) return;
     swipe = {
+      kind: 'row',
       row,
       pointerId: ev.pointerId,
       startX: ev.clientX,
@@ -893,13 +1094,36 @@ function setupMailGestureHandlers(eventId, context) {
   const onPointerMove = (ev) => {
     if (!swipe || ev.pointerId !== swipe.pointerId) return;
     swipe.dx = ev.clientX - swipe.startX;
-    updateSwipePreview(swipe.row, swipe.dx);
+    if (swipe.kind === 'row') {
+      updateSwipePreview(swipe.row, swipe.dx);
+    }
   };
 
   const onPointerEnd = (ev) => {
     if (!swipe || ev.pointerId !== swipe.pointerId) return;
-    const { row, dx } = swipe;
+    const done = swipe;
     swipe = null;
+
+    if (done.kind === 'detail') {
+      const state = getMailViewState(context);
+      if (state.mode !== 'detail') return;
+      if (done.dx <= -DETAIL_SWIPE_NAV_THRESHOLD_PX) {
+        const next = state.currentIndex + 1;
+        if (next < context.headers.length) {
+          void openMailDetailAtIndex(eventId, context, next, null);
+        }
+        return;
+      }
+      if (done.dx >= DETAIL_SWIPE_NAV_THRESHOLD_PX) {
+        const prev = state.currentIndex - 1;
+        if (prev >= 0) {
+          void openMailDetailAtIndex(eventId, context, prev, null);
+        }
+      }
+      return;
+    }
+
+    const { row, dx } = done;
     const action = resolveSwipeAction(dx);
     resetSwipePreview(row);
     if (!action) return;
@@ -927,6 +1151,43 @@ function setupMailGestureHandlers(eventId, context) {
   window.addEventListener('pointercancel', onPointerEnd);
 }
 
+function setupMailDetailKeyboardHandlers(eventId, context) {
+  const e = getEls();
+  if (e.text._mailDetailKeyDownHandler) {
+    document.removeEventListener('keydown', e.text._mailDetailKeyDownHandler);
+  }
+  const onKeyDown = (ev) => {
+    if (activeTextEventId !== eventId) return;
+    const state = getMailViewState(context);
+    if (state.mode !== 'detail') return;
+    const tag = String(ev.target?.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || ev.target?.isContentEditable) return;
+
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      backToMailList(eventId, context);
+      return;
+    }
+    if (ev.key === 'ArrowLeft' || ev.key === 'k' || ev.key === 'K') {
+      ev.preventDefault();
+      const prev = state.currentIndex - 1;
+      if (prev >= 0) {
+        void openMailDetailAtIndex(eventId, context, prev, null);
+      }
+      return;
+    }
+    if (ev.key === 'ArrowRight' || ev.key === 'j' || ev.key === 'J') {
+      ev.preventDefault();
+      const next = state.currentIndex + 1;
+      if (next < context.headers.length) {
+        void openMailDetailAtIndex(eventId, context, next, null);
+      }
+    }
+  };
+  e.text._mailDetailKeyDownHandler = onKeyDown;
+  document.addEventListener('keydown', onKeyDown);
+}
+
 function setupMailActionHandlers(eventId, context) {
   const e = getEls();
   if (e.text._mailClickHandler) {
@@ -937,8 +1198,24 @@ function setupMailActionHandlers(eventId, context) {
     const button = ev.target.closest('button[data-mail-action]');
     if (!button) return;
     const action = button.dataset.mailAction;
-    if (action === 'open-close') {
-      closeOpenPanel();
+    const state = getMailViewState(context);
+
+    if (action === 'detail-back') {
+      backToMailList(eventId, context);
+      return;
+    }
+    if (action === 'detail-prev') {
+      const prev = state.currentIndex - 1;
+      if (prev >= 0) {
+        void openMailDetailAtIndex(eventId, context, prev, null);
+      }
+      return;
+    }
+    if (action === 'detail-next') {
+      const next = state.currentIndex + 1;
+      if (next < context.headers.length) {
+        void openMailDetailAtIndex(eventId, context, next, null);
+      }
       return;
     }
     if (action === 'draft-cancel') {
@@ -956,8 +1233,9 @@ function setupMailActionHandlers(eventId, context) {
     }
 
     const row = button.closest('tr[data-message-id]');
-    if (!row) return;
-    const messageID = row.dataset.messageId || '';
+    const detailRoot = e.text.querySelector('[data-mail-detail-root]');
+    const inDetail = Boolean(detailRoot && !row);
+    const messageID = row ? (row.dataset.messageId || '') : String(detailRoot?.dataset.messageId || '');
     if (!messageID) return;
 
     if (action === 'draft-reply') {
@@ -968,8 +1246,13 @@ function setupMailActionHandlers(eventId, context) {
         subject: header?.subject || '',
         selectionText: window.getSelection()?.toString?.() || '',
       };
-      setMailRowBusy(row, true);
-      setMailRowStatus(row, 'Generating draft reply...', 'info');
+      if (row) {
+        setMailRowBusy(row, true);
+        setMailRowStatus(row, 'Generating draft reply...', 'info');
+      } else {
+        setMailDetailBusy(true);
+        setMailDetailStatus(context, 'Generating draft reply...', 'info');
+      }
       openDraftPanel('', 'Generating...');
       void callDraftReply(context, message)
         .then((payload) => {
@@ -977,34 +1260,95 @@ function setupMailActionHandlers(eventId, context) {
           const draftText = String(payload.draft_text || '').trim();
           const source = String(payload.source || 'llm').trim();
           openDraftPanel(draftText, source === 'llm' ? 'Generated by LLM (unsent)' : 'Fallback draft (unsent)');
-          setMailRowStatus(row, 'Draft ready. Review and edit before sending.', 'success');
+          if (row) {
+            setMailRowStatus(row, 'Draft ready. Review and edit before sending.', 'success');
+          } else {
+            setMailDetailStatus(context, 'Draft ready. Review and edit before sending.', 'success');
+          }
         })
         .catch((err) => {
           if (activeTextEventId !== eventId) return;
           closeDraftPanel();
-          setMailRowStatus(row, String(err?.message || err || 'draft generation failed'), 'error');
+          if (row) {
+            setMailRowStatus(row, String(err?.message || err || 'draft generation failed'), 'error');
+          } else {
+            setMailDetailStatus(context, String(err?.message || err || 'draft generation failed'), 'error');
+          }
         })
         .finally(() => {
           if (activeTextEventId !== eventId) return;
-          setMailRowBusy(row, false);
+          if (row && row.isConnected) {
+            setMailRowBusy(row, false);
+          }
+          setMailDetailBusy(false);
         });
       return;
     }
 
     if (action === 'defer-cancel') {
-      closeMailDeferControls(row);
+      if (inDetail) {
+        closeMailDetailDeferControls();
+      } else if (row) {
+        closeMailDeferControls(row);
+      }
       return;
     }
+
     if (action === 'defer') {
       const supportsNative = context.capabilities ? Boolean(context.capabilities.supports_native_defer) : true;
       if (!supportsNative) {
-        setMailRowStatus(row, 'Defer is currently a stub for this provider.', 'warning');
+        if (row) {
+          setMailRowStatus(row, 'Defer is currently a stub for this provider.', 'warning');
+        } else {
+          setMailDetailStatus(context, 'Defer is currently a stub for this provider.', 'warning');
+        }
         return;
       }
-      openMailDeferControls(row);
+      if (inDetail) {
+        openMailDetailDeferControls();
+      } else if (row) {
+        openMailDeferControls(row);
+      }
       return;
     }
+
     if (action === 'defer-apply') {
+      if (inDetail) {
+        const input = document.querySelector('[data-mail-detail-defer-input]');
+        if (!input || !input.value) {
+          setMailDetailStatus(context, 'Choose a defer date/time first.', 'error');
+          return;
+        }
+        const parsed = new Date(input.value);
+        if (Number.isNaN(parsed.getTime())) {
+          setMailDetailStatus(context, 'Invalid defer date/time.', 'error');
+          return;
+        }
+        const untilAt = parsed.toISOString();
+        setMailDetailBusy(true);
+        setMailDetailStatus(context, 'Running defer...', 'info');
+        void callMailAction(context, 'defer', messageID, untilAt)
+          .then((result) => {
+            if (activeTextEventId !== eventId) return;
+            if (result && result.status === 'stub_not_supported') {
+              setMailDetailStatus(context, 'Defer is not supported for this provider yet.', 'warning');
+              return;
+            }
+            closeMailDetailDeferControls();
+            const when = result?.deferred_until_at || untilAt;
+            setMailDetailStatus(context, `Deferred until ${formatMailDate(when)}.`, 'success');
+          })
+          .catch((err) => {
+            if (activeTextEventId !== eventId) return;
+            setMailDetailStatus(context, String(err?.message || err || 'defer failed'), 'error');
+          })
+          .finally(() => {
+            if (activeTextEventId !== eventId) return;
+            setMailDetailBusy(false);
+          });
+        return;
+      }
+
       const input = row.querySelector('[data-mail-defer-input]');
       if (!input || !input.value) {
         setMailRowStatus(row, 'Choose a defer date/time first.', 'error');
@@ -1019,55 +1363,100 @@ function setupMailActionHandlers(eventId, context) {
       runImmediateMailAction(eventId, context, row, 'defer', messageID, untilAt);
       return;
     }
+
     if (action === 'open') {
-      const header = findMailHeader(context, messageID);
-      setMailRowBusy(row, true);
-      setMailRowStatus(row, 'Opening...', 'info');
-      void callMailRead(context, messageID)
-        .then((message) => {
-          if (activeTextEventId !== eventId) return;
-          closeDraftPanel();
-          openMailPanel(header, message || {});
-          e.text.querySelectorAll('tr[data-message-id]').forEach((candidate) => {
-            candidate.classList.remove('mail-row-opened');
-          });
-          row.classList.add('mail-row-opened');
-          setMailRowStatus(row, 'Opened.', 'success');
-        })
-        .catch((err) => {
-          if (activeTextEventId !== eventId) return;
-          setMailRowStatus(row, String(err?.message || err || 'open failed'), 'error');
-        })
-        .finally(() => {
-          if (activeTextEventId !== eventId) return;
-          setMailRowBusy(row, false);
-        });
+      if (!row) return;
+      const parsedIndex = Number.parseInt(row.dataset.mailIndex || '', 10);
+      const idx = Number.isInteger(parsedIndex) ? parsedIndex : findMailHeaderIndex(context, messageID);
+      if (idx < 0 || idx >= context.headers.length) {
+        setMailRowStatus(row, 'Message not found in current list.', 'error');
+        return;
+      }
+      void openMailDetailAtIndex(eventId, context, idx, row);
       return;
     }
+
     if (action !== 'archive' && action !== 'delete') {
       return;
     }
-    if (action === 'archive' || action === 'delete') {
-      queueUndoableMailAction(eventId, context, row, action, messageID);
+
+    if (inDetail) {
+      setMailDetailBusy(true);
+      setMailDetailStatus(context, `Running ${action}...`, 'info');
+      let navigated = false;
+      void callMailAction(context, action, messageID, '')
+        .then((result) => {
+          if (activeTextEventId !== eventId) return;
+          if (result && result.status === 'stub_not_supported') {
+            setMailDetailStatus(context, 'Action is not supported for this provider.', 'warning');
+            return;
+          }
+          const currentIndex = state.currentIndex;
+          if (currentIndex < 0 || currentIndex >= context.headers.length) {
+            setMailDetailStatus(context, 'Action completed.', 'success');
+            return;
+          }
+          context.headers.splice(currentIndex, 1);
+          updateMailCount(context);
+          if (context.headers.length === 0) {
+            state.mode = 'list';
+            state.currentIndex = 0;
+            state.detailMessage = null;
+            renderMailArtifact(eventId, context);
+            return;
+          }
+          const nextIndex = Math.min(currentIndex, context.headers.length - 1);
+          state.currentIndex = nextIndex;
+          state.detailMessage = null;
+          navigated = true;
+          void openMailDetailAtIndex(eventId, context, nextIndex, null);
+        })
+        .catch((err) => {
+          if (activeTextEventId !== eventId) return;
+          setMailDetailStatus(context, String(err?.message || err || `${action} failed`), 'error');
+        })
+        .finally(() => {
+          if (activeTextEventId !== eventId) return;
+          if (!navigated) {
+            setMailDetailBusy(false);
+          }
+        });
       return;
     }
-    runImmediateMailAction(eventId, context, row, action, messageID, '');
+
+    queueUndoableMailAction(eventId, context, row, action, messageID);
   };
 
   e.text._mailClickHandler = onClick;
   e.text.addEventListener('click', onClick);
 }
 
-function renderMailArtifact(event, context) {
+function renderMailArtifact(eventId, context) {
   const e = getEls();
+  const state = getMailViewState(context);
   e.text.classList.add('mail-artifact');
-  e.text.innerHTML = renderMailHeadersHtml(context);
-  setupMailActionHandlers(event.event_id, context);
-  setupMailGestureHandlers(event.event_id, context);
+  if (!context.headers.length) {
+    state.mode = 'list';
+    state.currentIndex = 0;
+  }
+  if (state.mode === 'detail') {
+    if (state.currentIndex < 0 || state.currentIndex >= context.headers.length) {
+      state.currentIndex = Math.max(0, Math.min(state.currentIndex, context.headers.length - 1));
+    }
+    e.text.innerHTML = renderMailDetailHtml(context);
+    setupMailActionHandlers(eventId, context);
+    setupMailGestureHandlers(eventId, context);
+    setupMailDetailKeyboardHandlers(eventId, context);
+    setCapabilityHint(context);
+    void fetchMailCapabilities(eventId, context);
+    return;
+  }
+  e.text.innerHTML = renderMailListHtml(context);
+  setupMailActionHandlers(eventId, context);
+  setupMailGestureHandlers(eventId, context);
   setCapabilityHint(context);
-  void fetchMailCapabilities(event.event_id, context);
+  void fetchMailCapabilities(eventId, context);
 }
-
 function setupTextSelection(eventId) {
   const e = getEls();
   clearTextInteractionHandlers();
@@ -1221,7 +1610,7 @@ export function renderCanvas(event) {
     const mailContext = normalizeMailHeadersContext(event);
     if (mailContext) {
       activeMailContext = mailContext;
-      renderMailArtifact(event, mailContext);
+      renderMailArtifact(event.event_id, mailContext);
       return;
     }
     activeMailContext = null;

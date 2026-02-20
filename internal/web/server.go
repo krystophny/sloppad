@@ -150,6 +150,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/api/files/{session_id}/*", a.handleFilesProxy)
 	r.Post("/api/mail/action-capabilities", a.handleMailActionCapabilities)
 	r.Post("/api/mail/read", a.handleMailRead)
+	r.Post("/api/mail/mark-read", a.handleMailMarkRead)
 	r.Post("/api/mail/action", a.handleMailAction)
 	r.Post("/api/mail/draft-reply", a.handleMailDraftReply)
 
@@ -649,6 +650,39 @@ func (a *App) handleMailRead(w http.ResponseWriter, r *http.Request) {
 		"provider":   req.Provider,
 		"message_id": req.MessageID,
 		"format":     format,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeJSON(w, resp)
+}
+
+func (a *App) handleMailMarkRead(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var req struct {
+		Provider       string `json:"provider"`
+		MessageID      string `json:"message_id"`
+		ProducerMCPURL string `json:"producer_mcp_url"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.MessageID) == "" {
+		http.Error(w, "message_id is required", http.StatusBadRequest)
+		return
+	}
+	mcpURL, err := normalizeProducerMCPURL(req.ProducerMCPURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	resp, err := mcpToolsCallURL(mcpURL, "email_mark_read", map[string]interface{}{
+		"provider":    req.Provider,
+		"message_ids": []string{req.MessageID},
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)

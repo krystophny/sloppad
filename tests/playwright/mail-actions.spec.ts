@@ -130,9 +130,10 @@ test('imap defer shows stub and sends no mutate call', async ({ page }) => {
   expect(mutateCalls).toBe(0);
 });
 
-test('open fetches full message and shows it in panel', async ({ page }) => {
+test('open switches to full detail view, marks read, and supports nav/back', async ({ page }) => {
   let actionCalls = 0;
   const readCalls: Array<Record<string, unknown>> = [];
+  const markReadCalls: Array<Record<string, unknown>> = [];
 
   await page.route('**/api/mail/action-capabilities', async (route) => {
     await route.fulfill({
@@ -160,28 +161,53 @@ test('open fetches full message and shows it in panel', async ({ page }) => {
       json: {
         message: {
           ID: body.message_id,
-          Subject: 'Subject from read',
+          Subject: `Subject ${body.message_id}`,
           Sender: 'Alice <alice@example.com>',
           Recipients: ['Bob <bob@example.com>'],
           Date: '2026-02-20T09:00:00Z',
-          BodyText: 'Full message body',
+          BodyText: `Full message body ${body.message_id}`,
         },
       },
     });
   });
 
+  await page.route('**/api/mail/mark-read', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    markReadCalls.push(body);
+    await route.fulfill({
+      json: {
+        marked: 1,
+      },
+    });
+  });
+
   await renderMail(page, 'imap', [
-    { id: 'm-open', date: '2026-02-20T09:00:00Z', sender: 'Alice <alice@example.com>', subject: 'Header subject' },
+    { id: 'm1', date: '2026-02-20T09:00:00Z', sender: 'Alice <alice@example.com>', subject: 'Header subject 1' },
+    { id: 'm2', date: '2026-02-20T08:00:00Z', sender: 'Bob <bob@example.com>', subject: 'Header subject 2' },
   ]);
 
-  await page.click('tr[data-message-id="m-open"] button[data-mail-action="open"]');
+  await page.click('tr[data-message-id="m1"] button[data-mail-action="open"]');
 
   await expect.poll(() => readCalls.length).toBe(1);
-  expect(readCalls[0]?.message_id).toBe('m-open');
+  await expect.poll(() => markReadCalls.length).toBe(1);
+  expect(readCalls[0]?.message_id).toBe('m1');
+  expect(markReadCalls[0]?.message_id).toBe('m1');
   expect(actionCalls).toBe(0);
-  await expect(page.locator('[data-mail-open-panel]')).toBeVisible();
-  await expect(page.locator('[data-mail-open-subject]')).toContainText('Subject from read');
-  await expect(page.locator('[data-mail-open-body]')).toContainText('Full message body');
+  await expect(page.locator('[data-mail-detail-root]')).toBeVisible();
+  await expect(page.locator('.mail-detail-subject')).toContainText('Subject m1');
+  await expect(page.locator('[data-mail-detail-body]')).toContainText('Full message body m1');
+
+  await page.click('button[data-mail-action="detail-next"]');
+  await expect.poll(() => readCalls.length).toBe(2);
+  await expect.poll(() => markReadCalls.length).toBe(2);
+  expect(readCalls[1]?.message_id).toBe('m2');
+  expect(markReadCalls[1]?.message_id).toBe('m2');
+  await expect(page.locator('.mail-detail-subject')).toContainText('Subject m2');
+  await expect(page.locator('button[data-mail-action="detail-next"]')).toBeDisabled();
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.mail-triage-table')).toBeVisible();
+  await expect(page.locator('tr[data-message-id="m2"]')).toBeVisible();
 });
 
 test('swipe thresholds map to archive/delete exactly once', async ({ page }) => {

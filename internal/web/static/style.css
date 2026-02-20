@@ -455,10 +455,6 @@ body.desktop-canvas-only #panel-canvas {
   background: var(--bg-elevated);
 }
 
-.mail-row-opened {
-  background: #fff9db;
-}
-
 .mail-undo-toast {
   position: sticky;
   bottom: 0.75rem;
@@ -484,34 +480,66 @@ body.desktop-canvas-only #panel-canvas {
   background: var(--bg-surface);
 }
 
-.mail-open-panel {
+.mail-detail-view {
   margin-top: 0.75rem;
-  border: 1px solid var(--border);
-  padding: 0.55rem;
-  background: var(--bg-surface);
 }
 
-.mail-open-head {
+.mail-detail-toolbar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
-  margin-bottom: 0.4rem;
-  font-size: 0.84rem;
+  margin-bottom: 0.6rem;
 }
 
-.mail-open-meta {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.2rem;
-  margin-bottom: 0.45rem;
+.mail-detail-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mail-detail-position {
+  min-width: 64px;
+  text-align: center;
   font-size: 0.78rem;
   color: var(--text-dim);
 }
 
-.mail-open-panel pre {
-  margin: 0;
-  max-height: 340px;
+.mail-detail-subject {
+  margin-top: 0.7rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.95rem;
+}
+
+.mail-detail-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.2rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.mail-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.mail-detail-actions button {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.mail-detail-status {
+  margin-top: 0.25rem;
+  min-height: 1.1em;
+  font-size: 0.78rem;
+}
+
+.mail-detail-body {
+  margin: 0.5rem 0 0;
+  max-height: 52vh;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
