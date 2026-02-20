@@ -728,7 +728,7 @@ function setupMailGestureHandlers(eventId, context) {
     const messageID = row.dataset.messageId || '';
     if (!messageID) return;
     if (action === 'defer') {
-      const supportsNative = Boolean(context.capabilities?.supports_native_defer);
+      const supportsNative = context.capabilities ? Boolean(context.capabilities.supports_native_defer) : true;
       if (!supportsNative) {
         setMailRowStatus(row, 'Defer is currently a stub for this provider.', 'warning');
         return;
@@ -769,7 +769,7 @@ function setupMailActionHandlers(eventId, context) {
       return;
     }
     if (action === 'defer') {
-      const supportsNative = Boolean(context.capabilities?.supports_native_defer);
+      const supportsNative = context.capabilities ? Boolean(context.capabilities.supports_native_defer) : true;
       if (!supportsNative) {
         setMailRowStatus(row, 'Defer is currently a stub for this provider.', 'warning');
         return;
