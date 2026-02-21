@@ -258,6 +258,10 @@ function typesetMarkdownMath(root, attempt = 0) {
   void startupReady
     .then(() => {
       if (!root.isConnected) return;
+      if (typeof mj.texReset === 'function') {
+        // Reset equation numbers/labels so each artifact is independent.
+        mj.texReset();
+      }
       if (typeof mj.typesetClear === 'function') {
         mj.typesetClear([root]);
       }
