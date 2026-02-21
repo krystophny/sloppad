@@ -61,11 +61,15 @@ type App struct {
 	canvasWS         map[string]map[*websocket.Conn]struct{}
 	chatWS           map[string]map[*websocket.Conn]struct{}
 	chatTurnCancel   map[string]map[string]context.CancelFunc
+	chatTurnQueue    map[string]int
+	chatTurnWorker   map[string]bool
 	remoteCanvasWS   map[string]*websocket.Conn
 	tunnelPorts      map[string]int
 	relayCancel      map[string]context.CancelFunc
 	localServe       *serve.App
 	localServeCancel context.CancelFunc
+	projectServes    map[string]*serve.App
+	projectServeStop map[string]context.CancelFunc
 
 	bootID    string
 	startedAt string
@@ -89,26 +93,35 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL string, devRuntime 
 	if envTruthy("TABULA_NO_AUTH") {
 		noAuth = true
 	}
-	return &App{
-		dataDir:         dataDir,
-		localProjectDir: localProjectDir,
-		localMCPURL:     localMCPURL,
-		appServerURL:    appServerURL,
-		appServerModel:  strings.TrimSpace(os.Getenv("TABULA_APP_SERVER_MODEL")),
-		devRuntime:      devRuntime,
-		noAuth:          noAuth,
-		store:           s,
-		appServerClient: appServerClient,
-		upgrader:        websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		canvasWS:        map[string]map[*websocket.Conn]struct{}{},
-		chatWS:          map[string]map[*websocket.Conn]struct{}{},
-		chatTurnCancel:  map[string]map[string]context.CancelFunc{},
-		remoteCanvasWS:  map[string]*websocket.Conn{},
-		tunnelPorts:     map[string]int{},
-		relayCancel:     map[string]context.CancelFunc{},
-		bootID:          strconv.FormatInt(time.Now().UnixNano(), 16),
-		startedAt:       time.Now().UTC().Format(time.RFC3339Nano),
-	}, nil
+	app := &App{
+		dataDir:          dataDir,
+		localProjectDir:  localProjectDir,
+		localMCPURL:      localMCPURL,
+		appServerURL:     appServerURL,
+		appServerModel:   strings.TrimSpace(os.Getenv("TABULA_APP_SERVER_MODEL")),
+		devRuntime:       devRuntime,
+		noAuth:           noAuth,
+		store:            s,
+		appServerClient:  appServerClient,
+		upgrader:         websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		canvasWS:         map[string]map[*websocket.Conn]struct{}{},
+		chatWS:           map[string]map[*websocket.Conn]struct{}{},
+		chatTurnCancel:   map[string]map[string]context.CancelFunc{},
+		chatTurnQueue:    map[string]int{},
+		chatTurnWorker:   map[string]bool{},
+		remoteCanvasWS:   map[string]*websocket.Conn{},
+		tunnelPorts:      map[string]int{},
+		relayCancel:      map[string]context.CancelFunc{},
+		projectServes:    map[string]*serve.App{},
+		projectServeStop: map[string]context.CancelFunc{},
+		bootID:           strconv.FormatInt(time.Now().UnixNano(), 16),
+		startedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if _, err := app.ensureDefaultProjectRecord(); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	return app, nil
 }
 
 func pathJoin(parts ...string) string {
@@ -163,6 +176,10 @@ func (a *App) Router() http.Handler {
 
 	// runtime
 	r.Get("/api/runtime", a.handleRuntime)
+	r.Get("/api/projects", a.handleProjectsList)
+	r.Post("/api/projects", a.handleProjectCreate)
+	r.Post("/api/projects/{project_id}/activate", a.handleProjectActivate)
+	r.Get("/api/projects/{project_id}/context", a.handleProjectContext)
 	r.Post("/api/chat/sessions", a.handleChatSessionCreate)
 	r.Get("/api/chat/sessions/{session_id}/history", a.handleChatSessionHistory)
 	r.Get("/api/chat/sessions/{session_id}/activity", a.handleChatSessionActivity)
@@ -1025,9 +1042,13 @@ func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, session
 	prompt := buildArtifactRewritePrompt(kind, title, originalText, artifactPath, artifactPage, comments)
 	rewriteCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	cwd := strings.TrimSpace(a.localProjectDir)
-	if cwd == "" {
-		cwd = "."
+	cwd := "."
+	if project, projectErr := a.findProjectByCanvasSession(sessionID); projectErr == nil {
+		if root := strings.TrimSpace(project.RootPath); root != "" {
+			cwd = root
+		}
+	} else if fallback := strings.TrimSpace(a.localProjectDir); fallback != "" {
+		cwd = fallback
 	}
 	appResp, err := a.appServerClient.SendPrompt(rewriteCtx, appserver.PromptRequest{
 		CWD:    cwd,
@@ -1366,6 +1387,12 @@ func (a *App) startCanvasRelay(sessionID string, port int) {
 }
 
 func (a *App) startLocalServe() error {
+	a.mu.Lock()
+	_, alreadyReady := a.tunnelPorts[LocalSessionID]
+	a.mu.Unlock()
+	if alreadyReady {
+		return nil
+	}
 	if a.localProjectDir == "" {
 		return nil
 	}
@@ -1382,9 +1409,11 @@ func (a *App) startLocalServe() error {
 	}
 
 	app := serve.NewApp(a.localProjectDir, true)
-	a.localServe = app
 	ctx, cancel := context.WithCancel(context.Background())
+	a.mu.Lock()
+	a.localServe = app
 	a.localServeCancel = cancel
+	a.mu.Unlock()
 	go func() {
 		_ = app.Start("127.0.0.1", DaemonPort)
 	}()
@@ -1436,6 +1465,8 @@ func (a *App) Start(host string, port int) error {
 }
 
 func (a *App) Shutdown(ctx context.Context) error {
+	projectStops := map[string]context.CancelFunc{}
+	projectApps := map[string]*serve.App{}
 	a.mu.Lock()
 	for _, cancel := range a.relayCancel {
 		cancel()
@@ -1453,7 +1484,22 @@ func (a *App) Shutdown(ctx context.Context) error {
 			_ = ws.Close()
 		}
 	}
+	for sid, cancel := range a.projectServeStop {
+		projectStops[sid] = cancel
+	}
+	for sid, app := range a.projectServes {
+		projectApps[sid] = app
+	}
 	a.mu.Unlock()
+
+	for _, cancel := range projectStops {
+		cancel()
+	}
+	for _, app := range projectApps {
+		if app != nil {
+			_ = app.Stop(ctx)
+		}
+	}
 	if a.localServe != nil {
 		_ = a.localServe.Stop(ctx)
 	}

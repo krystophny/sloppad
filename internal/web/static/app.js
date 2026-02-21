@@ -5,16 +5,25 @@ const state = {
   sessionId: 'local',
   canvasWs: null,
   chatWs: null,
+  chatWsToken: 0,
+  canvasWsToken: 0,
   chatWsHasConnected: false,
   chatSessionId: '',
   chatMode: 'chat',
   activeTab: 'chat',
+  projects: [],
+  defaultProjectId: '',
+  serverActiveProjectId: '',
+  activeProjectId: '',
+  projectsOpen: false,
+  projectSwitchInFlight: false,
   canvasHasUnread: false,
   pendingByTurn: new Map(),
   pendingQueue: [],
   assistantActiveTurns: new Set(),
   assistantUnknownTurns: 0,
   assistantRemoteActiveCount: 0,
+  assistantRemoteQueuedCount: 0,
   assistantCancelInFlight: false,
   assistantLastError: '',
   chatCtrlHoldTimer: null,
@@ -30,6 +39,7 @@ window._tabulaApp = { getState };
 const MATH_SEGMENT_TOKEN_PREFIX = '@@TABULA_CHAT_MATH_SEGMENT_';
 const DEV_UI_RELOAD_POLL_MS = 1500;
 const ASSISTANT_ACTIVITY_POLL_MS = 1200;
+const ACTIVE_PROJECT_STORAGE_KEY = 'tabula.activeProjectId';
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
 const sttActionStart = 'start';
@@ -219,6 +229,48 @@ function focusChatInput({ placeCursorAtEnd = false } = {}) {
     const end = input.value.length;
     input.setSelectionRange(end, end);
   }
+}
+
+function activeProject() {
+  return state.projects.find((project) => project.id === state.activeProjectId) || null;
+}
+
+function setProjectOverviewVisible(open) {
+  state.projectsOpen = Boolean(open);
+  const root = document.getElementById('view-main');
+  const overview = document.getElementById('project-overview');
+  if (root) {
+    root.classList.toggle('projects-open', state.projectsOpen);
+  }
+  if (overview) {
+    overview.classList.toggle('is-hidden', !state.projectsOpen);
+  }
+}
+
+function persistActiveProjectID(projectID) {
+  if (!projectID) return;
+  try {
+    window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectID);
+  } catch (_) {
+    // noop
+  }
+}
+
+function readPersistedProjectID() {
+  try {
+    return String(window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function setActiveProjectID(projectID) {
+  state.activeProjectId = String(projectID || '').trim();
+  if (state.activeProjectId) {
+    persistActiveProjectID(state.activeProjectId);
+  }
+  renderProjectTabs();
+  renderProjectCards();
 }
 
 function createPushToPromptSessionID() {
@@ -546,11 +598,12 @@ function hasLocalAssistantWork() {
 function isAssistantWorking() {
   return hasLocalAssistantWork()
     || state.assistantRemoteActiveCount > 0
+    || state.assistantRemoteQueuedCount > 0
     || state.assistantCancelInFlight;
 }
 
 function updateAssistantActivityIndicator() {
-  if (!hasLocalAssistantWork() && state.assistantRemoteActiveCount <= 0) {
+  if (!hasLocalAssistantWork() && state.assistantRemoteActiveCount <= 0 && state.assistantRemoteQueuedCount <= 0) {
     state.assistantUnknownTurns = 0;
     state.assistantActiveTurns.clear();
   }
@@ -563,6 +616,8 @@ function updateAssistantActivityIndicator() {
     el.textContent = 'Assistant stopping...';
   } else if (failed) {
     el.textContent = 'Assistant error';
+  } else if (!hasLocalAssistantWork() && state.assistantRemoteActiveCount <= 0 && state.assistantRemoteQueuedCount > 0) {
+    el.textContent = `Assistant queued (${state.assistantRemoteQueuedCount})...`;
   } else {
     el.textContent = working ? 'Assistant is working...' : 'Assistant idle';
   }
@@ -696,22 +751,179 @@ function ensurePendingForTurn(turnID) {
   return row;
 }
 
-async function ensureChatSession() {
-  const resp = await fetch('/api/chat/sessions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  });
+function resetAssistantTurnTracking({ clearError = false } = {}) {
+  state.pendingByTurn.clear();
+  state.pendingQueue = [];
+  state.assistantActiveTurns.clear();
+  state.assistantUnknownTurns = 0;
+  state.assistantRemoteActiveCount = 0;
+  state.assistantRemoteQueuedCount = 0;
+  state.assistantCancelInFlight = false;
+  if (clearError) {
+    state.assistantLastError = '';
+  }
+  updateAssistantActivityIndicator();
+}
+
+function clearChatHistory() {
+  const host = chatHistoryEl();
+  if (host) {
+    host.innerHTML = '';
+  }
+}
+
+async function fetchProjects() {
+  const resp = await fetch('/api/projects', { cache: 'no-store' });
   if (!resp.ok) {
-    throw new Error(`chat session create failed: HTTP ${resp.status}`);
+    throw new Error(`projects list failed: HTTP ${resp.status}`);
   }
   const payload = await resp.json();
-  state.chatSessionId = String(payload.session_id || '');
-  setChatMode(payload.mode || 'chat');
+  const projects = Array.isArray(payload?.projects) ? payload.projects : [];
+  state.projects = projects.map((project) => ({
+    ...project,
+    id: String(project?.id || ''),
+  })).filter((project) => project.id);
+  state.defaultProjectId = String(payload?.default_project_id || '').trim();
+  state.serverActiveProjectId = String(payload?.active_project_id || '').trim();
+  renderProjectTabs();
+  renderProjectCards();
+}
+
+function upsertProject(project) {
+  if (!project || !project.id) return;
+  const index = state.projects.findIndex((item) => item.id === project.id);
+  if (index >= 0) {
+    state.projects[index] = project;
+  } else {
+    state.projects.push(project);
+  }
+}
+
+function resolveInitialProjectID() {
+  if (state.serverActiveProjectId && state.projects.some((project) => project.id === state.serverActiveProjectId)) {
+    return state.serverActiveProjectId;
+  }
+  const persisted = readPersistedProjectID();
+  if (persisted && state.projects.some((project) => project.id === persisted)) {
+    return persisted;
+  }
+  if (state.defaultProjectId && state.projects.some((project) => project.id === state.defaultProjectId)) {
+    return state.defaultProjectId;
+  }
+  return state.projects[0]?.id || '';
+}
+
+function renderProjectTabs() {
+  const strip = document.getElementById('project-tab-strip');
+  if (!(strip instanceof HTMLElement)) return;
+  strip.innerHTML = '';
+  for (const project of state.projects) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'project-tab-btn';
+    if (project.id === state.activeProjectId) {
+      button.classList.add('is-active');
+    }
+    button.textContent = String(project.name || project.id || 'Project');
+    button.title = String(project.root_path || '');
+    button.addEventListener('click', () => {
+      if (project.id === state.activeProjectId) return;
+      void switchProject(project.id);
+    });
+    strip.appendChild(button);
+  }
+}
+
+function renderProjectCards() {
+  const host = document.getElementById('project-cards');
+  if (!(host instanceof HTMLElement)) return;
+  host.innerHTML = '';
+  for (const project of state.projects) {
+    const card = document.createElement('article');
+    card.className = 'project-card';
+    if (project.id === state.activeProjectId) {
+      card.classList.add('is-active');
+    }
+
+    const head = document.createElement('div');
+    head.className = 'project-card-head';
+    const name = document.createElement('div');
+    name.className = 'project-card-name';
+    name.textContent = String(project.name || project.id || 'Project');
+    const kind = document.createElement('span');
+    kind.className = 'project-kind-pill';
+    kind.textContent = String(project.kind || 'managed');
+    head.append(name, kind);
+
+    const path = document.createElement('div');
+    path.className = 'project-card-path';
+    path.textContent = String(project.root_path || '');
+
+    const actions = document.createElement('div');
+    actions.className = 'project-card-actions';
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = project.id === state.activeProjectId ? 'Active' : 'Open';
+    openBtn.disabled = project.id === state.activeProjectId;
+    openBtn.addEventListener('click', () => {
+      void switchProject(project.id);
+    });
+    actions.appendChild(openBtn);
+
+    card.append(head, path, actions);
+    host.appendChild(card);
+  }
+}
+
+async function createProjectFromForm() {
+  const nameInput = document.getElementById('project-create-name');
+  const kindInput = document.getElementById('project-create-kind');
+  const pathInput = document.getElementById('project-create-path');
+  const req = {
+    name: nameInput instanceof HTMLInputElement ? nameInput.value : '',
+    kind: kindInput instanceof HTMLSelectElement ? kindInput.value : 'managed',
+    path: pathInput instanceof HTMLInputElement ? pathInput.value : '',
+  };
+  const resp = await fetch('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  const project = payload?.project;
+  if (!project || !project.id) {
+    throw new Error('project create returned invalid project');
+  }
+  upsertProject(project);
+  renderProjectTabs();
+  renderProjectCards();
+  if (nameInput instanceof HTMLInputElement) nameInput.value = '';
+  if (pathInput instanceof HTMLInputElement) pathInput.value = '';
+  return project;
+}
+
+async function activateProject(projectID) {
+  const resp = await fetch(`/api/projects/${encodeURIComponent(projectID)}/activate`, {
+    method: 'POST',
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  const project = payload?.project || {};
+  state.chatSessionId = String(project.chat_session_id || '');
+  state.sessionId = String(project.canvas_session_id || 'local');
+  setChatMode(project.chat_mode || 'chat');
   if (!state.chatSessionId) {
     throw new Error('chat session ID missing');
   }
-  showStatus('ready');
+  upsertProject(project);
+  return project;
 }
 
 async function loadChatHistory() {
@@ -743,16 +955,21 @@ async function loadChatHistory() {
 
 async function refreshAssistantActivity() {
   if (!state.chatSessionId || assistantActivityInFlight) return;
+  const targetSessionID = state.chatSessionId;
   assistantActivityInFlight = true;
   try {
-    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/activity`, {
+    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(targetSessionID)}/activity`, {
       cache: 'no-store',
     });
     if (!resp.ok) return;
+    if (targetSessionID !== state.chatSessionId) return;
     const payload = await resp.json();
     const activeTurns = Number(payload?.active_turns || 0);
+    const queuedTurns = Number(payload?.queued_turns || 0);
     if (!Number.isFinite(activeTurns) || activeTurns < 0) return;
+    if (!Number.isFinite(queuedTurns) || queuedTurns < 0) return;
     state.assistantRemoteActiveCount = activeTurns;
+    state.assistantRemoteQueuedCount = queuedTurns;
     updateAssistantActivityIndicator();
   } catch (_) {
     // Ignore transient probes while reconnecting.
@@ -777,24 +994,36 @@ function startAssistantActivityWatcher() {
   });
 }
 
+function closeChatWs() {
+  state.chatWsToken += 1;
+  if (state.chatWs) {
+    try {
+      state.chatWs.close();
+    } catch (_) {
+      // noop
+    }
+  }
+  state.chatWs = null;
+}
+
 function openChatWs() {
   if (!state.chatSessionId) return;
+  const turnToken = state.chatWsToken + 1;
+  state.chatWsToken = turnToken;
+  const targetSessionID = state.chatSessionId;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ws/chat/${encodeURIComponent(state.chatSessionId)}`;
+  const wsUrl = `${proto}//${location.host}/ws/chat/${encodeURIComponent(targetSessionID)}`;
   const ws = new WebSocket(wsUrl);
   state.chatWs = ws;
 
   ws.onopen = () => {
+    if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     const isReconnect = state.chatWsHasConnected;
     state.chatWsHasConnected = true;
     showStatus('chat connected');
     void refreshAssistantActivity();
     if (isReconnect) {
-      state.pendingByTurn.clear();
-      state.pendingQueue = [];
-      state.assistantActiveTurns.clear();
-      state.assistantUnknownTurns = 0;
-      updateAssistantActivityIndicator();
+      resetAssistantTurnTracking();
       void loadChatHistory().catch((err) => {
         appendPlainMessage('system', `History sync failed: ${String(err?.message || err)}`);
       });
@@ -802,6 +1031,7 @@ function openChatWs() {
   };
 
   ws.onmessage = (event) => {
+    if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     let payload = null;
     try {
       payload = JSON.parse(event.data);
@@ -812,10 +1042,26 @@ function openChatWs() {
   };
 
   ws.onclose = () => {
+    if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     state.chatWs = null;
     showStatus('reconnecting chat...');
-    window.setTimeout(() => openChatWs(), 1200);
+    window.setTimeout(() => {
+      if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
+      openChatWs();
+    }, 1200);
   };
+}
+
+function closeCanvasWs() {
+  state.canvasWsToken += 1;
+  if (state.canvasWs) {
+    try {
+      state.canvasWs.close();
+    } catch (_) {
+      // noop
+    }
+  }
+  state.canvasWs = null;
 }
 
 function handleChatEvent(payload) {
@@ -888,6 +1134,21 @@ function handleChatEvent(payload) {
     return;
   }
 
+  if (type === 'turn_queue_cleared') {
+    const count = Number(payload?.count || 0);
+    const limit = Number.isFinite(count) && count > 0 ? Math.floor(count) : state.pendingQueue.length;
+    for (let i = 0; i < limit; i += 1) {
+      const row = takePendingRow('');
+      if (!row) break;
+      updateAssistantRow(row, '_Stopped._', false);
+      trackAssistantTurnFinished('');
+    }
+    showStatus('assistant queue cleared');
+    updateAssistantActivityIndicator();
+    void refreshAssistantActivity();
+    return;
+  }
+
   if (type === 'error') {
     const turnID = String(payload.turn_id || '').trim();
     const row = takePendingRow(turnID);
@@ -901,6 +1162,48 @@ function handleChatEvent(payload) {
     showStatus(errText);
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
+  }
+}
+
+async function switchProject(projectID) {
+  const nextProjectID = String(projectID || '').trim();
+  if (!nextProjectID) return;
+  if (state.projectSwitchInFlight) return;
+  if (nextProjectID === state.activeProjectId && state.chatSessionId) {
+    setProjectOverviewVisible(false);
+    return;
+  }
+
+  state.projectSwitchInFlight = true;
+  showStatus('switching project...');
+  cancelChatVoiceCapture();
+  closeChatWs();
+  closeCanvasWs();
+  clearChatHistory();
+  clearCanvas();
+  resetAssistantTurnTracking({ clearError: true });
+  setActiveProjectID(nextProjectID);
+  try {
+    const project = await activateProject(nextProjectID);
+    state.chatWsHasConnected = false;
+    upsertProject(project);
+    renderProjectTabs();
+    renderProjectCards();
+    openCanvasWs();
+    await loadChatHistory();
+    await refreshAssistantActivity();
+    openChatWs();
+    setProjectOverviewVisible(false);
+    showStatus(`ready · ${String(project.name || 'project')}`);
+    if (state.activeTab === 'chat') {
+      focusChatInput({ placeCursorAtEnd: true });
+    }
+  } catch (err) {
+    const message = String(err?.message || err || 'project switch failed');
+    appendPlainMessage('system', `Project switch failed: ${message}`);
+    showStatus(`project switch failed: ${message}`);
+  } finally {
+    state.projectSwitchInFlight = false;
   }
 }
 
@@ -989,16 +1292,21 @@ async function cancelActiveAssistantTurn() {
 }
 
 function openCanvasWs() {
+  const turnToken = state.canvasWsToken + 1;
+  state.canvasWsToken = turnToken;
+  const targetSessionID = String(state.sessionId || 'local');
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ws/canvas/${encodeURIComponent(state.sessionId)}`;
+  const wsUrl = `${proto}//${location.host}/ws/canvas/${encodeURIComponent(targetSessionID)}`;
   const ws = new WebSocket(wsUrl);
   state.canvasWs = ws;
 
   ws.onopen = () => {
-    void loadCanvasSnapshot();
+    if (turnToken !== state.canvasWsToken || targetSessionID !== state.sessionId) return;
+    void loadCanvasSnapshot(targetSessionID);
   };
 
   ws.onmessage = (event) => {
+    if (turnToken !== state.canvasWsToken || targetSessionID !== state.sessionId) return;
     try {
       const payload = JSON.parse(event.data);
       renderCanvas(payload);
@@ -1012,14 +1320,18 @@ function openCanvasWs() {
   };
 
   ws.onclose = () => {
+    if (turnToken !== state.canvasWsToken || targetSessionID !== state.sessionId) return;
     state.canvasWs = null;
-    window.setTimeout(() => openCanvasWs(), 1200);
+    window.setTimeout(() => {
+      if (turnToken !== state.canvasWsToken || targetSessionID !== state.sessionId) return;
+      openCanvasWs();
+    }, 1200);
   };
 }
 
-async function loadCanvasSnapshot() {
+async function loadCanvasSnapshot(sessionID = state.sessionId) {
   try {
-    const resp = await fetch(`/api/canvas/${encodeURIComponent(state.sessionId)}/snapshot`);
+    const resp = await fetch(`/api/canvas/${encodeURIComponent(sessionID)}/snapshot`);
     if (!resp.ok) {
       clearCanvas();
       return;
@@ -1075,6 +1387,12 @@ async function commitCanvasFromChat() {
 function bindUi() {
   document.getElementById('tab-chat')?.addEventListener('click', () => setActiveTab('chat'));
   document.getElementById('tab-canvas')?.addEventListener('click', () => setActiveTab('canvas'));
+  document.getElementById('btn-projects')?.addEventListener('click', () => {
+    setProjectOverviewVisible(!state.projectsOpen);
+  });
+  document.getElementById('btn-projects-close')?.addEventListener('click', () => {
+    setProjectOverviewVisible(false);
+  });
 
   document.getElementById('btn-plan-toggle')?.addEventListener('click', () => {
     void runChatCommand('/plan');
@@ -1089,6 +1407,31 @@ function bindUi() {
     ev.preventDefault();
     void sendChatMessage();
   });
+
+  const projectCreateForm = document.getElementById('project-create-form');
+  projectCreateForm?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (state.projectSwitchInFlight) return;
+    showStatus('creating project...');
+    void createProjectFromForm()
+      .then((project) => switchProject(project.id))
+      .catch((err) => {
+        const message = String(err?.message || err || 'project create failed');
+        showStatus(`project create failed: ${message}`);
+      });
+  });
+
+  const projectKindInput = document.getElementById('project-create-kind');
+  if (projectKindInput instanceof HTMLSelectElement) {
+    const syncProjectPathField = () => {
+      const wrap = document.getElementById('project-create-path-wrap');
+      if (!(wrap instanceof HTMLElement)) return;
+      const isLinked = projectKindInput.value === 'linked';
+      wrap.style.opacity = isLinked ? '1' : '0.92';
+    };
+    projectKindInput.addEventListener('change', syncProjectPathField);
+    syncProjectPathField();
+  }
 
   const input = document.getElementById('chat-input');
   if (input instanceof HTMLTextAreaElement) {
@@ -1106,6 +1449,11 @@ function bindUi() {
   }
 
   document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && state.projectsOpen) {
+      ev.preventDefault();
+      setProjectOverviewVisible(false);
+      return;
+    }
     if (state.activeTab !== 'chat') return;
 
     if (ev.key === 'Escape' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
@@ -1211,16 +1559,17 @@ async function init() {
   startDevReloadWatcher();
   startAssistantActivityWatcher();
   initCanvasControls();
+  setProjectOverviewVisible(false);
   clearCanvas();
   setActiveTab('chat');
   showStatus('starting...');
 
-  openCanvasWs();
-  await ensureChatSession();
-  await loadChatHistory();
-  await refreshAssistantActivity();
-  openChatWs();
-  focusChatInput({ placeCursorAtEnd: true });
+  await fetchProjects();
+  const initialProjectID = resolveInitialProjectID();
+  if (!initialProjectID) {
+    throw new Error('no projects available');
+  }
+  await switchProject(initialProjectID);
 }
 
 init().catch((err) => {

@@ -11,6 +11,8 @@
     <div id="view-main" class="view">
       <header id="toolbar">
         <span class="brand">Tabula</span>
+        <div id="project-tab-strip" role="tablist" aria-label="Projects"></div>
+        <button id="btn-projects" class="tab-btn tab-btn-subtle" type="button">Projects</button>
         <span id="status-text">starting...</span>
         <span id="chat-mode-pill" class="badge">chat</span>
         <div class="toolbar-spacer"></div>
@@ -22,6 +24,35 @@
           </button>
         </div>
       </header>
+
+      <section id="project-overview" class="project-overview is-hidden" aria-label="Project overview">
+        <div class="project-overview-head">
+          <h2>Projects</h2>
+          <button id="btn-projects-close" type="button">Close</button>
+        </div>
+        <div id="project-cards" class="project-cards" aria-live="polite"></div>
+        <form id="project-create-form" autocomplete="off">
+          <h3>Add Project</h3>
+          <label>
+            Name
+            <input id="project-create-name" type="text" placeholder="Acme Website">
+          </label>
+          <label>
+            Kind
+            <select id="project-create-kind">
+              <option value="managed">Managed</option>
+              <option value="linked">Linked Path</option>
+            </select>
+          </label>
+          <label id="project-create-path-wrap">
+            Path (for linked, optional for managed)
+            <input id="project-create-path" type="text" placeholder="/home/you/code/repo">
+          </label>
+          <div class="project-create-actions">
+            <button id="btn-project-create" type="submit">Create Project</button>
+          </div>
+        </form>
+      </section>
 
       <div id="workspace" class="workspace-chat">
         <section id="panel-chat" class="panel" aria-label="Chat canvas">
