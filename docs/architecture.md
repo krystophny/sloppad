@@ -1,4 +1,4 @@
-# Tabula Architecture (Go)
+# Tabula Architecture
 
 Tabula is a Go-first MCP canvas/runtime stack with a browser UI.
 
@@ -7,53 +7,46 @@ Tabula is a Go-first MCP canvas/runtime stack with a browser UI.
 - `cmd/tabula/main.go`
   - CLI entrypoint and subcommand dispatch.
 - `internal/mcp/server.go`
-  - MCP JSON-RPC server (`initialize`, `tools/list`, `tools/call`).
+  - MCP JSON-RPC methods and tool dispatch.
 - `internal/canvas/adapter.go`
-  - Canvas/session/annotation state and tool implementations.
+  - Canvas sessions, artifact state, marks, commit, and event log.
 - `internal/serve/app.go`
-  - Local MCP HTTP daemon (`/mcp`, `/ws/canvas`, `/files/*`).
+  - MCP HTTP daemon (`/mcp`) and canvas websocket (`/ws/canvas`).
 - `internal/web/server.go`
-  - Web UI backend (auth, host/session APIs, terminal/canvas websockets).
-- `internal/ptyd/app.go`
-  - PTY daemon to keep terminal sessions alive across web restarts.
-- `internal/pty/*.go`
-  - Local/PTYD PTY transport implementations.
+  - Auth, host/session APIs, mail action APIs, terminal/canvas websocket routes.
 - `internal/store/store.go`
-  - SQLite persistence for web auth/hosts/session mappings.
+  - SQLite persistence for auth/session mappings.
+- `internal/pty/*.go`, `internal/ptyd/app.go`
+  - PTY session transport and daemon lifecycle.
 - `internal/protocol/bootstrap.go`
-  - Project bootstrap (`.tabula/*`, protocol files, gitignore wiring).
-
-## Data Flow
-
-1. Assistant calls MCP tools through `tabula mcp-server` (stdio) or `tabula serve` (HTTP MCP).
-2. MCP calls resolve in `internal/canvas/adapter.go`.
-3. Canvas events are broadcast over websocket to the browser canvas UI.
-4. Web terminal traffic is handled via local PTY or PTYD transport.
-
-## Cross-Server Handoff Flow (Helpy -> Tabula)
-
-1. Producer server (for example Helpy) resolves source data and creates handoff via `handoff.create`.
-2. Consumer server (Tabula) imports via `canvas_import_handoff` with `handoff_id` and `producer_mcp_url`.
-3. Tabula validates kind with `handoff.peek`, then consumes with `handoff.consume`.
-4. Imported payload is rendered as a canvas artifact and tagged with handoff metadata.
-
-Design rule:
-
-- Producer owns source-system access (email, file, sheet, etc.).
-- Tabula consumes opaque handoff IDs and does not need direct source access.
-- Controller should hand off to canvas instead of dumping payload in terminal/chat when UI testing is intended.
+  - Bootstrap behavior for project-local integration files.
 
 ## Runtime Modes
 
-- CLI stdio MCP: `tabula mcp-server`
-- Local MCP HTTP daemon: `tabula serve`
-- Browser UI: `tabula web`
-- Desktop canvas browser mode: `tabula canvas` (opens `/canvas`)
-- PTY daemon: `tabula ptyd`
+- `tabula mcp-server`: stdio MCP runtime
+- `tabula serve`: HTTP MCP + canvas websocket runtime
+- `tabula web`: browser-facing runtime
+- `tabula ptyd`: terminal session daemon
+- `tabula canvas`: convenience browser launcher
 
-Default local integration addresses:
+## Primary Data Flows
 
-- Tabula web: `http://localhost:8420`
-- Tabula MCP: `http://127.0.0.1:9420/mcp`
-- Helpy MCP: `http://127.0.0.1:8090/mcp`
-- Local session id: `local`
+1. MCP client calls tool on `tabula mcp-server` or `tabula serve`.
+2. Tool dispatch in `internal/mcp/server.go` resolves into adapter operations.
+3. Adapter updates session/artifact/mark state in memory and emits events.
+4. Browser canvas consumes websocket events and renders UI state.
+5. `canvas_commit` persists review annotations sidecar files.
+
+## Handoff Import Flow
+
+1. Producer creates handoff payload (outside Tabula).
+2. Tabula receives `canvas_import_handoff` with `handoff_id`.
+3. Tabula peeks/consumes producer handoff payload and renders artifact.
+4. Imported artifact becomes reviewable in the same canvas session.
+
+## Trust and Access Boundaries
+
+- Tabula does not require direct credentials to producer systems.
+- Producer endpoint authority remains outside Tabula.
+- Tabula stores local auth/session state in SQLite under web data dir.
+- Browser actions only become persistent changes through explicit commit operations.

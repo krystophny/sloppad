@@ -1,0 +1,21 @@
+{
+  "title": "tabula",
+  "version": "v0.0.1",
+  "description": "Tabula is a local-first MCP canvas and review runtime for object-scoped AI workflows.",
+  "license": "MIT",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Albert, Christopher"
+    }
+  ],
+  "keywords": [
+    "mcp",
+    "canvas",
+    "review",
+    "annotation",
+    "email",
+    "e-ink"
+  ],
+  "access_right": "open"
+}

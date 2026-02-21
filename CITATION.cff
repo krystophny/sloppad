@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+title: tabula
+message: If you use this software, please cite it using this metadata.
+type: software
+authors:
+  - family-names: Albert
+    given-names: Christopher
+license: MIT
+version: v0.0.1
+date-released: 2026-02-21
+repository-code: https://github.com/krystophny/tabula
+url: https://github.com/krystophny/tabula
+abstract: >-
+  Tabula is a local-first MCP canvas and review runtime focused on object-scoped
+  intent capture, annotation, and explicit user-controlled commit flows.
+keywords:
+  - mcp
+  - canvas
+  - review
+  - annotation
+  - email
+  - e-ink
