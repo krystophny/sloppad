@@ -625,6 +625,10 @@ function clearSelectionInteractionHandlers() {
 function clearMailInteractionHandlers() {
   const e = getEls();
   flushPendingUndoAction();
+  if (activeMailContext) {
+    const recording = getMailRecordingState(activeMailContext);
+    stopMailRecordingMedia(recording);
+  }
   if (e.text._mailClickHandler) {
     e.text.removeEventListener('click', e.text._mailClickHandler);
     e.text._mailClickHandler = null;
@@ -924,6 +928,65 @@ async function callDraftReply(context, message) {
   return payload;
 }
 
+function base64FromBytes(bytes) {
+  if (!bytes || !bytes.length) return '';
+  const chunkSize = 0x8000;
+  let out = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    out += String.fromCharCode(...chunk);
+  }
+  return btoa(out);
+}
+
+async function callMailSTT(context, audioBlob) {
+  if (!audioBlob || typeof audioBlob.arrayBuffer !== 'function') {
+    throw new Error('missing recorded audio payload');
+  }
+  const audioBytes = new Uint8Array(await audioBlob.arrayBuffer());
+  if (!audioBytes.length) {
+    throw new Error('recorded audio payload is empty');
+  }
+  const req = {
+    producer_mcp_url: context.producerMcpUrl,
+    mime_type: audioBlob.type || 'application/octet-stream',
+    audio_base64: base64FromBytes(audioBytes),
+  };
+  const customBaseURL = String(window.__TABULA_HELPY_STT_BASE_URL || '').trim();
+  if (customBaseURL) {
+    req.helpy_base_url = customBaseURL;
+  }
+  const resp = await fetch('/api/mail/stt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  let payload = {};
+  const raw = await resp.text();
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (_) {
+      if (!resp.ok) {
+        throw new Error(raw);
+      }
+    }
+  }
+  if (!resp.ok) {
+    throw new Error(typeof payload === 'object' && payload !== null && payload.error
+      ? payload.error
+      : raw || 'speech transcription failed');
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('speech transcription returned invalid response');
+  }
+  const transcript = String(payload.text || '').trim();
+  if (!transcript) {
+    throw new Error('speech transcription returned empty text');
+  }
+  return payload;
+}
+
 function findMailHeader(context, messageID) {
   for (const h of context.headers || []) {
     if (h.id === messageID) return h;
@@ -945,6 +1008,14 @@ function createDefaultMailRecordingState() {
     origin: '',
     holdPointerId: null,
     lastStopReason: '',
+    captureToken: 0,
+    mediaRecorder: null,
+    mediaStream: null,
+    chunks: [],
+    mimeType: 'audio/webm',
+    transcribing: false,
+    stopRequested: false,
+    error: '',
     transitions: ['mode:hold', 'state:idle'],
   };
 }
@@ -1044,6 +1115,9 @@ function pushMailRecordingTransition(recording, token) {
 }
 
 function recordingTriggerLabel(recording) {
+  if (recording.transcribing) {
+    return 'Transcribing...';
+  }
   if (recording.mode === MAIL_RECORDING_MODE.TOGGLE) {
     return recording.state === MAIL_RECORDING_STATE.RECORDING ? 'Stop Recording' : 'Start Recording';
   }
@@ -1058,7 +1132,11 @@ function setMailRecordingDomState(context) {
   if (!e.text) return;
   const recording = getMailRecordingState(context);
   const isActive = recording.state === MAIL_RECORDING_STATE.RECORDING;
-  const indicator = isActive
+  const indicator = recording.error
+    ? recording.error
+    : recording.transcribing
+      ? 'Transcribing...'
+      : isActive
     ? `Recording (${recording.mode} mode)`
     : `Ready (${recording.mode} mode)`;
   e.text.dataset.mailRecordingState = recording.state || MAIL_RECORDING_STATE.IDLE;
@@ -1085,21 +1163,213 @@ function setMailRecordingDomState(context) {
   e.text.querySelectorAll('button[data-mail-record-action="trigger"]').forEach((button) => {
     button.textContent = recordingTriggerLabel(recording);
     button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    button.disabled = recording.transcribing;
   });
   e.text.querySelectorAll('button[data-mail-record-action="stop"]').forEach((button) => {
-    button.disabled = !isActive;
+    button.disabled = !isActive || recording.transcribing;
     button.hidden = !isActive;
   });
+}
+
+function stopMailRecordingMedia(recording) {
+  if (recording?.mediaRecorder) {
+    try {
+      if (recording.mediaRecorder.state !== 'inactive') {
+        recording.mediaRecorder.stop();
+      }
+    } catch (_) {
+      // no-op: recorder might already be stopping/stopped
+    }
+  }
+  const stream = recording?.mediaStream;
+  if (stream && typeof stream.getTracks === 'function') {
+    stream.getTracks().forEach((track) => {
+      if (track && typeof track.stop === 'function') {
+        track.stop();
+      }
+    });
+  }
+  if (!recording) return;
+  recording.mediaRecorder = null;
+  recording.mediaStream = null;
+  recording.chunks = [];
+  recording.stopRequested = false;
+}
+
+async function startMailRecordingMediaCapture(context, token) {
+  const recording = getMailRecordingState(context);
+  if (!pendingDraftPromptCapture) {
+    return;
+  }
+  if (!window.MediaRecorder || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    throw new Error('Microphone capture is unavailable in this browser.');
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  if (recording.captureToken !== token || recording.state !== MAIL_RECORDING_STATE.RECORDING) {
+    if (stream && typeof stream.getTracks === 'function') {
+      stream.getTracks().forEach((track) => {
+        if (track && typeof track.stop === 'function') {
+          track.stop();
+        }
+      });
+    }
+    return;
+  }
+  let recorder = null;
+  try {
+    const preferredType = 'audio/webm;codecs=opus';
+    if (typeof window.MediaRecorder.isTypeSupported === 'function' && window.MediaRecorder.isTypeSupported(preferredType)) {
+      recorder = new window.MediaRecorder(stream, { mimeType: preferredType });
+    } else {
+      recorder = new window.MediaRecorder(stream);
+    }
+  } catch (_) {
+    recorder = new window.MediaRecorder(stream);
+  }
+  recording.mediaStream = stream;
+  recording.mediaRecorder = recorder;
+  recording.chunks = [];
+  recording.mimeType = recorder.mimeType || 'audio/webm';
+  recorder.addEventListener('dataavailable', (ev) => {
+    if (ev?.data && ev.data.size > 0) {
+      recording.chunks.push(ev.data);
+    }
+  });
+  recorder.start();
+  if (recording.stopRequested) {
+    try {
+      recorder.stop();
+    } catch (_) {
+      stopMailRecordingMedia(recording);
+    }
+  }
+}
+
+async function stopMailRecordingMediaAndCollectBlob(context, token) {
+  const recording = getMailRecordingState(context);
+  if (recording.captureToken !== token) {
+    return null;
+  }
+  const recorder = recording.mediaRecorder;
+  if (!recorder) {
+    return null;
+  }
+  const toBlob = () => {
+    const parts = Array.isArray(recording.chunks) ? recording.chunks.slice() : [];
+    stopMailRecordingMedia(recording);
+    if (!parts.length) {
+      return null;
+    }
+    return new Blob(parts, { type: recording.mimeType || recorder.mimeType || 'audio/webm' });
+  };
+  if (recorder.state === 'inactive') {
+    return toBlob();
+  }
+  return new Promise((resolve, reject) => {
+    const onStop = () => {
+      recorder.removeEventListener('error', onError);
+      resolve(toBlob());
+    };
+    const onError = () => {
+      recorder.removeEventListener('stop', onStop);
+      stopMailRecordingMedia(recording);
+      reject(new Error('recording failed'));
+    };
+    recorder.addEventListener('stop', onStop, { once: true });
+    recorder.addEventListener('error', onError, { once: true });
+    try {
+      recorder.stop();
+    } catch (err) {
+      recorder.removeEventListener('stop', onStop);
+      recorder.removeEventListener('error', onError);
+      stopMailRecordingMedia(recording);
+      reject(err);
+    }
+  });
+}
+
+async function transcribePendingDraftPrompt(context, token) {
+  const recording = getMailRecordingState(context);
+  if (!pendingDraftPromptCapture) {
+    stopMailRecordingMedia(recording);
+    return;
+  }
+  const pending = pendingDraftPromptCapture;
+  const isSamePending = () => pendingDraftPromptCapture === pending;
+  recording.transcribing = true;
+  recording.error = '';
+  setMailRecordingDomState(context);
+  if (isSamePending()) {
+    setMailAssistStatus(pending.context, pending.row, pending.inDetail, 'Transcribing voice input...', 'info');
+  }
+  try {
+    const audioBlob = await stopMailRecordingMediaAndCollectBlob(context, token);
+    if (!audioBlob || audioBlob.size <= 0) {
+      throw new Error('No audio captured. Hold to record and try again.');
+    }
+    const stt = await callMailSTT(context, audioBlob);
+    const transcript = String(stt?.text || '').trim();
+    if (!transcript) {
+      throw new Error('Speech recognizer returned empty text.');
+    }
+    resolvePendingDraftPromptCapture(transcript, 'Transcribed from voice input.', pending);
+  } catch (err) {
+    if (!isSamePending()) {
+      return;
+    }
+    const message = String(err?.message || err || 'speech transcription failed');
+    recording.error = `Transcription failed: ${message}`;
+    setMailAssistStatus(
+      pending.context,
+      pending.row,
+      pending.inDetail,
+      `Transcription failed: ${message}. Retry recording or type a prompt.`,
+      'warning',
+    );
+  } finally {
+    recording.transcribing = false;
+    setMailRecordingDomState(context);
+  }
 }
 
 function startMailRecording(context, origin) {
   const recording = getMailRecordingState(context);
   if (recording.state === MAIL_RECORDING_STATE.RECORDING) return false;
+  const token = Number(recording.captureToken || 0) + 1;
+  recording.captureToken = token;
+  recording.stopRequested = false;
   recording.state = MAIL_RECORDING_STATE.RECORDING;
   recording.origin = String(origin || '').trim();
   recording.lastStopReason = '';
+  recording.error = '';
   pushMailRecordingTransition(recording, 'state:recording');
   setMailRecordingDomState(context);
+  if (pendingDraftPromptCapture) {
+    void startMailRecordingMediaCapture(context, token).catch((err) => {
+      if (recording.captureToken !== token) {
+        return;
+      }
+      const pending = pendingDraftPromptCapture;
+      recording.state = MAIL_RECORDING_STATE.IDLE;
+      recording.origin = '';
+      recording.stopRequested = false;
+      recording.lastStopReason = 'capture_error';
+      recording.error = `Recording failed: ${String(err?.message || err || 'capture failed')}`;
+      pushMailRecordingTransition(recording, 'stop:capture_error');
+      pushMailRecordingTransition(recording, 'state:idle');
+      stopMailRecordingMedia(recording);
+      setMailRecordingDomState(context);
+      if (pending) {
+        setMailAssistStatus(
+          pending.context,
+          pending.row,
+          pending.inDetail,
+          `${recording.error}. Retry recording or type a prompt.`,
+          'warning',
+        );
+      }
+    });
+  }
   return true;
 }
 
@@ -1109,10 +1379,16 @@ function stopMailRecording(context, reason) {
   recording.state = MAIL_RECORDING_STATE.IDLE;
   recording.origin = '';
   recording.holdPointerId = null;
+  recording.stopRequested = true;
   recording.lastStopReason = String(reason || 'stop').trim() || 'stop';
   pushMailRecordingTransition(recording, `stop:${recording.lastStopReason}`);
   pushMailRecordingTransition(recording, 'state:idle');
   setMailRecordingDomState(context);
+  if (pendingDraftPromptCapture) {
+    void transcribePendingDraftPrompt(context, recording.captureToken);
+  } else {
+    stopMailRecordingMedia(recording);
+  }
   return true;
 }
 
@@ -1258,12 +1534,46 @@ function cancelPendingDraftPromptCapture(message) {
   return true;
 }
 
-function submitPendingDraftPromptCapture() {
-  if (!pendingDraftPromptCapture) return false;
-  const pending = pendingDraftPromptCapture;
+function getDraftPromptControls() {
   const panel = document.querySelector('[data-mail-draft-panel]');
   const promptInput = panel ? panel.querySelector('[data-mail-draft-prompt]') : null;
   const generateBtn = panel ? panel.querySelector('button[data-mail-action="draft-generate"]') : null;
+  return { panel, promptInput, generateBtn };
+}
+
+function resolvePendingDraftPromptCapture(promptText, sourceLabel, expectedPending = null) {
+  if (!pendingDraftPromptCapture) return false;
+  if (expectedPending && pendingDraftPromptCapture !== expectedPending) return false;
+  const pending = pendingDraftPromptCapture;
+  const normalized = String(promptText || '').trim();
+  if (!normalized) {
+    setMailAssistStatus(pending.context, pending.row, pending.inDetail, 'Speech transcript was empty. Retry recording or type a prompt.', 'warning');
+    return false;
+  }
+  const { promptInput, generateBtn } = getDraftPromptControls();
+  if (promptInput) {
+    promptInput.value = normalized;
+    promptInput.disabled = true;
+  }
+  if (generateBtn) {
+    generateBtn.disabled = true;
+  }
+  pendingDraftPromptCapture = null;
+  pending.resolve(normalized);
+  setMailAssistStatus(
+    pending.context,
+    pending.row,
+    pending.inDetail,
+    sourceLabel || 'Prompt captured. Generating draft...',
+    'info',
+  );
+  return true;
+}
+
+function submitPendingDraftPromptCapture() {
+  if (!pendingDraftPromptCapture) return false;
+  const pending = pendingDraftPromptCapture;
+  const { promptInput, generateBtn } = getDraftPromptControls();
   const promptText = String(promptInput?.value || '').trim();
   if (!promptText) {
     setMailAssistStatus(pending.context, pending.row, pending.inDetail, 'Enter a prompt before generating.', 'warning');
@@ -1278,9 +1588,7 @@ function submitPendingDraftPromptCapture() {
   if (generateBtn) {
     generateBtn.disabled = true;
   }
-  pendingDraftPromptCapture = null;
-  pending.resolve(promptText);
-  return true;
+  return resolvePendingDraftPromptCapture(promptText, 'Prompt captured. Generating draft...');
 }
 
 function waitForDraftPromptCapture(context, row, inDetail, messageID, actionId) {
@@ -1292,7 +1600,7 @@ function waitForDraftPromptCapture(context, row, inDetail, messageID, actionId) 
     promptDisabled: false,
     generateDisabled: false,
   });
-  setMailAssistStatus(context, row, inDetail, 'Add a prompt, then choose Generate.', 'info');
+  setMailAssistStatus(context, row, inDetail, 'Add a prompt or record voice input, then generate.', 'info');
   return new Promise((resolve, reject) => {
     pendingDraftPromptCapture = {
       resolve,

@@ -61,6 +61,84 @@ async function mockCapabilities(page: Page, provider = 'gmail') {
   });
 }
 
+async function mockMicrophoneCapture(page: Page, chunkText = 'voice sample') {
+  await page.evaluate((payload) => {
+    const fakeStream = {
+      getTracks() {
+        return [{ stop() {} }];
+      },
+    };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        async getUserMedia() {
+          return fakeStream;
+        },
+      },
+    });
+
+    class FakeMediaRecorder {
+      static isTypeSupported() {
+        return true;
+      }
+
+      constructor(stream, options = {}) {
+        this.stream = stream;
+        this.state = 'inactive';
+        this.mimeType = options.mimeType || 'audio/webm';
+        this._listeners = new Map();
+      }
+
+      addEventListener(type, cb) {
+        if (!this._listeners.has(type)) {
+          this._listeners.set(type, []);
+        }
+        this._listeners.get(type).push(cb);
+      }
+
+      removeEventListener(type, cb) {
+        const list = this._listeners.get(type);
+        if (!list) return;
+        this._listeners.set(type, list.filter((fn) => fn !== cb));
+      }
+
+      _emit(type, ev) {
+        const list = this._listeners.get(type) || [];
+        for (const fn of list) {
+          fn(ev);
+        }
+      }
+
+      start() {
+        this.state = 'recording';
+      }
+
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        queueMicrotask(() => {
+          const blob = new Blob([payload], { type: this.mimeType });
+          const dataEvent = { data: blob };
+          this._emit('dataavailable', dataEvent);
+          if (typeof this.ondataavailable === 'function') {
+            this.ondataavailable(dataEvent);
+          }
+          this._emit('stop', {});
+          if (typeof this.onstop === 'function') {
+            this.onstop({});
+          }
+        });
+      }
+    }
+
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      writable: true,
+      value: FakeMediaRecorder,
+    });
+  }, chunkText);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/tests/playwright/harness.html');
 });
@@ -681,6 +759,105 @@ test('keyboardless flow can complete full recording cycle via global button', as
   await trigger.click();
   await expect(canvasText).toHaveAttribute('data-mail-recording-state', 'idle');
   await expect(page.locator('[data-mail-record-indicator]')).toContainText('Ready (toggle mode)');
+});
+
+test('recording stop sends STT transcript into draft reply pipeline', async ({ page }) => {
+  const sttCalls: Array<Record<string, unknown>> = [];
+  const draftCalls: Array<Record<string, unknown>> = [];
+  const transcript = 'Please confirm delivery by Friday.';
+
+  await mockCapabilities(page);
+  await mockMicrophoneCapture(page, 'voice-bytes');
+
+  await page.route('**/api/mail/stt', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    sttCalls.push(body);
+    await route.fulfill({
+      json: {
+        text: transcript,
+        language: 'en',
+        language_probability: 0.98,
+        source: 'helpy_stt',
+        attempts: 1,
+      },
+    });
+  });
+
+  await page.route('**/api/mail/draft-reply', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    draftCalls.push(body);
+    await route.fulfill({
+      json: {
+        source: 'llm',
+        draft_text: `Voice draft for ${body.message_id}`,
+      },
+    });
+  });
+
+  await renderMail(page, 'gmail', [
+    { id: 'm23', date: '2026-02-20T13:00:00Z', sender: 'voice@example.com', subject: 'Voice path' },
+  ]);
+
+  await page.click('tr[data-message-id="m23"] button[data-mail-action="draft-reply"]');
+  await expect.poll(async () => page.locator('#canvas-text').getAttribute('data-mail-assist-state')).toBe('capturing');
+
+  await page.click('button[data-mail-record-mode="toggle"]');
+  const trigger = page.locator('button[data-mail-record-action="trigger"]');
+  await trigger.click();
+  await expect(page.locator('#canvas-text')).toHaveAttribute('data-mail-recording-state', 'recording');
+  await trigger.click();
+  await expect(page.locator('#canvas-text')).toHaveAttribute('data-mail-recording-state', 'idle');
+
+  await expect.poll(() => sttCalls.length).toBe(1);
+  await expect.poll(() => draftCalls.length).toBe(1);
+  expect(String(sttCalls[0]?.audio_base64 || '')).not.toBe('');
+  expect(draftCalls[0]?.selection_text).toBe(transcript);
+  await expect(page.locator('[data-mail-draft-panel] [data-mail-draft-text]')).toHaveValue(/Voice draft for m23/);
+  await expect(page.locator('tr[data-message-id="m23"] [data-mail-row-status]')).toContainText('Draft ready');
+});
+
+test('recording STT failure remains recoverable via manual prompt retry', async ({ page }) => {
+  let draftCalls = 0;
+
+  await mockCapabilities(page);
+  await mockMicrophoneCapture(page, 'voice-bytes');
+
+  await page.route('**/api/mail/stt', async (route) => {
+    await route.fulfill({
+      status: 502,
+      body: 'upstream unavailable',
+    });
+  });
+
+  await page.route('**/api/mail/draft-reply', async (route) => {
+    draftCalls += 1;
+    const body = JSON.parse(route.request().postData() || '{}');
+    await route.fulfill({
+      json: {
+        source: 'llm',
+        draft_text: `Manual fallback for ${body.message_id}`,
+      },
+    });
+  });
+
+  await renderMail(page, 'gmail', [
+    { id: 'm24', date: '2026-02-20T13:30:00Z', sender: 'retry@example.com', subject: 'Retry path' },
+  ]);
+
+  await page.click('tr[data-message-id="m24"] button[data-mail-action="draft-reply"]');
+  await page.click('button[data-mail-record-mode="toggle"]');
+  const trigger = page.locator('button[data-mail-record-action="trigger"]');
+  await trigger.click();
+  await trigger.click();
+
+  await expect(page.locator('tr[data-message-id="m24"] [data-mail-row-status]')).toContainText('Transcription failed');
+  expect(draftCalls).toBe(0);
+
+  await page.fill('[data-mail-draft-panel] [data-mail-draft-prompt]', 'Manual retry prompt.');
+  await page.click('[data-mail-draft-panel] button[data-mail-action="draft-generate"]');
+
+  await expect.poll(() => draftCalls).toBe(1);
+  await expect(page.locator('[data-mail-draft-panel] [data-mail-draft-text]')).toHaveValue(/Manual fallback for m24/);
 });
 
 test('unregistered assist action_id returns deterministic error without network call', async ({ page }) => {

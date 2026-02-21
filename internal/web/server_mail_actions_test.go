@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -438,6 +439,106 @@ func TestMailDraftReplyFallsBackWhenToolUnavailable(t *testing.T) {
 	}
 	if draft, _ := payload["draft_text"].(string); strings.TrimSpace(draft) == "" {
 		t.Fatalf("expected non-empty fallback draft_text")
+	}
+}
+
+func TestMailSTTProxyRetriesAndReturnsTranscript(t *testing.T) {
+	attempts := 0
+	helpy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if r.URL.Path != "/api/v0/voice/stt" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "audio/webm" {
+			t.Fatalf("expected content-type audio/webm, got %q", got)
+		}
+		if attempts == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":    "error",
+				"error":     "backend unavailable",
+				"code":      "stt.backend_failed",
+				"retryable": true,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"result": map[string]any{
+				"text":                 "reply by tomorrow",
+				"language":             "en",
+				"language_probability": 0.91,
+			},
+		})
+	}))
+	defer helpy.Close()
+
+	audioPayload := base64.StdEncoding.EncodeToString([]byte("audio-bytes"))
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), "POST", "/api/mail/stt", map[string]any{
+		"helpy_base_url": helpy.URL,
+		"mime_type":      "audio/webm",
+		"audio_base64":   audioPayload,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := payload["text"]; got != "reply by tomorrow" {
+		t.Fatalf("expected transcript text, got %#v", got)
+	}
+	if got := payload["source"]; got != "helpy_stt" {
+		t.Fatalf("expected source=helpy_stt, got %#v", got)
+	}
+	if got := payload["attempts"]; got != float64(2) {
+		t.Fatalf("expected attempts=2, got %#v", got)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected two upstream attempts, got %d", attempts)
+	}
+}
+
+func TestMailSTTRejectsMalformedAudio(t *testing.T) {
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), "POST", "/api/mail/stt", map[string]any{
+		"mime_type":    "audio/webm",
+		"audio_base64": "$$$not-base64$$$",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "valid base64") {
+		t.Fatalf("expected explicit base64 error, got %s", rr.Body.String())
+	}
+}
+
+func TestMailSTTUsesConfiguredBaseURLAndSurfacesValidation(t *testing.T) {
+	helpy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":    "error",
+			"error":     "empty audio data",
+			"code":      "stt.empty_audio",
+			"retryable": false,
+		})
+	}))
+	defer helpy.Close()
+	t.Setenv("TABULA_HELPY_STT_BASE_URL", helpy.URL)
+
+	audioPayload := base64.StdEncoding.EncodeToString([]byte("x"))
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), "POST", "/api/mail/stt", map[string]any{
+		"mime_type":    "audio/webm",
+		"audio_base64": audioPayload,
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "stt.empty_audio") {
+		t.Fatalf("expected upstream code in error message, got %s", rr.Body.String())
 	}
 }
 

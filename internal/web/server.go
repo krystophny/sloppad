@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +34,10 @@ const (
 	DaemonPort            = 9420
 	LocalSessionID        = "local"
 	defaultProducerMCPURL = "http://127.0.0.1:8090/mcp"
+	defaultHelpySTTURL    = "http://127.0.0.1:8090"
+	helpySTTPath          = "/api/v0/voice/stt"
+	maxMailSTTRetries     = 2
+	maxMailSTTAudioBytes  = 10 * 1024 * 1024
 )
 
 //go:embed static/* static/vendor/*
@@ -153,6 +159,7 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/mail/mark-read", a.handleMailMarkRead)
 	r.Post("/api/mail/action", a.handleMailAction)
 	r.Post("/api/mail/draft-reply", a.handleMailDraftReply)
+	r.Post("/api/mail/stt", a.handleMailSTT)
 
 	// ws
 	r.Get("/ws/terminal/{session_id}", a.handleTerminalWS)
@@ -795,6 +802,108 @@ func (a *App) handleMailDraftReply(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type helpySTTResult struct {
+	Text                string  `json:"text"`
+	Language            string  `json:"language"`
+	LanguageProbability float64 `json:"language_probability"`
+}
+
+type helpySTTSuccessEnvelope struct {
+	Status string         `json:"status"`
+	Result helpySTTResult `json:"result"`
+}
+
+type helpySTTErrorEnvelope struct {
+	Status    string `json:"status"`
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	Retryable bool   `json:"retryable"`
+}
+
+type helpySTTUpstreamError struct {
+	HTTPStatus int
+	Code       string
+	Retryable  bool
+	Message    string
+}
+
+func (e *helpySTTUpstreamError) Error() string {
+	if strings.TrimSpace(e.Code) != "" {
+		return fmt.Sprintf("stt request failed (%s): %s", e.Code, strings.TrimSpace(e.Message))
+	}
+	return fmt.Sprintf("stt request failed: %s", strings.TrimSpace(e.Message))
+}
+
+func (a *App) handleMailSTT(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var req struct {
+		ProducerMCPURL string `json:"producer_mcp_url"`
+		HelpyBaseURL   string `json:"helpy_base_url"`
+		MimeType       string `json:"mime_type"`
+		AudioBase64    string `json:"audio_base64"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	decodedAudio := strings.TrimSpace(req.AudioBase64)
+	if decodedAudio == "" {
+		http.Error(w, "audio_base64 is required", http.StatusBadRequest)
+		return
+	}
+	audioData, err := base64.StdEncoding.DecodeString(decodedAudio)
+	if err != nil {
+		http.Error(w, "audio_base64 must be valid base64", http.StatusBadRequest)
+		return
+	}
+	if len(audioData) == 0 {
+		http.Error(w, "audio payload is empty", http.StatusBadRequest)
+		return
+	}
+	if len(audioData) > maxMailSTTAudioBytes {
+		http.Error(w, "audio payload exceeds max size", http.StatusBadRequest)
+		return
+	}
+
+	mimeType := normalizeSTTMimeType(req.MimeType)
+	if !isAllowedSTTMimeType(mimeType) {
+		http.Error(w, "mime_type must be audio/* or application/octet-stream", http.StatusBadRequest)
+		return
+	}
+
+	helpyBaseURL, err := resolveHelpySTTBaseURL(req.HelpyBaseURL, req.ProducerMCPURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	result, attempts, err := callHelpySTTWithRetry(r.Context(), helpyBaseURL, mimeType, audioData)
+	if err != nil {
+		var upstreamErr *helpySTTUpstreamError
+		if errors.As(err, &upstreamErr) {
+			status := upstreamErr.HTTPStatus
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			http.Error(w, upstreamErr.Error(), status)
+			return
+		}
+		http.Error(w, fmt.Sprintf("stt request failed: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"text":                 strings.TrimSpace(result.Text),
+		"language":             strings.TrimSpace(result.Language),
+		"language_probability": result.LanguageProbability,
+		"source":               "helpy_stt",
+		"attempts":             attempts,
+	})
+}
+
 func tryProducerDraftReply(mcpURL, provider, messageID, subject, sender, selectionText string) (string, bool) {
 	resp, err := mcpToolsCallURL(mcpURL, "draft_reply", map[string]interface{}{
 		"provider":       provider,
@@ -901,6 +1010,179 @@ func mcpToolsCallURL(mcpURL, name string, arguments map[string]interface{}) (map
 		return nil, errors.New("MCP call failed: missing structuredContent")
 	}
 	return sc, nil
+}
+
+func normalizeSTTMimeType(raw string) string {
+	candidate := strings.TrimSpace(raw)
+	if candidate == "" {
+		return "audio/webm"
+	}
+	if i := strings.Index(candidate, ";"); i >= 0 {
+		candidate = strings.TrimSpace(candidate[:i])
+	}
+	if candidate == "" {
+		return "audio/webm"
+	}
+	return strings.ToLower(candidate)
+}
+
+func isAllowedSTTMimeType(mimeType string) bool {
+	if mimeType == "application/octet-stream" {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "audio/")
+}
+
+func resolveHelpySTTBaseURL(overrideBaseURL, producerMCPURL string) (string, error) {
+	candidate := strings.TrimSpace(overrideBaseURL)
+	if candidate == "" {
+		candidate = strings.TrimSpace(os.Getenv("TABULA_HELPY_STT_BASE_URL"))
+	}
+	if candidate == "" {
+		normalizedMCPURL, err := normalizeProducerMCPURL(producerMCPURL)
+		if err == nil {
+			if parsedMCPURL, parseErr := url.Parse(normalizedMCPURL); parseErr == nil {
+				candidate = (&url.URL{
+					Scheme: parsedMCPURL.Scheme,
+					Host:   parsedMCPURL.Host,
+				}).String()
+			}
+		}
+	}
+	if candidate == "" {
+		candidate = defaultHelpySTTURL
+	}
+	parsed, err := url.Parse(candidate)
+	if err != nil {
+		return "", fmt.Errorf("invalid helpy_base_url")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("helpy_base_url must use http or https")
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("helpy_base_url must include host")
+	}
+	if !isLoopbackHost(host) {
+		return "", fmt.Errorf("helpy_base_url host must be loopback")
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("helpy_base_url must not include query or fragment")
+	}
+	trimmedPath := strings.TrimSpace(parsed.Path)
+	if trimmedPath != "" && trimmedPath != "/" {
+		return "", fmt.Errorf("helpy_base_url must not include path")
+	}
+	parsed.Path = ""
+	return parsed.String(), nil
+}
+
+func callHelpySTTWithRetry(ctx context.Context, helpyBaseURL, mimeType string, audioData []byte) (helpySTTResult, int, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxMailSTTRetries; attempt++ {
+		result, err := callHelpySTTOnce(ctx, helpyBaseURL, mimeType, audioData)
+		if err == nil {
+			return result, attempt, nil
+		}
+		lastErr = err
+		var upstreamErr *helpySTTUpstreamError
+		if errors.As(err, &upstreamErr) {
+			if !upstreamErr.Retryable || attempt >= maxMailSTTRetries {
+				return helpySTTResult{}, attempt, err
+			}
+		} else if attempt >= maxMailSTTRetries {
+			return helpySTTResult{}, attempt, err
+		}
+		select {
+		case <-ctx.Done():
+			return helpySTTResult{}, attempt, ctx.Err()
+		case <-time.After(120 * time.Millisecond):
+		}
+	}
+	return helpySTTResult{}, maxMailSTTRetries, lastErr
+}
+
+func callHelpySTTOnce(ctx context.Context, helpyBaseURL, mimeType string, audioData []byte) (helpySTTResult, error) {
+	body := bytes.NewReader(audioData)
+	endpoint := strings.TrimRight(helpyBaseURL, "/") + helpySTTPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return helpySTTResult{}, err
+	}
+	req.Header.Set("Content-Type", mimeType)
+
+	resp, err := (&http.Client{Timeout: 25 * time.Second}).Do(req)
+	if err != nil {
+		return helpySTTResult{}, &helpySTTUpstreamError{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "stt.upstream_unreachable",
+			Retryable:  true,
+			Message:    err.Error(),
+		}
+	}
+	defer resp.Body.Close()
+
+	rawBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return helpySTTResult{}, &helpySTTUpstreamError{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "stt.upstream_read_failed",
+			Retryable:  true,
+			Message:    err.Error(),
+		}
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		parsedErr := helpySTTUpstreamError{
+			HTTPStatus: resp.StatusCode,
+			Retryable:  resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500,
+			Message:    strings.TrimSpace(string(rawBody)),
+		}
+		var envelope helpySTTErrorEnvelope
+		if err := json.Unmarshal(rawBody, &envelope); err == nil {
+			if strings.TrimSpace(envelope.Code) != "" {
+				parsedErr.Code = strings.TrimSpace(envelope.Code)
+			}
+			if strings.TrimSpace(envelope.Error) != "" {
+				parsedErr.Message = strings.TrimSpace(envelope.Error)
+			}
+			if envelope.Retryable {
+				parsedErr.Retryable = true
+			}
+		}
+		if parsedErr.Message == "" {
+			parsedErr.Message = http.StatusText(resp.StatusCode)
+		}
+		return helpySTTResult{}, &parsedErr
+	}
+
+	var success helpySTTSuccessEnvelope
+	if err := json.Unmarshal(rawBody, &success); err != nil {
+		return helpySTTResult{}, &helpySTTUpstreamError{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "stt.invalid_response",
+			Retryable:  true,
+			Message:    "invalid JSON in STT response",
+		}
+	}
+	if !strings.EqualFold(strings.TrimSpace(success.Status), "ok") {
+		return helpySTTResult{}, &helpySTTUpstreamError{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "stt.invalid_status",
+			Retryable:  true,
+			Message:    fmt.Sprintf("unexpected status %q", strings.TrimSpace(success.Status)),
+		}
+	}
+	success.Result.Text = strings.TrimSpace(success.Result.Text)
+	if success.Result.Text == "" {
+		return helpySTTResult{}, &helpySTTUpstreamError{
+			HTTPStatus: http.StatusBadGateway,
+			Code:       "stt.empty_transcript",
+			Retryable:  false,
+			Message:    "upstream STT returned empty transcript",
+		}
+	}
+	return success.Result, nil
 }
 
 func normalizeProducerMCPURL(raw string) (string, error) {
