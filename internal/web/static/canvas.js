@@ -2891,7 +2891,7 @@ function setupTextSelection(eventId) {
     if (!(target instanceof Element)) return;
     if (!e.text.contains(target)) return;
     if (target.closest('[data-review-popover]')) return;
-    if (target.closest('button,input,textarea,select,a,[contenteditable="true"]')) return;
+    if (target.closest('button,input,textarea,select,[contenteditable="true"]')) return;
     ev.preventDefault();
     openReviewCommentPopover(eventId, {
       source: 'point',

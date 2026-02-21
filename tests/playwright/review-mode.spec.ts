@@ -182,6 +182,26 @@ test('right-click inline comment popover submits a comment_point draft mark', as
   expect(Number((markSet.target as any).start_offset)).toBeGreaterThanOrEqual(0);
 });
 
+test('right-click on markdown link text still opens review comment popover', async ({ page }) => {
+  await renderArtifact(
+    page,
+    plainTextEvent('evt-comment-link', '# Notes\nReview [linked phrase](https://example.com/item) in-place'),
+  );
+  await page.locator('#canvas-text a').first().click({ button: 'right' });
+
+  const popover = page.locator('[data-review-popover="true"]');
+  await expect(popover).toBeVisible();
+  await popover.locator('input').fill('Annotate link text directly.');
+  await popover.locator('button[type="submit"]').click();
+  await expect(popover).toHaveCount(0);
+
+  const markSet = await waitForLastMessageOfKind(page, 'mark_set');
+  expect(markSet.artifact_id).toBe('evt-comment-link');
+  expect(markSet.intent).toBe('draft');
+  expect(markSet.type).toBe('comment_point');
+  expect(markSet.comment).toBe('Annotate link text directly.');
+});
+
 test('highlight selection popover submits with Enter key as a highlight draft mark', async ({ page }) => {
   await renderArtifact(page, plainTextEvent('evt-highlight-1', '# Notes\nHighlight this sentence now'));
   await selectTextFromSelector(page, '#canvas-text');
