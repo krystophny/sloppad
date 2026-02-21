@@ -46,6 +46,16 @@ function imageEvent(eventID: string) {
   };
 }
 
+function pdfEvent(eventID: string, path = 'missing.pdf') {
+  return {
+    kind: 'pdf_artifact',
+    event_id: eventID,
+    title: 'PDF',
+    path,
+    page: 0,
+  };
+}
+
 async function renderArtifact(page: Page, event: Record<string, unknown>) {
   await page.waitForFunction(() => typeof (window as any).renderHarnessArtifact === 'function');
   await page.evaluate((payload) => {
@@ -477,6 +487,45 @@ test('hovering an existing annotation shows pointer cursor', async ({ page }) =>
       return root ? getComputedStyle(root).cursor : '';
     });
   }).not.toBe('pointer');
+});
+
+test('pdf artifacts render without iframe using object surface', async ({ page }) => {
+  await renderArtifact(page, pdfEvent('evt-pdf-render'));
+
+  await expect(page.locator('#canvas-pdf iframe')).toHaveCount(0);
+  await expect(page.locator('#canvas-pdf .canvas-pdf-object')).toHaveCount(1);
+  await expect(page.locator('#canvas-pdf .canvas-pdf-hit-layer')).toHaveCount(1);
+
+  const dataAttr = await page.locator('#canvas-pdf .canvas-pdf-object').evaluate((el) => {
+    return (el as HTMLObjectElement).data || '';
+  });
+  expect(dataAttr).toContain('/api/files/');
+  expect(dataAttr).toContain('missing.pdf');
+});
+
+test('pdf point comment click emits mark_set with pdf_point target', async ({ page }) => {
+  await renderArtifact(page, pdfEvent('evt-pdf-mark'));
+  const selectedMarkType = await page.evaluate(() => {
+    const markType = document.getElementById('canvas-mark-type') as HTMLSelectElement | null;
+    const markComment = document.getElementById('canvas-mark-comment') as HTMLInputElement | null;
+    if (markType) markType.value = 'comment_point';
+    if (markComment) markComment.value = 'pdf-point-note';
+    return markType?.value || '';
+  });
+  expect(selectedMarkType).toBe('comment_point');
+  const hitLayer = page.locator('#canvas-pdf .canvas-pdf-hit-layer');
+  await expect(hitLayer).toHaveCount(1);
+  await hitLayer.click({ position: { x: 120, y: 140 } });
+
+  const markSet = await waitForLastMessageOfKind(page, 'mark_set');
+  expect(markSet.artifact_id).toBe('evt-pdf-mark');
+  expect(markSet.intent).toBe('draft');
+  expect(markSet.type).toBe('comment_point');
+  expect(markSet.target_kind).toBe('pdf_point');
+  expect(markSet.comment).toBe('pdf-point-note');
+  expect(Number((markSet.target as any).page)).toBe(0);
+
+  await expect(page.locator('#canvas-pdf .canvas-mark-comment_point')).toHaveCount(1);
 });
 
 test('popover opened near viewport edge stays within visible text canvas bounds', async ({ page }) => {

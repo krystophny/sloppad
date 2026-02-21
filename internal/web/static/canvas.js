@@ -149,8 +149,6 @@ const mailAssistActionRegistry = new Map();
 const DRAFT_PROMPT_CANCELLED_CODE = 'draft_prompt_cancelled';
 let pendingDraftPromptCapture = null;
 const POINT_COMMENT_MARK_SIZE_PX = 16;
-let activePdfObjectURL = '';
-let activePdfRenderSeq = 0;
 
 function getEls() {
   if (!els.empty) {
@@ -192,16 +190,6 @@ function hideAll() {
   e.text.style.display = 'none';
   e.image.style.display = 'none';
   e.pdf.style.display = 'none';
-}
-
-function revokeActivePdfObjectURL() {
-  if (!activePdfObjectURL) return;
-  try {
-    URL.revokeObjectURL(activePdfObjectURL);
-  } catch (_) {
-    // ignore revoke errors
-  }
-  activePdfObjectURL = '';
 }
 
 function ensureTextOverlay() {
@@ -3413,45 +3401,29 @@ function setupPdfOverlay() {
   hitRoot.addEventListener('mouseleave', hoverLeaveHandler);
 }
 
-async function renderPdfSurface(event) {
+function renderPdfSurface(event) {
   const e = getEls();
-  const seq = ++activePdfRenderSeq;
   const pdfState = (window._tabulaApp || {}).getState ? window._tabulaApp.getState() : {};
   const pdfSid = pdfState.sessionId || '';
   const pdfURL = `/api/files/${encodeURIComponent(pdfSid)}/${encodeURIComponent(event.path)}`;
-  revokeActivePdfObjectURL();
   e.pdf.innerHTML = '';
 
   const surface = document.createElement('div');
   surface.className = 'canvas-pdf-surface';
-  const embed = document.createElement('embed');
-  embed.type = 'application/pdf';
-  embed.className = 'canvas-pdf-embed';
+  const objectEl = document.createElement('object');
+  objectEl.className = 'canvas-pdf-object';
+  objectEl.type = 'application/pdf';
+  objectEl.data = pdfURL;
+  const fallback = document.createElement('div');
+  fallback.className = 'canvas-pdf-fallback';
+  fallback.innerHTML = `PDF preview unavailable. <a href="${pdfURL}" target="_blank" rel="noopener noreferrer">Open PDF</a>`;
   const hitLayer = document.createElement('div');
   hitLayer.className = 'canvas-pdf-hit-layer';
-  surface.appendChild(embed);
+  objectEl.appendChild(fallback);
+  surface.appendChild(objectEl);
   surface.appendChild(hitLayer);
   e.pdf.appendChild(surface);
   e.pdf._pdfHitLayer = hitLayer;
-
-  try {
-    const response = await fetch(pdfURL);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const blob = await response.blob();
-    if (seq !== activePdfRenderSeq) {
-      return;
-    }
-    const objectURL = URL.createObjectURL(blob);
-    activePdfObjectURL = objectURL;
-    embed.src = objectURL;
-  } catch (_) {
-    if (seq !== activePdfRenderSeq) {
-      return;
-    }
-    embed.src = pdfURL;
-  }
 }
 
 function clearPdfMarkers() {
@@ -3534,7 +3506,6 @@ export function clearCanvas() {
   activePdfEvent = null;
   draftMark = null;
   submittedDraftMarks = [];
-  revokeActivePdfObjectURL();
   clearOverlay();
 }
 
