@@ -9,6 +9,7 @@ Core paradigm:
 - Commit changes through review workflows instead of hidden auto-apply.
 
 License: MIT (`LICENSE`)
+Risk notice: see [`DISCLAIMER.md`](DISCLAIMER.md)
 
 ## Start Here
 
@@ -18,8 +19,8 @@ License: MIT (`LICENSE`)
 - **HTTP/MCP interface inventory**: [`docs/interfaces.md`](docs/interfaces.md)
 - **Integrated handoff protocol spec**: [`docs/handoff-protocol/README.md`](docs/handoff-protocol/README.md)
 - **System architecture**: [`docs/architecture.md`](docs/architecture.md)
-- **Next release notes (v0.0.3)**: [`docs/release-v0.0.3.md`](docs/release-v0.0.3.md)
-- **Published release (v0.0.2)**: [`docs/release-v0.0.2.md`](docs/release-v0.0.2.md)
+- **Published release (v0.0.4)**: [`docs/release-v0.0.4.md`](docs/release-v0.0.4.md)
+- **Previous release (v0.0.3)**: [`docs/release-v0.0.3.md`](docs/release-v0.0.3.md)
 - **Published baseline (v0.0.1)**: [`docs/release-v0.0.1.md`](docs/release-v0.0.1.md)
 
 ## Install
