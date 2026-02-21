@@ -155,6 +155,10 @@ const mailAssistActionRegistry = new Map();
 const DRAFT_PROMPT_CANCELLED_CODE = 'draft_prompt_cancelled';
 let pendingDraftPromptCapture = null;
 const POINT_COMMENT_MARK_SIZE_PX = 16;
+const MATH_DELIM_INLINE_OPEN = '@@TABULA_MATH_INLINE_OPEN@@';
+const MATH_DELIM_INLINE_CLOSE = '@@TABULA_MATH_INLINE_CLOSE@@';
+const MATH_DELIM_DISPLAY_OPEN = '@@TABULA_MATH_DISPLAY_OPEN@@';
+const MATH_DELIM_DISPLAY_CLOSE = '@@TABULA_MATH_DISPLAY_CLOSE@@';
 
 function getEls() {
   if (!els.empty) {
@@ -188,6 +192,23 @@ function sanitizeHtml(html) {
     }
   });
   return doc.body.innerHTML;
+}
+
+function preserveMathDelimiters(markdownSource) {
+  const src = String(markdownSource || '');
+  return src
+    .replace(/\\\(/g, MATH_DELIM_INLINE_OPEN)
+    .replace(/\\\)/g, MATH_DELIM_INLINE_CLOSE)
+    .replace(/\\\[/g, MATH_DELIM_DISPLAY_OPEN)
+    .replace(/\\\]/g, MATH_DELIM_DISPLAY_CLOSE);
+}
+
+function restoreMathDelimiters(renderedHtml) {
+  return String(renderedHtml || '')
+    .replaceAll(MATH_DELIM_INLINE_OPEN, '\\(')
+    .replaceAll(MATH_DELIM_INLINE_CLOSE, '\\)')
+    .replaceAll(MATH_DELIM_DISPLAY_OPEN, '\\[')
+    .replaceAll(MATH_DELIM_DISPLAY_CLOSE, '\\]');
 }
 
 function typesetMarkdownMath(root, attempt = 0) {
@@ -4093,7 +4114,9 @@ export function renderCanvas(event) {
       return;
     }
     activeMailContext = null;
-    e.text.innerHTML = sanitizeHtml(marked.parse(event.text || ''));
+    const markdownWithMathSentinels = preserveMathDelimiters(event.text || '');
+    const renderedMarkdownHtml = marked.parse(markdownWithMathSentinels);
+    e.text.innerHTML = restoreMathDelimiters(sanitizeHtml(renderedMarkdownHtml));
     typesetMarkdownMath(e.text);
     setupTextSelection(event.event_id);
     renderDraftOverlay();
