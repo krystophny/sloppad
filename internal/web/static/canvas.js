@@ -261,6 +261,49 @@ function clearSubmittedDraftMarksForEvent(eventId) {
   submittedDraftMarks = submittedDraftMarks.filter((mark) => mark.event_id !== eventId);
 }
 
+function markArea(mark) {
+  if (!mark || !Array.isArray(mark.rects)) return Number.POSITIVE_INFINITY;
+  let total = 0;
+  for (const rect of mark.rects) {
+    if (!Array.isArray(rect) || rect.length !== 4) continue;
+    const width = Math.max(1, Number(rect[2]) || 0);
+    const height = Math.max(1, Number(rect[3]) || 0);
+    total += width * height;
+  }
+  return total || Number.POSITIVE_INFINITY;
+}
+
+function findSubmittedMarkAtPoint(root, eventId, clientX, clientY) {
+  if (!root || !eventId) return null;
+  const rootRect = root.getBoundingClientRect();
+  const x = clientX - rootRect.left + root.scrollLeft;
+  const y = clientY - rootRect.top + root.scrollTop;
+  const candidates = [];
+  for (const mark of submittedDraftMarks) {
+    if (!mark || mark.event_id !== eventId || !Array.isArray(mark.rects)) continue;
+    for (const rect of mark.rects) {
+      if (!Array.isArray(rect) || rect.length !== 4) continue;
+      const rx = Number(rect[0]) || 0;
+      const ry = Number(rect[1]) || 0;
+      const rw = Math.max(1, Number(rect[2]) || 0);
+      const rh = Math.max(1, Number(rect[3]) || 0);
+      if (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh) {
+        candidates.push(mark);
+        break;
+      }
+    }
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => {
+    const aPoint = a.type === 'comment_point';
+    const bPoint = b.type === 'comment_point';
+    if (aPoint && !bPoint) return -1;
+    if (!aPoint && bPoint) return 1;
+    return markArea(a) - markArea(b);
+  });
+  return candidates[0];
+}
+
 function targetFromExistingMark(mark) {
   if (!mark || !Array.isArray(mark.rects) || !mark.rects.length) return null;
   const anchor = mark.rects[mark.rects.length - 1];
@@ -328,15 +371,6 @@ function renderDraftOverlay() {
         if (mark.comment) {
           el.title = mark.comment;
         }
-        el.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          if (!activeTextEventId) return;
-          openReviewCommentPopover(activeTextEventId, {
-            source: 'existing',
-            existingMark: mark,
-          });
-        });
       }
       overlay.appendChild(el);
     }
@@ -767,6 +801,10 @@ function clearSelectionInteractionHandlers() {
   if (e.text._reviewContextMenuHandler) {
     e.text.removeEventListener('contextmenu', e.text._reviewContextMenuHandler);
     e.text._reviewContextMenuHandler = null;
+  }
+  if (e.text._reviewExistingMarkClickHandler) {
+    e.text.removeEventListener('click', e.text._reviewExistingMarkClickHandler);
+    e.text._reviewExistingMarkClickHandler = null;
   }
 }
 
@@ -3044,6 +3082,29 @@ function setupTextSelection(eventId) {
   };
   e.text._reviewContextMenuHandler = onContextMenu;
   e.text.addEventListener('contextmenu', onContextMenu);
+
+  const onExistingMarkClick = (ev) => {
+    if (activeTextEventId !== eventId) return;
+    if (ev.button !== 0) return;
+    if (e.text._reviewPopoverEl) return;
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('[data-review-popover]')) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && isSelectionInside(e.text, selection)) {
+      return;
+    }
+    const hit = findSubmittedMarkAtPoint(e.text, eventId, ev.clientX, ev.clientY);
+    if (!hit) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openReviewCommentPopover(eventId, {
+      source: 'existing',
+      existingMark: hit,
+    });
+  };
+  e.text._reviewExistingMarkClickHandler = onExistingMarkClick;
+  e.text.addEventListener('click', onExistingMarkClick);
 
   if (e.text._scrollHandler) {
     e.text.removeEventListener('scroll', e.text._scrollHandler);

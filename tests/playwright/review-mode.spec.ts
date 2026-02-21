@@ -124,6 +124,23 @@ async function countOverlayMarks(page: Page, markType: string): Promise<number> 
   }, markType);
 }
 
+async function clickFirstOverlayMark(page: Page, markType: string) {
+  const point = await page.evaluate((type) => {
+    const el = document.querySelector(`.canvas-mark-overlay .canvas-mark-${type}`);
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return null;
+    return {
+      x: rect.left + Math.min(rect.width - 1, Math.max(1, rect.width / 2)),
+      y: rect.top + Math.min(rect.height - 1, Math.max(1, rect.height / 2)),
+    };
+  }, markType);
+  if (!point) {
+    throw new Error(`unable to locate overlay mark for ${markType}`);
+  }
+  await page.mouse.click(point.x, point.y);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/tests/playwright/harness.html');
   await clearHarnessMessages(page);
@@ -355,7 +372,7 @@ test('clicking an existing highlight reopens its comment popover with prior text
   await expect(popover).toHaveCount(0);
   await expect.poll(async () => countOverlayMarks(page, 'highlight')).toBeGreaterThan(0);
 
-  await page.locator('.canvas-mark-overlay .canvas-mark-highlight').first().click();
+  await clickFirstOverlayMark(page, 'highlight');
   popover = page.locator('[data-review-popover="true"]');
   await expect(popover).toBeVisible();
   await expect(popover.locator('input')).toHaveValue('Remember this highlight comment.');
@@ -372,7 +389,7 @@ test('clicking an existing point comment reopens its comment popover with prior 
   await expect(popover).toHaveCount(0);
   await expect.poll(async () => countOverlayMarks(page, 'comment_point')).toBeGreaterThan(0);
 
-  await page.locator('.canvas-mark-overlay .canvas-mark-comment_point').first().click();
+  await clickFirstOverlayMark(page, 'comment_point');
   popover = page.locator('[data-review-popover="true"]');
   await expect(popover).toBeVisible();
   await expect(popover.locator('input')).toHaveValue('Remember this point comment.');

@@ -298,6 +298,10 @@ body.desktop-canvas-only #panel-canvas {
   position: relative;
 }
 
+#canvas-text:focus {
+  outline: none;
+}
+
 .canvas-mark-overlay {
   position: absolute;
   inset: 0;
@@ -309,8 +313,7 @@ body.desktop-canvas-only #panel-canvas {
   position: absolute;
   border-radius: 2px;
   opacity: 0.35;
-  pointer-events: auto;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .canvas-mark-highlight { background: #ffd400; }
