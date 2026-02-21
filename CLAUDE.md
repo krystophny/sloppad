@@ -27,18 +27,19 @@ Main units:
 - `tabula-mcp.service`
 - `tabula-ptyd.service`
 - `tabula-codex-app-server.service`
+- `tabula-voxtype-mcp.service`
 - `helpy-mcp.service`
 
 Status:
 
 ```bash
-systemctl --user status tabula-web.service tabula-mcp.service tabula-ptyd.service tabula-codex-app-server.service helpy-mcp.service --no-pager -n 40
+systemctl --user status tabula-web.service tabula-mcp.service tabula-ptyd.service tabula-codex-app-server.service tabula-voxtype-mcp.service helpy-mcp.service --no-pager -n 40
 ```
 
 Restart all integration services:
 
 ```bash
-systemctl --user restart helpy-mcp.service tabula-codex-app-server.service tabula-mcp.service tabula-ptyd.service tabula-web.service
+systemctl --user restart helpy-mcp.service tabula-codex-app-server.service tabula-mcp.service tabula-ptyd.service tabula-voxtype-mcp.service tabula-web.service
 ```
 
 ## Handoff-First UI Testing Rule

@@ -1,6 +1,6 @@
 # Interfaces
 
-This document summarizes externally relevant interfaces in `v0.0.1`.
+This document summarizes externally relevant interfaces in `v0.0.5`.
 
 ## MCP HTTP Daemon
 
@@ -40,6 +40,7 @@ Mail interaction endpoints:
 - `POST /api/mail/draft-reply`
 - `POST /api/mail/draft-intent`
 - `POST /api/mail/stt`
+- `POST /api/stt/push-to-prompt`
 
 Websocket routes:
 - `GET /ws/terminal/{session_id}`
@@ -70,4 +71,4 @@ Defined in `internal/mcp/server.go`:
 
 ## Stability Statement
 
-`v0.0.1` is pre-stable; interfaces may evolve. Breaking changes are documented in release notes.
+`v0.0.5` is pre-stable; interfaces may evolve. Breaking changes are documented in release notes.

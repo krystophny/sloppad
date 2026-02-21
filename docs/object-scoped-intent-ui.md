@@ -13,9 +13,10 @@ Core constraints:
 ## Invocation Primitive
 
 Long press is the primary invoke action on an object.
+Desktop equivalents: long left-click hold at a target point, or right-click.
 
 Mode-dependent behavior:
-- Voice mode: capture spoken intent.
+- Voice mode (Push To Prompt): capture spoken intent.
 - Silent mode: open compact inline prompt.
 - Comment mode: capture annotation text/speech as draft mark.
 

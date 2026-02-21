@@ -15,6 +15,7 @@ import (
 	"github.com/krystophny/tabula/internal/protocol"
 	"github.com/krystophny/tabula/internal/ptyd"
 	"github.com/krystophny/tabula/internal/serve"
+	"github.com/krystophny/tabula/internal/voxtypemcp"
 	"github.com/krystophny/tabula/internal/web"
 	"github.com/pkg/browser"
 )
@@ -41,6 +42,8 @@ func run(args []string) int {
 		return cmdWeb(args[1:])
 	case "ptyd":
 		return cmdPtyd(args[1:])
+	case "voxtype-mcp":
+		return cmdVoxTypeMCP(args[1:])
 	case "canvas":
 		return cmdCanvas(args[1:])
 	case "run":
@@ -54,7 +57,7 @@ func run(args []string) int {
 
 func printHelp() {
 	fmt.Println("tabula <command> [flags]")
-	fmt.Println("commands: canvas schema bootstrap mcp-server serve web ptyd run")
+	fmt.Println("commands: canvas schema bootstrap mcp-server serve web ptyd voxtype-mcp run")
 }
 
 func cmdSchema() int {
@@ -181,6 +184,21 @@ func cmdPtyd(args []string) int {
 	}
 	app := ptyd.New(*dataDir)
 	if err := app.Start(*host, *port); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func cmdVoxTypeMCP(args []string) int {
+	fs := flag.NewFlagSet("voxtype-mcp", flag.ContinueOnError)
+	bind := fs.String("bind", "127.0.0.1", "bind address")
+	port := fs.Int("port", 8091, "port")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	server := voxtypemcp.NewServer(*bind, *port)
+	if err := server.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}

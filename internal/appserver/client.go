@@ -126,7 +126,7 @@ func (c *Client) SendPrompt(ctx context.Context, req PromptRequest) (*PromptResp
 			"clientInfo": map[string]interface{}{
 				"name":    "tabula-web",
 				"title":   "Tabula Web",
-				"version": "0.3.0",
+				"version": "0.0.5",
 			},
 			"capabilities": map[string]interface{}{
 				"experimentalApi": true,

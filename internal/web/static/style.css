@@ -378,6 +378,37 @@ body.desktop-canvas-only #panel-canvas {
   gap: 0.35rem;
 }
 
+.canvas-review-voice-hint {
+  position: absolute;
+  right: 0.65rem;
+  top: 0.65rem;
+  z-index: 13;
+  max-width: min(420px, calc(100% - 1.3rem));
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text);
+  font-size: 0.76rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+
+.canvas-review-voice-hint[data-tone="recording"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.canvas-review-voice-hint[data-tone="ok"] {
+  border-color: #2d8a49;
+  color: #2d8a49;
+}
+
+.canvas-review-voice-hint[data-tone="error"] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

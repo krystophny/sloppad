@@ -20,8 +20,8 @@ Risk notice: see [`DISCLAIMER.md`](DISCLAIMER.md)
 - **Integrated handoff protocol spec**: [`docs/handoff-protocol/README.md`](docs/handoff-protocol/README.md)
 - **System architecture**: [`docs/architecture.md`](docs/architecture.md)
 - **Codex app-server pivot notes**: [`docs/codex-app-server-pivot.md`](docs/codex-app-server-pivot.md)
-- **Published release (v0.0.4)**: [`docs/release-v0.0.4.md`](docs/release-v0.0.4.md)
-- **Previous release (v0.0.3)**: [`docs/release-v0.0.3.md`](docs/release-v0.0.3.md)
+- **Published release (v0.0.5)**: [`docs/release-v0.0.5.md`](docs/release-v0.0.5.md)
+- **Previous release (v0.0.4)**: [`docs/release-v0.0.4.md`](docs/release-v0.0.4.md)
 - **Published baseline (v0.0.1)**: [`docs/release-v0.0.1.md`](docs/release-v0.0.1.md)
 
 ## Install
@@ -42,6 +42,7 @@ tabula mcp-server --project-dir . --headless --no-canvas
 tabula serve --project-dir . --host 127.0.0.1 --port 9420
 tabula web --data-dir ~/.tabula-web --project-dir . --host 127.0.0.1 --port 8420 --app-server-url ws://127.0.0.1:8787
 tabula ptyd --data-dir ~/.local/share/tabula-ptyd --host 127.0.0.1 --port 9333
+tabula voxtype-mcp --bind 127.0.0.1 --port 8091
 tabula canvas
 ```
 
@@ -51,12 +52,21 @@ tabula canvas
 - MCP HTTP: `http://127.0.0.1:9420/mcp`
 - Canvas websocket: `ws://127.0.0.1:9420/ws/canvas`
 - Codex app-server websocket: `ws://127.0.0.1:8787`
+- VoxType MCP bridge: `http://127.0.0.1:8091/mcp`
 - Local browser session id: `local`
 
 Commit-triggered AI rewrite:
 - On `Commit`, Tabula now aggregates persistent review comments for the active artifact.
 - For text artifacts (`markdown/plain text`), it asks Codex app-server for a full rewritten document.
 - For PDF artifacts, it asks Codex app-server for structured review notes and renders them as a text artifact.
+
+## Push To Prompt
+
+Tabula uses the term **Push To Prompt** (coined in this project) for voice-driven intent capture, analogous to Push To Talk.  
+In `v0.0.5`, STT is routed through VoxType MCP (`/api/stt/push-to-prompt`) and no Helpy STT provider is used by Tabula.
+
+For always-on local usage, run the user `systemd` bridge service `tabula-voxtype-mcp.service`.
+It is configured to prefer daemon-backed capture mode and talks to the already-running `voxtype.service` daemon.
 
 ## Novel UI Focus (What To Evaluate First)
 

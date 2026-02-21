@@ -145,6 +145,12 @@ const MAIL_DRAFT_INTENT = Object.freeze({
   DICTATION: 'dictation',
 });
 const MAIL_DRAFT_INTENT_FALLBACK_POLICY = MAIL_DRAFT_INTENT.PROMPT;
+const REVIEW_LONG_PRESS_MS = 450;
+const REVIEW_LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+const sttActionStart = 'start';
+const sttActionAppend = 'append';
+const sttActionStop = 'stop';
+const sttActionCancel = 'cancel';
 const mailAssistActionRegistry = new Map();
 const DRAFT_PROMPT_CANCELLED_CODE = 'draft_prompt_cancelled';
 let pendingDraftPromptCapture = null;
@@ -490,6 +496,80 @@ function pointTargetFromClientPoint(root, clientX, clientY) {
   }
 }
 
+function submitPointDraftMark(eventId, target, comment, localMarkID = '') {
+  const markID = String(localMarkID || '').trim() || nextSubmittedDraftMarkID();
+  const normalizedComment = String(comment || '').trim();
+  const state = window._tabulaApp?.getState?.();
+  sendSelectionFeedback({
+    kind: 'mark_set',
+    session_id: state?.sessionId || '',
+    mark_id: markID,
+    artifact_id: eventId,
+    intent: 'draft',
+    type: 'comment_point',
+    target_kind: 'text_range',
+    target: {
+      line_start: Number(target?.lineStart || 1),
+      line_end: Number(target?.lineEnd || 1),
+      start_offset: Number(target?.startOffset || 0),
+      end_offset: Number(target?.endOffset || 0),
+      rects: Array.isArray(target?.rects) ? target.rects : [],
+    },
+    comment: normalizedComment,
+  });
+  addSubmittedDraftMark({
+    local_id: markID,
+    event_id: eventId,
+    type: 'comment_point',
+    line_start: Number(target?.lineStart || 1),
+    line_end: Number(target?.lineEnd || 1),
+    start_offset: Number(target?.startOffset || 0),
+    end_offset: Number(target?.endOffset || 0),
+    comment: normalizedComment,
+    rects: Array.isArray(target?.rects) ? target.rects : [],
+  });
+  renderDraftOverlay();
+}
+
+function showReviewVoiceHint(text, tone = 'info') {
+  const e = getEls();
+  if (!e.text) return;
+  let hint = e.text.querySelector('[data-review-voice-hint]');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'canvas-review-voice-hint';
+    hint.dataset.reviewVoiceHint = '1';
+    e.text.appendChild(hint);
+  }
+  hint.dataset.tone = tone;
+  hint.textContent = String(text || '').trim();
+}
+
+function clearReviewVoiceHint() {
+  const e = getEls();
+  if (!e.text) return;
+  const hint = e.text.querySelector('[data-review-voice-hint]');
+  if (hint && hint.parentNode) {
+    hint.parentNode.removeChild(hint);
+  }
+}
+
+function newMediaRecorder(stream) {
+  let recorder = null;
+  try {
+    const preferredType = 'audio/webm;codecs=opus';
+    if (typeof window.MediaRecorder?.isTypeSupported === 'function'
+      && window.MediaRecorder.isTypeSupported(preferredType)) {
+      recorder = new window.MediaRecorder(stream, { mimeType: preferredType });
+    } else {
+      recorder = new window.MediaRecorder(stream);
+    }
+  } catch (_) {
+    recorder = new window.MediaRecorder(stream);
+  }
+  return recorder;
+}
+
 function closeReviewCommentPopover() {
   const e = getEls();
   if (!e.text) return;
@@ -591,7 +671,9 @@ function openReviewCommentPopover(eventId, options = {}) {
   popover.setAttribute('aria-label', isExistingMark ? 'View or edit comment' : 'Add comment');
   const inputId = `review-comment-input-${Math.random().toString(36).slice(2, 8)}`;
   const submitLabel = isExistingMark ? 'Update Comment' : 'Add Comment';
-  const initialComment = isExistingMark ? String(options.existingMark?.comment || '') : '';
+  const initialComment = isExistingMark
+    ? String(options.existingMark?.comment || '')
+    : String(options.initialComment || '');
   popover.innerHTML = `
     <label class="sr-only" for="${inputId}">Comment</label>
     <input id="${inputId}" type="text" maxlength="500" placeholder="Add comment (optional)">
@@ -929,6 +1011,7 @@ function resetMailRecordingDomState() {
 
 function clearSelectionInteractionHandlers() {
   const e = getEls();
+  clearReviewVoiceHint();
   closeReviewCommentPopover();
   if (e.text) {
     e.text._suppressNextReviewOpen = false;
@@ -969,6 +1052,49 @@ function clearSelectionInteractionHandlers() {
   if (e.text._reviewHoverLeaveHandler) {
     e.text.removeEventListener('mouseleave', e.text._reviewHoverLeaveHandler);
     e.text._reviewHoverLeaveHandler = null;
+  }
+  if (e.text._reviewLongPressPointerDownHandler) {
+    e.text.removeEventListener('pointerdown', e.text._reviewLongPressPointerDownHandler);
+    e.text._reviewLongPressPointerDownHandler = null;
+  }
+  if (e.text._reviewLongPressPointerMoveHandler) {
+    window.removeEventListener('pointermove', e.text._reviewLongPressPointerMoveHandler);
+    e.text._reviewLongPressPointerMoveHandler = null;
+  }
+  if (e.text._reviewLongPressPointerUpHandler) {
+    window.removeEventListener('pointerup', e.text._reviewLongPressPointerUpHandler);
+    window.removeEventListener('pointercancel', e.text._reviewLongPressPointerUpHandler);
+    e.text._reviewLongPressPointerUpHandler = null;
+  }
+  const reviewVoiceCapture = e.text._reviewVoiceCapture;
+  if (reviewVoiceCapture) {
+    reviewVoiceCapture.cancelled = true;
+    if (reviewVoiceCapture.longPressTimer) {
+      clearTimeout(reviewVoiceCapture.longPressTimer);
+      reviewVoiceCapture.longPressTimer = null;
+    }
+    if (reviewVoiceCapture.sttSessionID) {
+      void callPushToPromptAction(null, sttActionCancel, {
+        session_id: reviewVoiceCapture.sttSessionID,
+      }).catch(() => {});
+    }
+    if (reviewVoiceCapture.mediaRecorder) {
+      try {
+        if (reviewVoiceCapture.mediaRecorder.state !== 'inactive') {
+          reviewVoiceCapture.mediaRecorder.stop();
+        }
+      } catch (_) {
+        // no-op
+      }
+    }
+    if (reviewVoiceCapture.mediaStream && typeof reviewVoiceCapture.mediaStream.getTracks === 'function') {
+      reviewVoiceCapture.mediaStream.getTracks().forEach((track) => {
+        if (track && typeof track.stop === 'function') {
+          track.stop();
+        }
+      });
+    }
+    e.text._reviewVoiceCapture = null;
   }
   const pdfHitLayer = e.pdf?._pdfHitLayer;
   if (pdfHitLayer && e.pdf._pdfClickHandler) {
@@ -1300,6 +1426,11 @@ async function callDraftReply(context, message) {
   return payload;
 }
 
+function createPushToPromptSessionID() {
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `ptp-${Date.now().toString(36)}-${rand}`;
+}
+
 function base64FromBytes(bytes) {
   if (!bytes || !bytes.length) return '';
   const chunkSize = 0x8000;
@@ -1309,6 +1440,46 @@ function base64FromBytes(bytes) {
     out += String.fromCharCode(...chunk);
   }
   return btoa(out);
+}
+
+async function callPushToPromptAction(context, action, payload = {}) {
+  const req = {
+    action,
+    ...payload,
+  };
+  const producerMCPURL = String(context?.producerMcpUrl || '').trim();
+  if (producerMCPURL) {
+    req.producer_mcp_url = producerMCPURL;
+  }
+  const customMCPURL = String(window.__TABULA_VOXTYPE_MCP_URL || '').trim();
+  if (customMCPURL) {
+    req.voxtype_mcp_url = customMCPURL;
+  }
+  const resp = await fetch('/api/stt/push-to-prompt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  let payload = {};
+  const raw = await resp.text();
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch (_) {
+      if (!resp.ok) {
+        throw new Error(raw);
+      }
+    }
+  }
+  if (!resp.ok) {
+    throw new Error(typeof payload === 'object' && payload !== null && payload.error
+      ? payload.error
+      : raw || 'push-to-prompt request failed');
+  }
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('push-to-prompt request returned invalid response');
+  }
+  return payload;
 }
 
 async function callMailSTT(context, audioBlob) {
@@ -1324,10 +1495,6 @@ async function callMailSTT(context, audioBlob) {
     mime_type: audioBlob.type || 'application/octet-stream',
     audio_base64: base64FromBytes(audioBytes),
   };
-  const customBaseURL = String(window.__TABULA_HELPY_STT_BASE_URL || '').trim();
-  if (customBaseURL) {
-    req.helpy_base_url = customBaseURL;
-  }
   const resp = await fetch('/api/mail/stt', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1417,6 +1584,12 @@ function createDefaultMailRecordingState() {
     mediaStream: null,
     chunks: [],
     mimeType: 'audio/webm',
+    captureBackend: '',
+    sttSessionID: '',
+    appendSeq: 0,
+    appendChain: Promise.resolve(),
+    startPromise: Promise.resolve(),
+    appendError: '',
     transcribing: false,
     stopRequested: false,
     error: '',
@@ -1523,12 +1696,12 @@ function recordingTriggerLabel(recording) {
     return 'Transcribing...';
   }
   if (recording.mode === MAIL_RECORDING_MODE.TOGGLE) {
-    return recording.state === MAIL_RECORDING_STATE.RECORDING ? 'Stop Recording' : 'Start Recording';
+    return recording.state === MAIL_RECORDING_STATE.RECORDING ? 'Stop Push To Prompt' : 'Start Push To Prompt';
   }
   if (recording.state === MAIL_RECORDING_STATE.RECORDING) {
-    return 'Recording... release to stop';
+    return 'Push To Prompt active... release to stop';
   }
-  return 'Hold to Record';
+  return 'Hold to Push To Prompt';
 }
 
 function setMailRecordingDomState(context) {
@@ -1541,8 +1714,8 @@ function setMailRecordingDomState(context) {
     : recording.transcribing
       ? 'Transcribing...'
       : isActive
-    ? `Recording (${recording.mode} mode)`
-    : `Ready (${recording.mode} mode)`;
+    ? `Push To Prompt (${recording.mode} mode)`
+    : `Ready for Push To Prompt (${recording.mode} mode)`;
   e.text.dataset.mailRecordingState = recording.state || MAIL_RECORDING_STATE.IDLE;
   e.text.dataset.mailRecordingMode = recording.mode || MAIL_RECORDING_MODE.HOLD;
   e.text.dataset.mailRecordingActive = isActive ? '1' : '0';
@@ -1597,12 +1770,58 @@ function stopMailRecordingMedia(recording) {
   recording.mediaRecorder = null;
   recording.mediaStream = null;
   recording.chunks = [];
+  recording.captureBackend = '';
+  recording.sttSessionID = '';
+  recording.appendSeq = 0;
+  recording.appendChain = Promise.resolve();
+  recording.startPromise = Promise.resolve();
+  recording.appendError = '';
   recording.stopRequested = false;
+}
+
+async function pushToPromptAppendChunk(context, recording, chunkBlob) {
+  if (!recording?.sttSessionID) return;
+  if (!chunkBlob || typeof chunkBlob.arrayBuffer !== 'function' || chunkBlob.size <= 0) return;
+  const bytes = new Uint8Array(await chunkBlob.arrayBuffer());
+  if (!bytes.length) return;
+  const seq = Number(recording.appendSeq || 0);
+  recording.appendSeq = seq + 1;
+  const payload = {
+    session_id: recording.sttSessionID,
+    seq,
+    audio_base64: base64FromBytes(bytes),
+  };
+  const chain = recording.appendChain || Promise.resolve();
+  recording.appendChain = chain.then(() => callPushToPromptAction(context, sttActionAppend, payload));
+  try {
+    await recording.appendChain;
+  } catch (err) {
+    recording.appendError = String(err?.message || err || 'chunk append failed');
+    throw err;
+  }
 }
 
 async function startMailRecordingMediaCapture(context, token) {
   const recording = getMailRecordingState(context);
   if (!pendingDraftPromptCapture) {
+    return;
+  }
+  recording.mediaStream = null;
+  recording.mediaRecorder = null;
+  recording.chunks = [];
+  recording.mimeType = 'audio/webm';
+  recording.captureBackend = '';
+  recording.sttSessionID = createPushToPromptSessionID();
+  recording.appendSeq = 0;
+  recording.appendChain = Promise.resolve();
+  recording.appendError = '';
+  const startResp = await callPushToPromptAction(context, sttActionStart, {
+    session_id: recording.sttSessionID,
+    mime_type: recording.mimeType,
+  });
+  const captureBackend = String(startResp?.capture_backend || '').trim().toLowerCase();
+  recording.captureBackend = captureBackend || 'buffered';
+  if (recording.captureBackend === 'daemon') {
     return;
   }
   if (!window.MediaRecorder || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
@@ -1619,27 +1838,19 @@ async function startMailRecordingMediaCapture(context, token) {
     }
     return;
   }
-  let recorder = null;
-  try {
-    const preferredType = 'audio/webm;codecs=opus';
-    if (typeof window.MediaRecorder.isTypeSupported === 'function' && window.MediaRecorder.isTypeSupported(preferredType)) {
-      recorder = new window.MediaRecorder(stream, { mimeType: preferredType });
-    } else {
-      recorder = new window.MediaRecorder(stream);
-    }
-  } catch (_) {
-    recorder = new window.MediaRecorder(stream);
-  }
+  const recorder = newMediaRecorder(stream);
   recording.mediaStream = stream;
   recording.mediaRecorder = recorder;
-  recording.chunks = [];
-  recording.mimeType = recorder.mimeType || 'audio/webm';
+  recording.mimeType = recorder.mimeType || recording.mimeType || 'audio/webm';
   recorder.addEventListener('dataavailable', (ev) => {
     if (ev?.data && ev.data.size > 0) {
       recording.chunks.push(ev.data);
+      void pushToPromptAppendChunk(context, recording, ev.data).catch(() => {
+        // appendError is set in helper; final transcription path will surface the error
+      });
     }
   });
-  recorder.start();
+  recorder.start(300);
   if (recording.stopRequested) {
     try {
       recorder.stop();
@@ -1704,14 +1915,40 @@ async function transcribePendingDraftPrompt(context, token) {
   recording.error = '';
   setMailRecordingDomState(context);
   if (isSamePending()) {
-    setMailAssistStatus(pending.context, pending.row, pending.inDetail, 'Transcribing voice input...', 'info');
+    setMailAssistStatus(pending.context, pending.row, pending.inDetail, 'Transcribing Push To Prompt input...', 'info');
   }
   try {
-    const audioBlob = await stopMailRecordingMediaAndCollectBlob(context, token);
-    if (!audioBlob || audioBlob.size <= 0) {
-      throw new Error('No audio captured. Hold to record and try again.');
+    await (recording.startPromise || Promise.resolve());
+    let stt = null;
+    if (recording.captureBackend === 'daemon') {
+      if (!recording.sttSessionID) {
+        throw new Error('No active Push To Prompt session.');
+      }
+      stt = await callPushToPromptAction(context, sttActionStop, {
+        session_id: recording.sttSessionID,
+      });
+      stopMailRecordingMedia(recording);
+    } else {
+      const audioBlob = await stopMailRecordingMediaAndCollectBlob(context, token);
+      if (!audioBlob || audioBlob.size <= 0) {
+        throw new Error('No audio captured. Hold to record and try again.');
+      }
+      try {
+        if (recording.sttSessionID) {
+          await (recording.appendChain || Promise.resolve());
+          if (recording.appendError) {
+            throw new Error(recording.appendError);
+          }
+          stt = await callPushToPromptAction(context, sttActionStop, {
+            session_id: recording.sttSessionID,
+          });
+        } else {
+          stt = await callMailSTT(context, audioBlob);
+        }
+      } catch (stopErr) {
+        stt = await callMailSTT(context, audioBlob);
+      }
     }
-    const stt = await callMailSTT(context, audioBlob);
     const transcript = String(stt?.text || '').trim();
     if (!transcript) {
       throw new Error('Speech recognizer returned empty text.');
@@ -1785,7 +2022,8 @@ function startMailRecording(context, origin) {
   pushMailRecordingTransition(recording, 'state:recording');
   setMailRecordingDomState(context);
   if (pendingDraftPromptCapture) {
-    void startMailRecordingMediaCapture(context, token).catch((err) => {
+    recording.startPromise = startMailRecordingMediaCapture(context, token);
+    void recording.startPromise.catch((err) => {
       if (recording.captureToken !== token) {
         return;
       }
@@ -1797,6 +2035,10 @@ function startMailRecording(context, origin) {
       recording.error = `Recording failed: ${String(err?.message || err || 'capture failed')}`;
       pushMailRecordingTransition(recording, 'stop:capture_error');
       pushMailRecordingTransition(recording, 'state:idle');
+      const sessionID = String(recording.sttSessionID || '').trim();
+      if (sessionID) {
+        void callPushToPromptAction(context, sttActionCancel, { session_id: sessionID }).catch(() => {});
+      }
       stopMailRecordingMedia(recording);
       setMailRecordingDomState(context);
       if (pending) {
@@ -1809,6 +2051,8 @@ function startMailRecording(context, origin) {
         );
       }
     });
+  } else {
+    recording.startPromise = Promise.resolve();
   }
   return true;
 }
@@ -1827,6 +2071,10 @@ function stopMailRecording(context, reason) {
   if (pendingDraftPromptCapture) {
     void transcribePendingDraftPrompt(context, recording.captureToken);
   } else {
+    const sessionID = String(recording.sttSessionID || '').trim();
+    if (sessionID) {
+      void callPushToPromptAction(context, sttActionCancel, { session_id: sessionID }).catch(() => {});
+    }
     stopMailRecordingMedia(recording);
   }
   return true;
@@ -2063,7 +2311,7 @@ function waitForDraftPromptCapture(context, row, inDetail, messageID, actionId) 
     promptDisabled: false,
     generateDisabled: false,
   });
-  setMailAssistStatus(context, row, inDetail, 'Add a prompt or record voice input, then generate.', 'info');
+  setMailAssistStatus(context, row, inDetail, 'Add a prompt or use Push To Prompt voice input, then generate.', 'info');
   return new Promise((resolve, reject) => {
     pendingDraftPromptCapture = {
       resolve,
@@ -2247,9 +2495,9 @@ function renderMailRecordingControls() {
         <button type="button" data-mail-record-mode="hold" aria-pressed="true">Hold</button>
         <button type="button" data-mail-record-mode="toggle" aria-pressed="false">Toggle</button>
       </div>
-      <button type="button" data-mail-record-action="trigger">Hold to Record</button>
+      <button type="button" data-mail-record-action="trigger">Hold to Push To Prompt</button>
       <button type="button" data-mail-record-action="stop" hidden disabled>Stop</button>
-      <span class="mail-record-indicator" data-mail-record-indicator>Ready (hold mode)</span>
+      <span class="mail-record-indicator" data-mail-record-indicator>Ready for Push To Prompt (hold mode)</span>
     </div>
   `;
 }
@@ -3253,6 +3501,298 @@ function setupTextSelection(eventId) {
   e.text.addEventListener('mouseup', handler);
   e.text.addEventListener('keyup', handler);
 
+  const canUseReviewVoiceCapture = () => (
+    Boolean(window.MediaRecorder)
+    && Boolean(navigator.mediaDevices)
+    && typeof navigator.mediaDevices.getUserMedia === 'function'
+  );
+
+  const isInteractiveTarget = (target) => {
+    if (!(target instanceof Element)) return true;
+    if (!e.text.contains(target)) return true;
+    if (target.closest('[data-review-popover]')) return true;
+    if (target.closest('button,input,textarea,select,[contenteditable="true"]')) return true;
+    if (target.closest('.mail-triage-root,.mail-detail-root,.mail-draft-panel,.mail-record-controls')) return true;
+    return false;
+  };
+
+  const stopReviewVoiceMedia = (capture) => {
+    if (!capture) return;
+    if (capture.mediaRecorder) {
+      try {
+        if (capture.mediaRecorder.state !== 'inactive') {
+          capture.mediaRecorder.stop();
+        }
+      } catch (_) {
+        // no-op
+      }
+    }
+    if (capture.mediaStream && typeof capture.mediaStream.getTracks === 'function') {
+      capture.mediaStream.getTracks().forEach((track) => {
+        if (track && typeof track.stop === 'function') {
+          track.stop();
+        }
+      });
+    }
+    capture.mediaRecorder = null;
+    capture.mediaStream = null;
+  };
+
+  const stopReviewVoiceMediaAndFlush = (capture) => {
+    if (!capture?.mediaRecorder) {
+      stopReviewVoiceMedia(capture);
+      return Promise.resolve();
+    }
+    const recorder = capture.mediaRecorder;
+    if (recorder.state === 'inactive') {
+      stopReviewVoiceMedia(capture);
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const onStop = () => {
+        recorder.removeEventListener('error', onError);
+        stopReviewVoiceMedia(capture);
+        resolve();
+      };
+      const onError = () => {
+        recorder.removeEventListener('stop', onStop);
+        stopReviewVoiceMedia(capture);
+        resolve();
+      };
+      recorder.addEventListener('stop', onStop, { once: true });
+      recorder.addEventListener('error', onError, { once: true });
+      try {
+        recorder.stop();
+      } catch (_) {
+        recorder.removeEventListener('stop', onStop);
+        recorder.removeEventListener('error', onError);
+        stopReviewVoiceMedia(capture);
+        resolve();
+      }
+    });
+  };
+
+  const cleanupReviewVoiceCapture = (capture, cancelRemote) => {
+    if (!capture) return;
+    if (capture.longPressTimer) {
+      clearTimeout(capture.longPressTimer);
+      capture.longPressTimer = null;
+    }
+    if (cancelRemote && capture.sttSessionID) {
+      void callPushToPromptAction(null, sttActionCancel, {
+        session_id: capture.sttSessionID,
+      }).catch(() => {});
+    }
+    stopReviewVoiceMedia(capture);
+    if (e.text._reviewVoiceCapture === capture) {
+      e.text._reviewVoiceCapture = null;
+    }
+  };
+
+  const appendReviewVoiceChunk = async (capture, chunkBlob) => {
+    if (!capture?.sttSessionID) return;
+    if (!chunkBlob || typeof chunkBlob.arrayBuffer !== 'function' || chunkBlob.size <= 0) return;
+    const bytes = new Uint8Array(await chunkBlob.arrayBuffer());
+    if (!bytes.length) return;
+    const seq = Number(capture.appendSeq || 0);
+    capture.appendSeq = seq + 1;
+    const payload = {
+      session_id: capture.sttSessionID,
+      seq,
+      audio_base64: base64FromBytes(bytes),
+    };
+    const chain = capture.appendChain || Promise.resolve();
+    capture.appendChain = chain.then(() => callPushToPromptAction(null, sttActionAppend, payload));
+    await capture.appendChain;
+  };
+
+  const beginReviewVoiceCapture = async (capture) => {
+    if (!capture || e.text._reviewVoiceCapture !== capture || capture.cancelled) return;
+    capture.longPressTimer = null;
+    capture.active = true;
+    if (e.text._reviewPopoverEl) {
+      closeReviewCommentPopover();
+    }
+    showReviewVoiceHint(
+      capture.source === 'contextmenu'
+        ? 'Recording voice note... right-click again to stop.'
+        : 'Recording voice note... release to submit.',
+      'recording',
+    );
+
+    capture.sttSessionID = createPushToPromptSessionID();
+    capture.appendSeq = 0;
+    capture.appendChain = Promise.resolve();
+    capture.appendError = '';
+    capture.captureBackend = '';
+    const startResp = await callPushToPromptAction(null, sttActionStart, {
+      session_id: capture.sttSessionID,
+      mime_type: 'audio/webm',
+    });
+    const captureBackend = String(startResp?.capture_backend || '').trim().toLowerCase();
+    capture.captureBackend = captureBackend || 'buffered';
+    if (capture.captureBackend === 'daemon') {
+      return;
+    }
+    if (!canUseReviewVoiceCapture()) {
+      throw new Error('Microphone capture is unavailable in this browser.');
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    if (e.text._reviewVoiceCapture !== capture || capture.cancelled) {
+      if (typeof stream.getTracks === 'function') {
+        stream.getTracks().forEach((track) => {
+          if (track && typeof track.stop === 'function') {
+            track.stop();
+          }
+        });
+      }
+      return;
+    }
+    const recorder = newMediaRecorder(stream);
+    capture.mediaStream = stream;
+    capture.mediaRecorder = recorder;
+    recorder.addEventListener('dataavailable', (ev) => {
+      if (!ev?.data || ev.data.size <= 0) return;
+      const chain = appendReviewVoiceChunk(capture, ev.data);
+      capture.appendChain = chain.catch((err) => {
+        capture.appendError = String(err?.message || err || 'audio chunk append failed');
+        throw err;
+      });
+      void capture.appendChain.catch(() => {});
+    });
+    recorder.start(300);
+    if (capture.stopRequested) {
+      await stopReviewVoiceMediaAndFlush(capture);
+    }
+  };
+
+  const stopAndSubmitReviewVoiceCapture = async (capture) => {
+    if (!capture || capture.stopping || capture.cancelled) return;
+    capture.stopping = true;
+    capture.stopRequested = true;
+    let stoppedRemotely = false;
+    try {
+      if (!capture.active) {
+        cleanupReviewVoiceCapture(capture, true);
+        clearReviewVoiceHint();
+        return;
+      }
+      await stopReviewVoiceMediaAndFlush(capture);
+      await (capture.appendChain || Promise.resolve());
+      if (capture.appendError) {
+        throw new Error(capture.appendError);
+      }
+      if (!capture.sttSessionID) {
+        throw new Error('missing transcription session');
+      }
+      const stt = await callPushToPromptAction(null, sttActionStop, {
+        session_id: capture.sttSessionID,
+      });
+      stoppedRemotely = true;
+      const transcript = String(stt?.text || '').trim();
+      if (!transcript) {
+        throw new Error('speech recognizer returned empty text');
+      }
+      submitPointDraftMark(eventId, capture.target, transcript);
+      showReviewVoiceHint('Voice note added to draft annotations.', 'ok');
+      window.setTimeout(() => {
+        if (!e.text._reviewVoiceCapture) {
+          clearReviewVoiceHint();
+        }
+      }, 900);
+    } catch (err) {
+      const message = String(err?.message || err || 'voice capture failed');
+      showReviewVoiceHint(`Voice capture failed: ${message}`, 'error');
+      openReviewCommentPopover(eventId, {
+        source: 'point',
+        contextmenuEvent: { clientX: capture.clientX, clientY: capture.clientY },
+      });
+    } finally {
+      cleanupReviewVoiceCapture(capture, !stoppedRemotely);
+    }
+  };
+
+  const onReviewLongPressPointerDown = (ev) => {
+    if (activeTextEventId !== eventId) return;
+    if (e.text.classList.contains('mail-artifact')) return;
+    if (!(ev.button === 0 || ev.pointerType === 'touch')) return;
+    const target = ev.target;
+    if (isInteractiveTarget(target)) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && isSelectionInside(e.text, selection)) {
+      return;
+    }
+    if (e.text._reviewVoiceCapture) return;
+    const capture = {
+      pointerId: ev.pointerId,
+      source: 'long_press',
+      clientX: ev.clientX,
+      clientY: ev.clientY,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      target: pointTargetFromClientPoint(e.text, ev.clientX, ev.clientY),
+      longPressTimer: null,
+      active: false,
+      cancelled: false,
+      stopping: false,
+      stopRequested: false,
+      mediaStream: null,
+      mediaRecorder: null,
+      sttSessionID: '',
+      appendSeq: 0,
+      appendChain: Promise.resolve(),
+      appendError: '',
+    };
+    capture.longPressTimer = window.setTimeout(() => {
+      void beginReviewVoiceCapture(capture).catch((err) => {
+        const message = String(err?.message || err || 'voice capture failed');
+        showReviewVoiceHint(`Voice capture failed: ${message}`, 'error');
+        cleanupReviewVoiceCapture(capture, true);
+      });
+    }, REVIEW_LONG_PRESS_MS);
+    e.text._reviewVoiceCapture = capture;
+  };
+
+  const onReviewLongPressPointerMove = (ev) => {
+    const capture = e.text._reviewVoiceCapture;
+    if (!capture || capture.pointerId !== ev.pointerId) return;
+    if (!capture.longPressTimer) return;
+    const dx = ev.clientX - capture.startX;
+    const dy = ev.clientY - capture.startY;
+    const distance = Math.hypot(dx, dy);
+    if (distance < REVIEW_LONG_PRESS_MOVE_TOLERANCE_PX) return;
+    capture.cancelled = true;
+    cleanupReviewVoiceCapture(capture, false);
+    clearReviewVoiceHint();
+  };
+
+  const onReviewLongPressPointerUp = (ev) => {
+    const capture = e.text._reviewVoiceCapture;
+    if (!capture) return;
+    if (capture.source !== 'contextmenu' && capture.pointerId !== ev.pointerId) return;
+    if (capture.longPressTimer) {
+      capture.cancelled = true;
+      cleanupReviewVoiceCapture(capture, false);
+      clearReviewVoiceHint();
+      return;
+    }
+    if (!capture.active) {
+      capture.cancelled = true;
+      cleanupReviewVoiceCapture(capture, false);
+      clearReviewVoiceHint();
+      return;
+    }
+    void stopAndSubmitReviewVoiceCapture(capture);
+  };
+
+  e.text._reviewLongPressPointerDownHandler = onReviewLongPressPointerDown;
+  e.text._reviewLongPressPointerMoveHandler = onReviewLongPressPointerMove;
+  e.text._reviewLongPressPointerUpHandler = onReviewLongPressPointerUp;
+  e.text.addEventListener('pointerdown', onReviewLongPressPointerDown);
+  window.addEventListener('pointermove', onReviewLongPressPointerMove);
+  window.addEventListener('pointerup', onReviewLongPressPointerUp);
+  window.addEventListener('pointercancel', onReviewLongPressPointerUp);
+
   const onContextMenu = (ev) => {
     if (activeTextEventId !== eventId) return;
     const target = ev.target;
@@ -3260,6 +3800,13 @@ function setupTextSelection(eventId) {
     if (!e.text.contains(target)) return;
     if (target.closest('[data-review-popover]')) return;
     if (target.closest('button,input,textarea,select,[contenteditable="true"]')) return;
+    const activeCapture = e.text._reviewVoiceCapture;
+    if (activeCapture?.source === 'contextmenu' && activeCapture.active) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void stopAndSubmitReviewVoiceCapture(activeCapture);
+      return;
+    }
     if (e.text._reviewPopoverEl) {
       e.text._suppressNextReviewOpen = true;
       closeReviewCommentPopover();
@@ -3288,6 +3835,36 @@ function setupTextSelection(eventId) {
       return;
     }
     ev.preventDefault();
+    const useVoice = !ev.shiftKey && !e.text.classList.contains('mail-artifact');
+    if (useVoice) {
+      const capture = {
+        pointerId: null,
+        source: 'contextmenu',
+        clientX: ev.clientX,
+        clientY: ev.clientY,
+        startX: ev.clientX,
+        startY: ev.clientY,
+        target: pointTargetFromClientPoint(e.text, ev.clientX, ev.clientY),
+        longPressTimer: null,
+        active: false,
+        cancelled: false,
+        stopping: false,
+        stopRequested: false,
+        mediaStream: null,
+        mediaRecorder: null,
+        sttSessionID: '',
+        appendSeq: 0,
+        appendChain: Promise.resolve(),
+        appendError: '',
+      };
+      e.text._reviewVoiceCapture = capture;
+      void beginReviewVoiceCapture(capture).catch((err) => {
+        const message = String(err?.message || err || 'voice capture failed');
+        showReviewVoiceHint(`Voice capture failed: ${message}`, 'error');
+        cleanupReviewVoiceCapture(capture, true);
+      });
+      return;
+    }
     openReviewCommentPopover(eventId, {
       source: 'point',
       contextmenuEvent: ev,
