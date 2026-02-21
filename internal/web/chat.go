@@ -286,6 +286,46 @@ func (a *App) runAssistantTurn(sessionID string) {
 
 	latestMessage := ""
 	latestTurnID := ""
+	persistedAssistantID := int64(0)
+	persistedAssistantText := ""
+	persistWriteFailed := false
+	persistAssistantSnapshot := func(text string) {
+		candidate := strings.TrimSpace(text)
+		if candidate == "" {
+			return
+		}
+		if persistedAssistantID == 0 {
+			storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", candidate, candidate, "markdown")
+			if storeErr != nil {
+				if !persistWriteFailed {
+					persistWriteFailed = true
+					a.broadcastChatEvent(sessionID, map[string]interface{}{
+						"type":  "error",
+						"error": storeErr.Error(),
+					})
+				}
+				return
+			}
+			persistedAssistantID = storedAssistant.ID
+			persistedAssistantText = candidate
+			return
+		}
+		if candidate == persistedAssistantText {
+			return
+		}
+		if storeErr := a.store.UpdateChatMessageContent(persistedAssistantID, candidate, candidate, "markdown"); storeErr != nil {
+			if !persistWriteFailed {
+				persistWriteFailed = true
+				a.broadcastChatEvent(sessionID, map[string]interface{}{
+					"type":  "error",
+					"error": storeErr.Error(),
+				})
+			}
+			return
+		}
+		persistedAssistantText = candidate
+	}
+
 	appResp, err := a.appServerClient.SendPromptStream(ctx, appserver.PromptRequest{
 		CWD:     a.localProjectDir,
 		Prompt:  prompt,
@@ -305,6 +345,7 @@ func (a *App) runAssistantTurn(sessionID string) {
 		case "assistant_message":
 			latestMessage = ev.Message
 			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(ev.Message)
 			payload["message"] = ev.Message
 			payload["delta"] = ev.Delta
 		case "turn_completed":
@@ -312,6 +353,7 @@ func (a *App) runAssistantTurn(sessionID string) {
 				latestMessage = ev.Message
 			}
 			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(latestMessage)
 			payload["message"] = latestMessage
 		case "error":
 			payload["error"] = ev.Error
@@ -338,13 +380,25 @@ func (a *App) runAssistantTurn(sessionID string) {
 	if assistantText == "" {
 		assistantText = "(assistant returned no content)"
 	}
-	storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
-	if storeErr != nil {
-		a.broadcastChatEvent(sessionID, map[string]interface{}{
-			"type":  "error",
-			"error": storeErr.Error(),
-		})
-		return
+	if persistedAssistantID == 0 {
+		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
+		if storeErr != nil {
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
+				"type":  "error",
+				"error": storeErr.Error(),
+			})
+			return
+		}
+		persistedAssistantID = storedAssistant.ID
+		persistedAssistantText = assistantText
+	} else if assistantText != persistedAssistantText {
+		if storeErr := a.store.UpdateChatMessageContent(persistedAssistantID, assistantText, assistantText, "markdown"); storeErr != nil {
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
+				"type":  "error",
+				"error": storeErr.Error(),
+			})
+			return
+		}
 	}
 	turnID := strings.TrimSpace(appResp.TurnID)
 	if turnID == "" {
@@ -353,7 +407,7 @@ func (a *App) runAssistantTurn(sessionID string) {
 	a.broadcastChatEvent(sessionID, map[string]interface{}{
 		"type":      "message_persisted",
 		"role":      "assistant",
-		"id":        storedAssistant.ID,
+		"id":        persistedAssistantID,
 		"turn_id":   turnID,
 		"thread_id": appResp.ThreadID,
 		"message":   assistantText,

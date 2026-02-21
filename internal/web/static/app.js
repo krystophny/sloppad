@@ -5,6 +5,7 @@ const state = {
   sessionId: 'local',
   canvasWs: null,
   chatWs: null,
+  chatWsHasConnected: false,
   chatSessionId: '',
   chatMode: 'chat',
   activeTab: 'chat',
@@ -601,7 +602,16 @@ function openChatWs() {
   state.chatWs = ws;
 
   ws.onopen = () => {
+    const isReconnect = state.chatWsHasConnected;
+    state.chatWsHasConnected = true;
     showStatus('chat connected');
+    if (isReconnect) {
+      state.pendingByTurn.clear();
+      state.pendingQueue = [];
+      void loadChatHistory().catch((err) => {
+        appendPlainMessage('system', `History sync failed: ${String(err?.message || err)}`);
+      });
+    }
   };
 
   ws.onmessage = (event) => {

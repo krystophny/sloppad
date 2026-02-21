@@ -455,6 +455,21 @@ func (s *Store) AddChatMessage(sessionID, role, contentMarkdown, contentPlain, r
 	}, nil
 }
 
+func (s *Store) UpdateChatMessageContent(id int64, contentMarkdown, contentPlain, renderFormat string) error {
+	if id <= 0 {
+		return errors.New("message id is required")
+	}
+	renderFormat = normalizeRenderFormat(renderFormat)
+	_, err := s.db.Exec(
+		`UPDATE chat_messages SET content_markdown = ?, content_plain = ?, render_format = ? WHERE id = ?`,
+		contentMarkdown,
+		contentPlain,
+		renderFormat,
+		id,
+	)
+	return err
+}
+
 func (s *Store) ListChatMessages(sessionID string, limit int) ([]ChatMessage, error) {
 	if limit <= 0 {
 		limit = 200
