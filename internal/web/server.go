@@ -910,15 +910,17 @@ func (a *App) mcpToolsCall(port int, name string, arguments map[string]interface
 }
 
 type reviewComment struct {
-	Comment     string
-	MarkType    string
-	TargetKind  string
-	LineStart   int
-	LineEnd     int
-	StartOffset int
-	EndOffset   int
-	Page        int
-	UpdatedAt   string
+	Comment       string
+	MarkType      string
+	TargetKind    string
+	LineStart     int
+	LineEnd       int
+	StartOffset   int
+	EndOffset     int
+	Page          int
+	UpdatedAt     string
+	TargetExcerpt string
+	DeleteIntent  bool
 }
 
 func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, sessionID string, tunnelPort int, requestedArtifactID string) (map[string]interface{}, error) {
@@ -1014,17 +1016,28 @@ func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, session
 		if lineEnd < lineStart {
 			lineEnd = lineStart
 		}
+		startOffset := intFromAny(target["start_offset"], 0)
+		endOffset := intFromAny(target["end_offset"], startOffset)
+		if endOffset < startOffset {
+			endOffset = startOffset
+		}
 		page := intFromAny(target["page"], 0)
+		targetExcerpt := ""
+		if kind == "text_artifact" {
+			targetExcerpt = extractTargetExcerpt(originalText, lineStart, lineEnd, startOffset, endOffset)
+		}
 		comments = append(comments, reviewComment{
-			Comment:     comment,
-			MarkType:    strings.TrimSpace(fmt.Sprint(mark["type"])),
-			TargetKind:  strings.TrimSpace(fmt.Sprint(mark["target_kind"])),
-			LineStart:   lineStart,
-			LineEnd:     lineEnd,
-			StartOffset: intFromAny(target["start_offset"], 0),
-			EndOffset:   intFromAny(target["end_offset"], 0),
-			Page:        page,
-			UpdatedAt:   strings.TrimSpace(fmt.Sprint(mark["updated_at"])),
+			Comment:       comment,
+			MarkType:      strings.TrimSpace(fmt.Sprint(mark["type"])),
+			TargetKind:    strings.TrimSpace(fmt.Sprint(mark["target_kind"])),
+			LineStart:     lineStart,
+			LineEnd:       lineEnd,
+			StartOffset:   startOffset,
+			EndOffset:     endOffset,
+			Page:          page,
+			UpdatedAt:     strings.TrimSpace(fmt.Sprint(mark["updated_at"])),
+			TargetExcerpt: targetExcerpt,
+			DeleteIntent:  isDeleteInstruction(comment),
 		})
 	}
 	if len(comments) == 0 {
@@ -1044,46 +1057,7 @@ func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, session
 		return comments[i].UpdatedAt < comments[j].UpdatedAt
 	})
 
-	workingText := originalText
-	deleteDirectivesApplied := 0
-	if kind == "text_artifact" {
-		workingText, comments, deleteDirectivesApplied = applyDeleteDirectivesToText(workingText, comments)
-	}
-
-	if len(comments) == 0 {
-		if kind == "text_artifact" && deleteDirectivesApplied > 0 {
-			showResp, err := a.mcpToolsCall(tunnelPort, "canvas_artifact_show", map[string]interface{}{
-				"session_id":       sessionID,
-				"kind":             "text",
-				"title":            title,
-				"markdown_or_text": workingText,
-				"reason":           "commit_review_delete_directive",
-			})
-			if err != nil {
-				return nil, err
-			}
-			return map[string]interface{}{
-				"enabled":                   true,
-				"applied":                   true,
-				"source":                    "deterministic_delete_directive",
-				"artifact_kind":             kind,
-				"input_artifact_id":         artifactID,
-				"output_artifact_id":        showResp["artifact_id"],
-				"comments_used":             0,
-				"delete_directives_applied": deleteDirectivesApplied,
-			}, nil
-		}
-		return map[string]interface{}{
-			"enabled":       true,
-			"applied":       false,
-			"reason":        "no_persistent_comments",
-			"artifact_id":   artifactID,
-			"marks_total":   len(rawMarks),
-			"comments_used": 0,
-		}, nil
-	}
-
-	prompt := buildArtifactRewritePrompt(kind, title, workingText, artifactPath, artifactPage, comments)
+	prompt := buildArtifactRewritePrompt(kind, title, originalText, artifactPath, artifactPage, comments)
 	rewriteCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cwd := "."
@@ -1103,23 +1077,43 @@ func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, session
 		return nil, err
 	}
 
+	threadID := appResp.ThreadID
+	turnID := appResp.TurnID
 	rewrittenText := sanitizeAppServerTextResponse(appResp.Message)
 	if strings.TrimSpace(rewrittenText) == "" {
 		return nil, errors.New("app-server returned empty rewrite result")
 	}
-	if kind == "text_artifact" && normalizeLineEndings(strings.TrimSpace(rewrittenText)) == normalizeLineEndings(strings.TrimSpace(workingText)) {
-		if deleteDirectivesApplied == 0 {
+
+	if kind == "text_artifact" {
+		if unappliedDeletes := collectUnappliedDeleteComments(comments, rewrittenText); len(unappliedDeletes) > 0 {
+			retryPrompt := buildArtifactDeleteRetryPrompt(title, rewrittenText, unappliedDeletes)
+			retryCtx, retryCancel := context.WithTimeout(ctx, 90*time.Second)
+			retryResp, retryErr := a.appServerClient.SendPrompt(retryCtx, appserver.PromptRequest{
+				CWD:    cwd,
+				Model:  a.appServerModel,
+				Prompt: retryPrompt,
+			})
+			retryCancel()
+			if retryErr == nil {
+				retryText := sanitizeAppServerTextResponse(retryResp.Message)
+				if strings.TrimSpace(retryText) != "" {
+					rewrittenText = retryText
+					threadID = retryResp.ThreadID
+					turnID = retryResp.TurnID
+				}
+			}
+		}
+		if normalizeLineEndings(strings.TrimSpace(rewrittenText)) == normalizeLineEndings(strings.TrimSpace(originalText)) {
 			return map[string]interface{}{
 				"enabled":       true,
 				"applied":       false,
 				"reason":        "unchanged",
 				"artifact_id":   artifactID,
 				"comments_used": len(comments),
-				"thread_id":     appResp.ThreadID,
-				"turn_id":       appResp.TurnID,
+				"thread_id":     threadID,
+				"turn_id":       turnID,
 			}, nil
 		}
-		rewrittenText = workingText
 	}
 
 	outputTitle := title
@@ -1142,168 +1136,122 @@ func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, session
 	}
 
 	return map[string]interface{}{
-		"enabled":                   true,
-		"applied":                   true,
-		"source":                    "codex_app_server",
-		"artifact_kind":             kind,
-		"input_artifact_id":         artifactID,
-		"output_artifact_id":        showResp["artifact_id"],
-		"comments_used":             len(comments),
-		"delete_directives_applied": deleteDirectivesApplied,
-		"thread_id":                 appResp.ThreadID,
-		"turn_id":                   appResp.TurnID,
+		"enabled":            true,
+		"applied":            true,
+		"source":             "codex_app_server",
+		"artifact_kind":      kind,
+		"input_artifact_id":  artifactID,
+		"output_artifact_id": showResp["artifact_id"],
+		"comments_used":      len(comments),
+		"thread_id":          threadID,
+		"turn_id":            turnID,
 	}, nil
 }
 
-type runeSpan struct {
-	Start int
-	End   int
-}
-
-func applyDeleteDirectivesToText(text string, comments []reviewComment) (string, []reviewComment, int) {
-	if len(comments) == 0 {
-		return text, comments, 0
-	}
-	remaining := make([]reviewComment, 0, len(comments))
-	spans := make([]runeSpan, 0, len(comments))
-	deleteCount := 0
-	for _, c := range comments {
-		if c.TargetKind != "text_range" || !isDeleteDirective(c.Comment) {
-			remaining = append(remaining, c)
-			continue
-		}
-		span, ok := runeSpanForCommentTarget(text, c)
-		if !ok || span.End <= span.Start {
-			remaining = append(remaining, c)
-			continue
-		}
-		deleteCount++
-		spans = append(spans, span)
-	}
-	if len(spans) == 0 {
-		return text, comments, 0
-	}
-	return deleteRuneSpans(text, spans), remaining, deleteCount
-}
-
-func isDeleteDirective(comment string) bool {
+func isDeleteInstruction(comment string) bool {
 	s := strings.ToLower(strings.TrimSpace(comment))
 	if s == "" {
 		return false
 	}
-	words := strings.FieldsFunc(s, func(r rune) bool {
-		switch r {
-		case ' ', '\t', '\n', '\r', ':', ';', ',', '.', '!', '?':
-			return true
-		default:
-			return false
-		}
-	})
-	if len(words) == 0 {
-		return false
-	}
-	verb := strings.TrimLeft(words[0], "/#-")
-	switch verb {
-	case "delete", "remove", "omit", "cut":
-		return true
-	default:
-		return false
-	}
+	return strings.Contains(s, "delete") ||
+		strings.Contains(s, "remove") ||
+		strings.Contains(s, "omit") ||
+		strings.Contains(s, "cut") ||
+		strings.Contains(s, "drop") ||
+		strings.Contains(s, "erase")
 }
 
-func runeSpanForCommentTarget(text string, c reviewComment) (runeSpan, bool) {
-	lines := strings.Split(text, "\n")
-	if len(lines) == 0 || c.LineStart <= 0 || c.LineEnd <= 0 {
-		return runeSpan{}, false
-	}
-	startLine := c.LineStart
-	endLine := c.LineEnd
-	if endLine < startLine {
-		startLine, endLine = endLine, startLine
-	}
-	if startLine > len(lines) {
-		return runeSpan{}, false
-	}
-	if endLine > len(lines) {
-		endLine = len(lines)
-	}
-	lineStartOffsets := make([]int, len(lines))
-	runeOffset := 0
-	for i, line := range lines {
-		lineStartOffsets[i] = runeOffset
-		runeOffset += len([]rune(line))
-		if i < len(lines)-1 {
-			runeOffset++ // newline
-		}
-	}
-	startLineLen := len([]rune(lines[startLine-1]))
-	endLineLen := len([]rune(lines[endLine-1]))
-	startCol := c.StartOffset
-	if startCol < 0 {
-		startCol = 0
-	}
-	endCol := c.EndOffset
-	if endCol < 0 {
-		endCol = 0
-	}
-	if startCol > startLineLen {
-		startCol = startLineLen
-	}
-	if c.StartOffset == 0 && c.EndOffset == 0 {
-		startCol = 0
-		endCol = endLineLen
-	} else if endCol > endLineLen {
-		endCol = endLineLen
-	}
-	start := lineStartOffsets[startLine-1] + startCol
-	end := lineStartOffsets[endLine-1] + endCol
-	if end < start {
-		start, end = end, start
-	}
-	return runeSpan{Start: start, End: end}, true
-}
-
-func deleteRuneSpans(text string, spans []runeSpan) string {
-	if len(spans) == 0 {
-		return text
-	}
-	sort.Slice(spans, func(i, j int) bool {
-		if spans[i].Start == spans[j].Start {
-			return spans[i].End < spans[j].End
-		}
-		return spans[i].Start < spans[j].Start
-	})
-	merged := make([]runeSpan, 0, len(spans))
-	for _, s := range spans {
-		if len(merged) == 0 {
-			merged = append(merged, s)
-			continue
-		}
-		last := &merged[len(merged)-1]
-		if s.Start > last.End {
-			merged = append(merged, s)
-			continue
-		}
-		if s.End > last.End {
-			last.End = s.End
-		}
-	}
+func extractTargetExcerpt(text string, lineStart, lineEnd, startOffset, endOffset int) string {
+	text = normalizeLineEndings(text)
 	runes := []rune(text)
-	for i := len(merged) - 1; i >= 0; i-- {
-		start := merged[i].Start
-		end := merged[i].End
-		if start < 0 {
-			start = 0
+	if startOffset < 0 {
+		startOffset = 0
+	}
+	if endOffset < startOffset {
+		endOffset = startOffset
+	}
+	if startOffset < len(runes) && endOffset > startOffset {
+		if endOffset > len(runes) {
+			endOffset = len(runes)
 		}
-		if end > len(runes) {
-			end = len(runes)
-		}
-		if end <= start {
+		return strings.TrimSpace(string(runes[startOffset:endOffset]))
+	}
+	if lineStart <= 0 {
+		return ""
+	}
+	if lineEnd < lineStart {
+		lineEnd = lineStart
+	}
+	lines := strings.Split(text, "\n")
+	if lineStart > len(lines) {
+		return ""
+	}
+	if lineEnd > len(lines) {
+		lineEnd = len(lines)
+	}
+	return strings.TrimSpace(strings.Join(lines[lineStart-1:lineEnd], "\n"))
+}
+
+func collectUnappliedDeleteComments(comments []reviewComment, rewrittenText string) []reviewComment {
+	rewritten := normalizeContainsText(rewrittenText)
+	if rewritten == "" {
+		return nil
+	}
+	missing := make([]reviewComment, 0, len(comments))
+	for _, c := range comments {
+		if !c.DeleteIntent {
 			continue
 		}
-		runes = append(runes[:start], runes[end:]...)
+		excerpt := normalizeContainsText(c.TargetExcerpt)
+		if len(excerpt) < 3 {
+			continue
+		}
+		if strings.Contains(rewritten, excerpt) {
+			missing = append(missing, c)
+		}
 	}
-	return string(runes)
+	return missing
+}
+
+func normalizeContainsText(s string) string {
+	s = strings.ToLower(normalizeLineEndings(strings.TrimSpace(s)))
+	return strings.Join(strings.Fields(s), " ")
+}
+
+func truncatePromptSnippet(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if maxRunes <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
+}
+
+func buildArtifactDeleteRetryPrompt(title, currentText string, missing []reviewComment) string {
+	var b strings.Builder
+	b.WriteString("You are correcting a revised document.\n")
+	b.WriteString("Required deletions were missed in the previous output.\n")
+	b.WriteString("Delete each target excerpt from the draft and return only the full corrected document.\n")
+	b.WriteString("No preface. No explanations. No code fences.\n")
+	if strings.TrimSpace(title) != "" {
+		fmt.Fprintf(&b, "Artifact title: %s\n", strings.TrimSpace(title))
+	}
+	b.WriteString("\nRequired deletions:\n")
+	for i, c := range missing {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, strings.TrimSpace(c.Comment))
+		if excerpt := strings.TrimSpace(c.TargetExcerpt); excerpt != "" {
+			fmt.Fprintf(&b, "   target excerpt: %q\n", truncatePromptSnippet(excerpt, 240))
+		}
+	}
+	b.WriteString("\nCurrent draft text:\n")
+	b.WriteString("<<<TEXT\n")
+	b.WriteString(currentText)
+	b.WriteString("\nTEXT\n")
+	b.WriteString(">>>")
+	return b.String()
 }
 
 func buildArtifactRewritePrompt(kind, title, text, path string, page int, comments []reviewComment) string {
@@ -1315,6 +1263,8 @@ func buildArtifactRewritePrompt(kind, title, text, path string, page int, commen
 	case "text_artifact":
 		b.WriteString("Artifact type: text/markdown.\n")
 		b.WriteString("Preserve document structure and style unless comments request changes.\n")
+		b.WriteString("If a comment requests delete/remove/cut/omit, remove the targeted text from the final document.\n")
+		b.WriteString("A short comment like \"delete\" means delete the selected target span.\n")
 		b.WriteString("Return the full revised document text.\n")
 	case "pdf_artifact":
 		b.WriteString("Artifact type: PDF.\n")
@@ -1352,11 +1302,17 @@ func buildArtifactRewritePrompt(kind, title, text, path string, page int, commen
 		if c.Page > 0 {
 			scope = append(scope, fmt.Sprintf("page %d", c.Page))
 		}
+		if c.DeleteIntent && kind == "text_artifact" {
+			scope = append(scope, "delete request")
+		}
 		prefix := fmt.Sprintf("%d.", i+1)
 		if len(scope) > 0 {
 			prefix += " [" + strings.Join(scope, ", ") + "]"
 		}
 		fmt.Fprintf(&b, "%s %s\n", prefix, c.Comment)
+		if kind == "text_artifact" && strings.TrimSpace(c.TargetExcerpt) != "" {
+			fmt.Fprintf(&b, "   target excerpt: %q\n", truncatePromptSnippet(c.TargetExcerpt, 240))
+		}
 	}
 	if kind == "text_artifact" {
 		b.WriteString("\nOriginal document text:\n")
