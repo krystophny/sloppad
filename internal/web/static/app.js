@@ -1440,19 +1440,25 @@ function bindUi() {
       if (sendHoldTimer) {
         clearTimeout(sendHoldTimer);
         sendHoldTimer = null;
+        sendHoldIsTouch = false;
         return;
       }
-      if (sendHoldActive) {
+      if (sendHoldActive || state.chatVoiceCapture) {
         sendHoldActive = false;
+        sendHoldIsTouch = false;
         void stopChatVoiceCaptureAndApply();
       }
     };
     sendBtn.addEventListener('touchstart', (ev) => startHold(ev, true), { passive: false });
-    sendBtn.addEventListener('touchend', (ev) => {
-      if (sendHoldTimer || sendHoldActive) ev.preventDefault();
+    window.addEventListener('touchend', (ev) => {
+      if (!sendHoldIsTouch) return;
+      if (sendHoldTimer || sendHoldActive || state.chatVoiceCapture) ev.preventDefault();
       endHold();
     }, { passive: false });
-    sendBtn.addEventListener('touchcancel', () => endHold());
+    window.addEventListener('touchcancel', () => {
+      if (!sendHoldIsTouch) return;
+      endHold();
+    });
     sendBtn.addEventListener('mousedown', (ev) => {
       if (ev.button !== 0) return;
       if (sendHoldIsTouch) return;
@@ -1615,8 +1621,16 @@ function bindUi() {
   });
 }
 
+function requestMicPermission() {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') return;
+  navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    stream.getTracks().forEach((t) => t.stop());
+  }).catch(() => {});
+}
+
 async function init() {
   bindUi();
+  requestMicPermission();
   updateAssistantActivityIndicator();
   startDevReloadWatcher();
   startAssistantActivityWatcher();
