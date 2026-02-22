@@ -110,6 +110,7 @@ marked.setOptions({
 
 const els = {};
 let activeTextEventId = null;
+let activeArtifactTitle = '';
 let activePdfEvent = null;
 
 const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_MATH_SEGMENT_';
@@ -283,10 +284,7 @@ function textRangeFromClientPoint(clientX, clientY) {
 }
 
 function getActiveArtifactTitle() {
-  const state = window._taburaApp?.getState?.();
-  if (!state?.artifactTabs) return '';
-  const tab = state.artifactTabs.find(t => t.id === activeTextEventId);
-  return tab?.title || '';
+  return activeArtifactTitle;
 }
 
 export function getActiveTextEventId() {
@@ -391,6 +389,7 @@ export function renderCanvas(event) {
     e.text.classList.add('is-active');
     clearTextInteractionHandlers();
     activeTextEventId = event.event_id;
+    activeArtifactTitle = event.title || '';
     activePdfEvent = null;
     const mailContext = normalizeMailHeadersContext(event);
     if (mailContext) {
@@ -412,6 +411,7 @@ export function renderCanvas(event) {
     e.img.src = `/api/files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`;
     e.img.alt = event.title || 'Image';
     activeTextEventId = null;
+    activeArtifactTitle = event.title || '';
     activePdfEvent = null;
   } else if (event.kind === 'pdf_artifact') {
     clearTextInteractionHandlers();
@@ -420,6 +420,7 @@ export function renderCanvas(event) {
     e.pdf.classList.add('is-active');
     void renderPdfSurface(event);
     activeTextEventId = null;
+    activeArtifactTitle = event.title || '';
     activePdfEvent = event;
   } else if (event.kind === 'clear_canvas') {
     clearTextInteractionHandlers();
@@ -431,5 +432,6 @@ export function clearCanvas() {
   clearTextInteractionHandlers();
   hideAll();
   activeTextEventId = null;
+  activeArtifactTitle = '';
   activePdfEvent = null;
 }

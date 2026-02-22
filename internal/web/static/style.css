@@ -109,60 +109,38 @@ body.desktop-canvas-only #toolbar {
   gap: 0.35rem;
 }
 
-/* Workspace */
+/* Workspace — two-column: document left, chat right */
 #workspace {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   overflow: hidden;
   min-height: 0;
   min-width: 0;
 }
 
-#canvas-tab-bar {
+#canvas-column {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.35rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+
+#chat-column {
+  width: 380px;
   flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #f6f7f9;
 }
 
-.canvas-tab {
-  padding: 0.25rem 0.65rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  font-size: 0.78rem;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.canvas-tab.is-active {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-color: var(--accent);
-}
-
-.canvas-tab-close {
-  background: none;
-  border: none;
-  color: inherit;
-  font-size: 0.7rem;
-  padding: 0 0.15rem;
-  cursor: pointer;
-  line-height: 1;
-  font-weight: 400;
-  opacity: 0.7;
-}
-
-.canvas-tab-close:hover {
-  opacity: 1;
+/* When no artifact is open, chat goes full width */
+#canvas-column[style*="display: none"] ~ #chat-column,
+#canvas-column[style*="display:none"] ~ #chat-column {
+  width: 100%;
+  flex: 1;
 }
 
 #canvas-viewport {
@@ -449,165 +427,38 @@ body.desktop-canvas-only #toolbar {
   transition: opacity 0.2s;
 }
 
-.annotation-bubble {
-  position: absolute;
-  z-index: 20;
-  width: min(340px, calc(100% - 20px));
-  max-height: 50vh;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.annotation-bubble-header {
-  display: flex;
+/* Prompt context badge (tap-to-reference) */
+.prompt-context {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.annotation-bubble-location {
-  font-size: 0.85rem;
+  gap: 0.25rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
   color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-bottom: 0.35rem;
 }
 
-.annotation-bubble-dismiss {
+.prompt-context-dismiss {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 1rem;
+  font-size: 0.72rem;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0.2rem;
+  padding: 0 0.1rem;
   flex-shrink: 0;
 }
 
-.annotation-bubble-dismiss:hover {
+.prompt-context-dismiss:hover {
   color: var(--text);
-}
-
-.annotation-bubble-messages {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.5rem 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.annotation-bubble-msg {
-  font-size: 1rem;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.annotation-bubble-msg-user {
-  color: var(--text);
-  background: var(--bg-elevated);
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
-  align-self: flex-end;
-  max-width: 90%;
-}
-
-.annotation-bubble-msg-assistant {
-  color: var(--text);
-  max-width: 100%;
-}
-
-.annotation-bubble-msg-assistant pre {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.4rem;
-  overflow-x: auto;
-  font-size: 0.78rem;
-}
-
-.annotation-bubble-msg-error {
-  color: var(--error);
-  font-size: 0.78rem;
-}
-
-.annotation-bubble-bar {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.3rem;
-  padding: 0.4rem 0.5rem;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.annotation-bubble-input {
-  flex: 1;
-  resize: none;
-  min-height: 1.6em;
-  max-height: 4em;
-  line-height: 1.35;
-  padding: 0.3rem 0.5rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 1rem;
-}
-
-.annotation-bubble-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.annotation-bubble-send {
-  flex-shrink: 0;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.78rem;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.annotation-side-panel {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  left: auto;
-  width: 340px;
-  max-height: none;
-  z-index: 10;
-  border: none;
-  border-left: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-}
-
-#canvas-viewport.has-annotation-panel .canvas-pane.is-active {
-  margin-right: 340px;
-}
-
-@media (max-width: 599px) {
-  .annotation-bubble {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    width: 100%;
-    border-radius: 12px 12px 0 0;
-    max-height: 50vh;
-  }
 }
 
 .sr-only {
@@ -1252,10 +1103,6 @@ button[data-mail-record-action="stop"] {
   justify-content: flex-end;
 }
 
-#canvas-chat {
-  background: #f6f7f9;
-}
-
 #chat-history {
   flex: 1;
   min-height: 0;
@@ -1320,6 +1167,36 @@ button[data-mail-record-action="stop"] {
   background: #f9fafb;
 }
 
+
+/* Mobile: single column, canvas as overlay */
+@media (max-width: 767px) {
+  #workspace {
+    flex-direction: column;
+    position: relative;
+  }
+
+  #chat-column {
+    width: 100%;
+    flex: 1;
+  }
+
+  #canvas-column {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    border-right: none;
+    background: var(--bg);
+  }
+
+  #canvas-column .canvas-close-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 51;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+  }
+}
 
 @media (max-width: 768px) {
   #toolbar {

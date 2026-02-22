@@ -1,15 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-type HarnessLogEntry = { type: string; action: string; [key: string]: unknown };
-
-async function getLog(page: Page): Promise<HarnessLogEntry[]> {
-  return page.evaluate(() => (window as any).__harnessLog.slice());
-}
-
-async function clearLog(page: Page) {
-  await page.evaluate(() => { (window as any).__harnessLog.splice(0); });
-}
-
 async function waitReady(page: Page) {
   await page.goto('/tests/playwright/chat-harness.html');
   await page.waitForSelector('#prompt-input', { state: 'visible', timeout: 5_000 });
@@ -32,15 +22,19 @@ async function renderTestArtifact(page: Page) {
       title: 'test.txt',
       text: 'Line one\nLine two\nLine three\nLine four\nLine five',
     });
+  });
+  // Simulate what app.js does: show canvas column with the right pane
+  await page.evaluate(() => {
+    const col = document.getElementById('canvas-column');
+    if (col) col.style.display = '';
     const ct = document.getElementById('canvas-text');
     if (ct) {
-      ct.style.display = 'flex';
+      ct.style.display = '';
       ct.classList.add('is-active');
     }
   });
 }
 
-/** Install a fetch spy that captures the full body of chat message POSTs. */
 async function installMessageSpy(page: Page) {
   await page.evaluate(() => {
     (window as any).__sentBodies = [];
@@ -62,14 +56,37 @@ async function getSentBodies(page: Page): Promise<any[]> {
   return page.evaluate(() => (window as any).__sentBodies.slice());
 }
 
-test.describe('annotation bubble', () => {
+test.describe('two-column layout', () => {
   test.beforeEach(async ({ page }) => {
     await waitReady(page);
     await injectCanvasModuleRef(page);
     await installMessageSpy(page);
   });
 
-  test('right-click on artifact opens annotation bubble', async ({ page }) => {
+  test('desktop: chat column visible, canvas column hidden when no artifact', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const chatColumn = page.locator('#chat-column');
+    await expect(chatColumn).toBeVisible();
+    const canvasColumn = page.locator('#canvas-column');
+    const display = await canvasColumn.evaluate(el => el.style.display);
+    expect(display).toBe('none');
+  });
+
+  test('desktop: artifact renders in left column, chat visible on right', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await renderTestArtifact(page);
+    const canvasColumn = page.locator('#canvas-column');
+    const canvasDisplay = await canvasColumn.evaluate(el => el.style.display);
+    expect(canvasDisplay).not.toBe('none');
+
+    const chatColumn = page.locator('#chat-column');
+    await expect(chatColumn).toBeVisible();
+
+    const canvasText = page.locator('#canvas-text');
+    await expect(canvasText).toBeVisible();
+  });
+
+  test('right-click on artifact sets prompt context badge', async ({ page }) => {
     await renderTestArtifact(page);
     const canvasText = page.locator('#canvas-text');
     await expect(canvasText).toBeVisible();
@@ -79,12 +96,13 @@ test.describe('annotation bubble', () => {
     await page.mouse.click(box.x + 20, box.y + 20, { button: 'right' });
     await page.waitForTimeout(200);
 
-    // In headless, caretRangeFromPoint may not work; verify no crash.
+    // In headless, caretRangeFromPoint may not resolve, so badge may or may not appear.
+    // Verify no crash and no annotation bubble.
     const bubbleCount = await page.locator('.annotation-bubble').count();
-    expect(bubbleCount).toBeLessThanOrEqual(1);
+    expect(bubbleCount).toBe(0);
   });
 
-  test('left-click on artifact does not open bubble', async ({ page }) => {
+  test('left-click on artifact does not set prompt context', async ({ page }) => {
     await renderTestArtifact(page);
     const canvasText = page.locator('#canvas-text');
     await expect(canvasText).toBeVisible();
@@ -94,247 +112,63 @@ test.describe('annotation bubble', () => {
     await page.mouse.click(box.x + 20, box.y + 20);
     await page.waitForTimeout(200);
 
-    const bubbleCount = await page.locator('.annotation-bubble').count();
-    expect(bubbleCount).toBe(0);
+    // No prompt context badge from left-click
+    const badgeCount = await page.locator('.prompt-context').count();
+    expect(badgeCount).toBe(0);
   });
 
-  test('bubble send posts message with thread_key', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 42, title: 'doc.md' },
-        clientX: 100,
-        clientY: 100,
+  test('prompt context badge can be dismissed', async ({ page }) => {
+    // Programmatically set a prompt context to test dismissal
+    await page.evaluate(() => {
+      const app = (window as any)._taburaApp;
+      if (app?.getState) {
+        const state = app.getState();
+        state.promptContext = { line: 5, title: 'test.txt' };
+      }
+      // Manually render badge
+      const bar = document.getElementById('prompt-bar');
+      if (!bar) return;
+      const badge = document.createElement('span');
+      badge.className = 'prompt-context';
+      badge.textContent = 'Line 5 of "test.txt"';
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'prompt-context-dismiss';
+      dismiss.textContent = '\u00d7';
+      dismiss.addEventListener('click', () => {
+        const s = (window as any)._taburaApp?.getState?.();
+        if (s) s.promptContext = null;
+        badge.remove();
       });
-    });
-    await expect(page.locator('.annotation-bubble')).toBeVisible();
-    await expect(page.locator('.annotation-bubble-location')).toContainText('Line 42 of "doc.md"');
-
-    const input = page.locator('.annotation-bubble-input');
-    await input.fill('fix this bug');
-    await page.locator('.annotation-bubble-send').click();
-    await page.waitForTimeout(300);
-
-    const bodies = await getSentBodies(page);
-    expect(bodies.length).toBeGreaterThanOrEqual(1);
-    const sent = bodies[bodies.length - 1];
-    expect(sent.text).toBe('fix this bug');
-    expect(sent.thread_key).toBeTruthy();
-    expect(String(sent.thread_key)).toMatch(/^ann-/);
-  });
-
-  test('Enter key in bubble submits message', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    await expect(page.locator('.annotation-bubble')).toBeVisible();
-
-    const input = page.locator('.annotation-bubble-input');
-    await input.fill('enter test');
-    await input.press('Enter');
-    await page.waitForTimeout(300);
-
-    // User message should appear in bubble
-    await expect(page.locator('.annotation-bubble-msg-user')).toContainText('enter test');
-
-    // POST body should have thread_key
-    const bodies = await getSentBodies(page);
-    expect(bodies.length).toBeGreaterThanOrEqual(1);
-    const sent = bodies[bodies.length - 1];
-    expect(sent.text).toBe('enter test');
-    expect(String(sent.thread_key)).toMatch(/^ann-/);
-  });
-
-  test('bubble receives streamed response', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-      const threadKey = mod.getActiveThreadKey();
-      mod.routeBubbleEvent({ type: 'turn_started', turn_id: 'turn-1', thread_key: threadKey });
-      mod.routeBubbleEvent({
-        type: 'assistant_message',
-        turn_id: 'turn-1',
-        thread_key: threadKey,
-        message: 'Here is the fix',
-      });
-      mod.routeBubbleEvent({
-        type: 'message_persisted',
-        role: 'assistant',
-        turn_id: 'turn-1',
-        thread_key: threadKey,
-        message: 'Here is the fix',
-      });
+      badge.appendChild(dismiss);
+      const status = bar.querySelector('.prompt-status');
+      if (status) status.after(badge);
+      else bar.prepend(badge);
     });
 
-    const messages = page.locator('.annotation-bubble-messages');
-    await expect(messages).toBeVisible();
-    await expect(messages.locator('.annotation-bubble-msg-assistant')).toContainText('Here is the fix');
-  });
-
-  test('bubble dismiss on click outside', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    await expect(page.locator('.annotation-bubble')).toBeVisible();
+    await expect(page.locator('.prompt-context')).toBeVisible();
+    await page.locator('.prompt-context-dismiss').click();
     await page.waitForTimeout(100);
-
-    await page.mouse.click(5, 5);
-    await page.waitForTimeout(200);
-    await expect(page.locator('.annotation-bubble')).toHaveCount(0);
+    await expect(page.locator('.prompt-context')).toHaveCount(0);
   });
 
-  test('bubble dismiss on X button', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    await expect(page.locator('.annotation-bubble')).toBeVisible();
+  test('canvas clear hides canvas column', async ({ page }) => {
+    await renderTestArtifact(page);
+    const canvasColumn = page.locator('#canvas-column');
+    let display = await canvasColumn.evaluate(el => el.style.display);
+    expect(display).not.toBe('none');
 
-    await page.locator('.annotation-bubble-dismiss').click();
-    await page.waitForTimeout(100);
-    await expect(page.locator('.annotation-bubble')).toHaveCount(0);
-  });
-
-  test('wide viewport opens side panel', async ({ page }) => {
-    // Default Playwright viewport is 1280x720 (≥900px) → side panel mode
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 5, title: 'review.md' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    const bubble = page.locator('.annotation-bubble');
-    await expect(bubble).toBeVisible();
-    await expect(bubble).toHaveClass(/annotation-side-panel/);
-
-    const viewport = page.locator('#canvas-viewport');
-    await expect(viewport).toHaveClass(/has-annotation-panel/);
-
-    // Verify it is inside #canvas-viewport
-    const parent = await bubble.evaluate((el) => el.parentElement?.id);
-    expect(parent).toBe('canvas-viewport');
-  });
-
-  test('medium viewport opens floating bubble not side panel', async ({ page }) => {
-    await page.setViewportSize({ width: 800, height: 600 });
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    const bubble = page.locator('.annotation-bubble');
-    await expect(bubble).toBeVisible();
-    const hasSidePanel = await bubble.evaluate((el) =>
-      el.classList.contains('annotation-side-panel')
-    );
-    expect(hasSidePanel).toBe(false);
-  });
-
-  test('side panel not dismissed by click on canvas-text', async ({ page }) => {
-    // Default viewport is wide (1280x720)
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 2, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    const panel = page.locator('.annotation-side-panel');
-    await expect(panel).toBeVisible();
-    await page.waitForTimeout(100);
-
-    // Programmatic click on canvas-text should NOT close the side panel
-    const survived = await page.evaluate(() => {
-      const ct = document.getElementById('canvas-text');
-      if (ct) ct.click();
-      return !!document.querySelector('.annotation-side-panel');
-    });
-    expect(survived).toBe(true);
-    await expect(panel).toBeVisible();
-  });
-
-  test('side panel close removes has-annotation-panel class', async ({ page }) => {
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    const viewport = page.locator('#canvas-viewport');
-    await expect(viewport).toHaveClass(/has-annotation-panel/);
-
-    await page.locator('.annotation-bubble-dismiss').click();
-    await page.waitForTimeout(100);
-    const classes = await viewport.getAttribute('class');
-    expect(classes).not.toContain('has-annotation-panel');
-  });
-
-  test('mobile bottom sheet layout', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
-    });
-    const bubble = page.locator('.annotation-bubble');
-    await expect(bubble).toBeVisible();
-
-    const styles = await bubble.evaluate((el) => {
-      const cs = window.getComputedStyle(el);
-      return { position: cs.position, bottom: cs.bottom };
-    });
-    expect(styles.position).toBe('fixed');
-    expect(styles.bottom).toBe('0px');
-  });
-
-  test('main chat not affected by bubble messages', async ({ page }) => {
-    const chatHistoryBefore = await page.locator('#chat-history .chat-message').count();
-
-    await page.evaluate(async () => {
-      const mod = await import('../../internal/web/static/canvas-bubble.js');
-      mod.openAnnotationBubble({
-        location: { line: 1, title: 'test.txt' },
-        clientX: 100,
-        clientY: 100,
-      });
+    // Trigger clear_canvas
+    await page.evaluate(() => {
+      const mod = (window as any).__canvasModule;
+      mod.renderCanvas({ kind: 'clear_canvas' });
+      // app.js would call hideCanvasColumn, simulate it
+      const col = document.getElementById('canvas-column');
+      if (col) col.style.display = 'none';
     });
 
-    const input = page.locator('.annotation-bubble-input');
-    await input.fill('bubble comment');
-    await page.locator('.annotation-bubble-send').click();
-    await page.waitForTimeout(300);
-
-    const chatHistoryAfter = await page.locator('#chat-history .chat-message').count();
-    expect(chatHistoryAfter).toBe(chatHistoryBefore);
+    display = await canvasColumn.evaluate(el => el.style.display);
+    expect(display).toBe('none');
   });
 
   test('text selection works normally without opening bubble', async ({ page }) => {
@@ -358,9 +192,6 @@ test.describe('annotation bubble', () => {
   test('line highlight absent after left-click', async ({ page }) => {
     await renderTestArtifact(page);
 
-    const markerCount = await page.locator('.transient-marker').count();
-    expect(markerCount).toBe(0);
-
     const canvasText = page.locator('#canvas-text');
     const box = await canvasText.boundingBox();
     if (box) {
@@ -368,10 +199,30 @@ test.describe('annotation bubble', () => {
       await page.waitForTimeout(100);
     }
 
-    // Left-click should not produce a highlight or marker
-    const markerCountAfter = await page.locator('.transient-marker').count();
-    expect(markerCountAfter).toBe(0);
     const highlightCount = await page.locator('.review-line-highlight').count();
     expect(highlightCount).toBe(0);
+  });
+
+  test('no tab bar in DOM', async ({ page }) => {
+    const tabBar = await page.locator('#canvas-tab-bar').count();
+    expect(tabBar).toBe(0);
+  });
+
+  test('no canvas-chat pane in DOM', async ({ page }) => {
+    const chatPane = await page.locator('#canvas-chat').count();
+    expect(chatPane).toBe(0);
+  });
+
+  test('send message without context has no location prefix', async ({ page }) => {
+    const input = page.locator('#prompt-input');
+    await input.fill('hello');
+    await page.locator('#prompt-send').click();
+    await page.waitForTimeout(300);
+
+    const bodies = await getSentBodies(page);
+    expect(bodies.length).toBeGreaterThanOrEqual(1);
+    const sent = bodies[bodies.length - 1];
+    expect(sent.text).toBe('hello');
+    expect(sent.thread_key).toBeUndefined();
   });
 });

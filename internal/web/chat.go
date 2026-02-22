@@ -19,8 +19,7 @@ import (
 const assistantTurnTimeout = 20 * time.Minute
 
 type chatMessageRequest struct {
-	Text      string `json:"text"`
-	ThreadKey string `json:"thread_key,omitempty"`
+	Text string `json:"text"`
 }
 
 type chatCommandRequest struct {
@@ -227,27 +226,18 @@ func (a *App) handleChatSessionMessage(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	threadKey := strings.TrimSpace(req.ThreadKey)
-	var storeOpts []store.ChatMessageOption
-	if threadKey != "" {
-		storeOpts = append(storeOpts, store.WithThreadKey(threadKey))
-	}
-	storedUser, err := a.store.AddChatMessage(sessionID, "user", text, text, "text", storeOpts...)
+	storedUser, err := a.store.AddChatMessage(sessionID, "user", text, text, "text")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	acceptedPayload := map[string]interface{}{
+	a.broadcastChatEvent(sessionID, map[string]interface{}{
 		"type":    "message_accepted",
 		"role":    "user",
 		"content": text,
 		"id":      storedUser.ID,
-	}
-	if threadKey != "" {
-		acceptedPayload["thread_key"] = threadKey
-	}
-	a.broadcastChatEvent(sessionID, acceptedPayload)
-	queuedTurns := a.enqueueAssistantTurn(sessionID, threadKey)
+	})
+	queuedTurns := a.enqueueAssistantTurn(sessionID)
 	writeJSON(w, map[string]interface{}{
 		"ok":         true,
 		"kind":       "turn_queued",
@@ -408,7 +398,6 @@ func (a *App) clearQueuedChatTurns(sessionID string) int {
 	defer a.mu.Unlock()
 	queued := a.chatTurnQueue[sessionID]
 	delete(a.chatTurnQueue, sessionID)
-	delete(a.chatTurnThreadKeys, sessionID)
 	return queued
 }
 
@@ -436,25 +425,10 @@ func (a *App) queuedChatTurnCount(sessionID string) int {
 	return a.chatTurnQueue[sessionID]
 }
 
-func (a *App) enqueueAssistantTurn(sessionID string, threadKeys ...string) int {
-	threadKey := ""
-	if len(threadKeys) > 0 {
-		threadKey = strings.TrimSpace(threadKeys[0])
-	}
+func (a *App) enqueueAssistantTurn(sessionID string) int {
 	a.mu.Lock()
 	a.chatTurnQueue[sessionID] = a.chatTurnQueue[sessionID] + 1
 	queued := a.chatTurnQueue[sessionID]
-	if threadKey != "" {
-		if a.chatTurnThreadKeys == nil {
-			a.chatTurnThreadKeys = map[string][]string{}
-		}
-		a.chatTurnThreadKeys[sessionID] = append(a.chatTurnThreadKeys[sessionID], threadKey)
-	} else {
-		if a.chatTurnThreadKeys == nil {
-			a.chatTurnThreadKeys = map[string][]string{}
-		}
-		a.chatTurnThreadKeys[sessionID] = append(a.chatTurnThreadKeys[sessionID], "")
-	}
 	workerRunning := a.chatTurnWorker[sessionID]
 	if !workerRunning {
 		a.chatTurnWorker[sessionID] = true
@@ -466,28 +440,20 @@ func (a *App) enqueueAssistantTurn(sessionID string, threadKeys ...string) int {
 	return queued
 }
 
-func (a *App) dequeueAssistantTurn(sessionID string) (bool, string) {
+func (a *App) dequeueAssistantTurn(sessionID string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	queued := a.chatTurnQueue[sessionID]
 	if queued <= 0 {
-		return false, ""
-	}
-	threadKey := ""
-	if keys := a.chatTurnThreadKeys[sessionID]; len(keys) > 0 {
-		threadKey = keys[0]
-		a.chatTurnThreadKeys[sessionID] = keys[1:]
-		if len(a.chatTurnThreadKeys[sessionID]) == 0 {
-			delete(a.chatTurnThreadKeys, sessionID)
-		}
+		return false
 	}
 	queued--
 	if queued <= 0 {
 		delete(a.chatTurnQueue, sessionID)
-		return true, threadKey
+		return true
 	}
 	a.chatTurnQueue[sessionID] = queued
-	return true, threadKey
+	return true
 }
 
 func (a *App) markAssistantWorkerIdleIfQueueEmpty(sessionID string) bool {
@@ -502,28 +468,19 @@ func (a *App) markAssistantWorkerIdleIfQueueEmpty(sessionID string) bool {
 
 func (a *App) runAssistantTurnQueue(sessionID string) {
 	for {
-		ok, threadKey := a.dequeueAssistantTurn(sessionID)
-		if !ok {
+		if !a.dequeueAssistantTurn(sessionID) {
 			if a.markAssistantWorkerIdleIfQueueEmpty(sessionID) {
 				return
 			}
 			continue
 		}
-		a.runAssistantTurn(sessionID, threadKey)
+		a.runAssistantTurn(sessionID)
 	}
 }
 
-func (a *App) appSessionKey(sessionID, threadKey string) string {
-	if threadKey != "" {
-		return sessionID + ":ann:" + threadKey
-	}
-	return sessionID
-}
-
-func (a *App) getOrCreateAppSession(sessionID string, cwd string, threadKey string) (*appserver.Session, bool, error) {
-	key := a.appSessionKey(sessionID, threadKey)
+func (a *App) getOrCreateAppSession(sessionID string, cwd string) (*appserver.Session, bool, error) {
 	a.mu.Lock()
-	s := a.chatAppSessions[key]
+	s := a.chatAppSessions[sessionID]
 	a.mu.Unlock()
 	if s != nil && s.IsOpen() {
 		return s, true, nil
@@ -535,10 +492,10 @@ func (a *App) getOrCreateAppSession(sessionID string, cwd string, threadKey stri
 		return nil, false, err
 	}
 	a.mu.Lock()
-	if old := a.chatAppSessions[key]; old != nil {
+	if old := a.chatAppSessions[sessionID]; old != nil {
 		_ = old.Close()
 	}
-	a.chatAppSessions[key] = s
+	a.chatAppSessions[sessionID] = s
 	a.mu.Unlock()
 	return s, false, nil
 }
@@ -553,17 +510,13 @@ func (a *App) closeAppSession(sessionID string) {
 	}
 }
 
-func (a *App) runAssistantTurn(sessionID string, threadKey string) {
+func (a *App) runAssistantTurn(sessionID string) {
 	session, err := a.store.GetChatSession(sessionID)
 	if err != nil {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
 		return
 	}
-	var listOpts []store.ChatMessageOption
-	if threadKey != "" {
-		listOpts = append(listOpts, store.WithThreadKey(threadKey))
-	}
-	messages, err := a.store.ListChatMessages(sessionID, 200, listOpts...)
+	messages, err := a.store.ListChatMessages(sessionID, 200)
 	if err != nil {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
 		return
@@ -576,9 +529,8 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 	}
 
 	cwd := a.cwdForProjectKey(session.ProjectKey)
-	appSess, resumed, sessErr := a.getOrCreateAppSession(sessionID, cwd, threadKey)
+	appSess, resumed, sessErr := a.getOrCreateAppSession(sessionID, cwd)
 	if sessErr != nil {
-		// Fall back to single-shot mode.
 		a.runAssistantTurnLegacy(sessionID, session, messages)
 		return
 	}
@@ -589,9 +541,7 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 		prompt = buildTurnPrompt(messages, canvasCtx)
 	} else {
 		prompt = buildPromptFromHistory(session.Mode, messages, canvasCtx)
-		if threadKey == "" {
-			_ = a.store.UpdateChatSessionThread(sessionID, appSess.ThreadID())
-		}
+		_ = a.store.UpdateChatSessionThread(sessionID, appSess.ThreadID())
 	}
 	if strings.TrimSpace(prompt) == "" {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": "empty prompt"})
@@ -611,16 +561,6 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 	persistedAssistantID := int64(0)
 	persistedAssistantText := ""
 	persistWriteFailed := false
-	var storeOpts []store.ChatMessageOption
-	if threadKey != "" {
-		storeOpts = append(storeOpts, store.WithThreadKey(threadKey))
-	}
-	tagPayload := func(p map[string]interface{}) map[string]interface{} {
-		if threadKey != "" {
-			p["thread_key"] = threadKey
-		}
-		return p
-	}
 
 	persistAssistantSnapshot := func(text string) {
 		candidate := strings.TrimSpace(text)
@@ -628,14 +568,14 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 			return
 		}
 		if persistedAssistantID == 0 {
-			storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", candidate, candidate, "markdown", storeOpts...)
+			storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", candidate, candidate, "markdown")
 			if storeErr != nil {
 				if !persistWriteFailed {
 					persistWriteFailed = true
-					a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+					a.broadcastChatEvent(sessionID, map[string]interface{}{
 						"type":  "error",
 						"error": storeErr.Error(),
-					}))
+					})
 				}
 				return
 			}
@@ -649,10 +589,10 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 		if storeErr := a.store.UpdateChatMessageContent(persistedAssistantID, candidate, candidate, "markdown"); storeErr != nil {
 			if !persistWriteFailed {
 				persistWriteFailed = true
-				a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+				a.broadcastChatEvent(sessionID, map[string]interface{}{
 					"type":  "error",
 					"error": storeErr.Error(),
-				}))
+				})
 			}
 			return
 		}
@@ -698,21 +638,21 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 			shouldBroadcast = false
 		}
 		if shouldBroadcast {
-			a.broadcastChatEvent(sessionID, tagPayload(payload))
+			a.broadcastChatEvent(sessionID, payload)
 		}
 	})
 	if err != nil {
-		a.closeAppSession(a.appSessionKey(sessionID, threadKey))
+		a.closeAppSession(sessionID)
 		if errors.Is(err, context.Canceled) {
-			a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
 				"type":    "turn_cancelled",
 				"turn_id": latestTurnID,
-			}))
+			})
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			errText := "assistant request timed out"
-			_, _ = a.store.AddChatMessage(sessionID, "system", errText, errText, "text", storeOpts...)
+			_, _ = a.store.AddChatMessage(sessionID, "system", errText, errText, "text")
 			payload := map[string]interface{}{
 				"type":  "error",
 				"error": errText,
@@ -720,11 +660,11 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 			if strings.TrimSpace(latestTurnID) != "" {
 				payload["turn_id"] = latestTurnID
 			}
-			a.broadcastChatEvent(sessionID, tagPayload(payload))
+			a.broadcastChatEvent(sessionID, payload)
 			return
 		}
 		errText := normalizeAssistantError(err)
-		_, _ = a.store.AddChatMessage(sessionID, "system", errText, errText, "text", storeOpts...)
+		_, _ = a.store.AddChatMessage(sessionID, "system", errText, errText, "text")
 		payload := map[string]interface{}{
 			"type":  "error",
 			"error": errText,
@@ -732,7 +672,7 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 		if strings.TrimSpace(latestTurnID) != "" {
 			payload["turn_id"] = latestTurnID
 		}
-		a.broadcastChatEvent(sessionID, tagPayload(payload))
+		a.broadcastChatEvent(sessionID, payload)
 		return
 	}
 
@@ -744,33 +684,31 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 		assistantText = "(assistant returned no content)"
 	}
 
-	if threadKey == "" {
-		if actions, cleaned := parseCanvasActions(assistantText); len(actions) > 0 {
-			canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
-			if canvasSessionID != "" {
-				a.executeCanvasActions(canvasSessionID, actions)
-			}
-			assistantText = cleaned
+	if actions, cleaned := parseCanvasActions(assistantText); len(actions) > 0 {
+		canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
+		if canvasSessionID != "" {
+			a.executeCanvasActions(canvasSessionID, actions)
 		}
+		assistantText = cleaned
 	}
 
 	if persistedAssistantID == 0 {
-		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown", storeOpts...)
+		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
 		if storeErr != nil {
-			a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
 				"type":  "error",
 				"error": storeErr.Error(),
-			}))
+			})
 			return
 		}
 		persistedAssistantID = storedAssistant.ID
 		persistedAssistantText = assistantText
 	} else if assistantText != persistedAssistantText {
 		if storeErr := a.store.UpdateChatMessageContent(persistedAssistantID, assistantText, assistantText, "markdown"); storeErr != nil {
-			a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
 				"type":  "error",
 				"error": storeErr.Error(),
-			}))
+			})
 			return
 		}
 	}
@@ -778,14 +716,14 @@ func (a *App) runAssistantTurn(sessionID string, threadKey string) {
 	if turnID == "" {
 		turnID = latestTurnID
 	}
-	a.broadcastChatEvent(sessionID, tagPayload(map[string]interface{}{
+	a.broadcastChatEvent(sessionID, map[string]interface{}{
 		"type":      "message_persisted",
 		"role":      "assistant",
 		"id":        persistedAssistantID,
 		"turn_id":   turnID,
 		"thread_id": appResp.ThreadID,
 		"message":   assistantText,
-	}))
+	})
 }
 
 // runAssistantTurnLegacy is the single-shot fallback when persistent session

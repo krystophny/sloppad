@@ -5,17 +5,19 @@
 For direct runtime requests, run the obvious command first, then verify.
 Do not scan source/docs unless the command fails.
 
-## Unified Canvas
+## Canvas Layout
 
-Chat is the default pane. Artifacts (text, image, PDF) appear as closeable tabs in the canvas tab bar. A single prompt bar (`#prompt-input` + `#prompt-send`) serves all modes. No dual-mode switching.
+Two-column layout: document (artifact) on the left, chat on the right. No tabs. One document at a time. When no artifact is open, chat takes full width. On mobile (<768px), canvas is a full-screen overlay with close button.
+
+Key structural selectors: `#workspace` (flex row), `#canvas-column` (left, flex:1), `#chat-column` (right, 380px), `#canvas-viewport`, `.canvas-pane`.
 
 ## Artifact Interaction (Tap-to-Reference)
 
-Tap/click on artifact text sets a transient marker and location context badge in the prompt bar (`Line N of "title"`). Long-press starts PTT voice recording with location context. Text selection captures the selected text as context. Context is prepended to the chat message on send and cleared after. No persistent marks, overlays, popovers, or commit lifecycle.
+Right-click on artifact text sets a location context badge in the prompt bar (`Line N of "title"`). Long-press starts PTT voice recording with location context. Text selection captures the selected text as context. Context is prepended to the chat message on send and cleared after. All messages go through main chat. No bubbles, no tabs, no thread keys.
 
-Key selectors: `.transient-marker` (pulsing dot), `.prompt-context` (badge chip), `.prompt-context-dismiss` (X button).
+Key selectors: `.prompt-context` (badge chip), `.prompt-context-dismiss` (X button).
 
-JS modules: `canvas.js` (core rendering + location capture, <500 lines), `canvas-mail.js` (mail triage UI), `app.js` (prompt context state + artifact interaction listeners).
+JS modules: `canvas.js` (core rendering + location capture), `canvas-mail.js` (mail triage UI), `app.js` (prompt context state + two-column layout + artifact interaction listeners).
 
 ## Post-Adjustment Artifact Rule
 
@@ -138,7 +140,7 @@ Every UI interaction flow must have a Playwright test. Never skip tests.
 - New UI features require corresponding Playwright tests before merge.
 - Touch event flows (touchstart/touchend) must be tested alongside mouse flows (mousedown/mouseup).
 - Async flows (mic capture, STT, WebSocket) must use mock harnesses (see `tests/playwright/chat-harness.html` and `tests/playwright/harness.html`).
-- Key selectors: `#prompt-input` (textarea), `#prompt-send` (send button), `#prompt-bar` (form), `#canvas-tab-bar` (tab bar), `.canvas-pane` (panes).
+- Key selectors: `#prompt-input` (textarea), `#prompt-send` (send button), `#prompt-bar` (form), `#canvas-column` (document column), `#chat-column` (chat column), `.canvas-pane` (panes).
 - Run `npx playwright test` locally and verify 100% pass before push.
 - Existing tests: `tests/playwright/artifact-context.spec.ts`, `tests/playwright/mail-actions.spec.ts`, `tests/playwright/chat-voice-send.spec.ts`.
 
