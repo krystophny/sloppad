@@ -470,7 +470,7 @@ async function beginChatVoiceCapture(opts) {
     });
     recorder.start(300);
     if (capture.stopRequested) {
-      await stopChatVoiceMediaAndFlush(capture);
+      void stopChatVoiceCaptureAndApply();
     }
   } catch (err) {
     const message = String(err?.message || err || 'push-to-prompt failed');
@@ -488,13 +488,11 @@ async function beginChatVoiceCapture(opts) {
 async function stopChatVoiceCaptureAndApply() {
   const capture = state.chatVoiceCapture;
   if (!capture || capture.stopping) return;
-  capture.stopping = true;
   capture.stopRequested = true;
+  if (!capture.active) return;
+  capture.stopping = true;
   let remoteStopped = false;
   try {
-    if (!capture.active) {
-      return;
-    }
     await stopChatVoiceMediaAndFlush(capture);
     await (capture.appendChain || Promise.resolve());
     if (capture.appendError) {

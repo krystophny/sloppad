@@ -300,6 +300,8 @@ body.desktop-canvas-only #panel-canvas {
   white-space: pre-wrap;
   user-select: text;
   position: relative;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
 }
 
 #canvas-pdf {
@@ -517,6 +519,12 @@ button[data-mail-record-action="stop"] {
 
 .mail-recording-active .mail-record-controls {
   border-color: var(--accent);
+}
+
+.mail-recording-active #canvas-text {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .mail-triage-table {

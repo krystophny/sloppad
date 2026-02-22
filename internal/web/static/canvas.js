@@ -1151,18 +1151,30 @@ function clearSelectionInteractionHandlers() {
     e.text.removeEventListener('pointerdown', e.text._reviewAnchorPointerHandler);
     e.text._reviewAnchorPointerHandler = null;
   }
-  if (e.text._reviewLongPressPointerDownHandler) {
-    e.text.removeEventListener('pointerdown', e.text._reviewLongPressPointerDownHandler);
-    e.text._reviewLongPressPointerDownHandler = null;
+  if (e.text._reviewLPTouchStartHandler) {
+    e.text.removeEventListener('touchstart', e.text._reviewLPTouchStartHandler);
+    e.text._reviewLPTouchStartHandler = null;
   }
-  if (e.text._reviewLongPressPointerMoveHandler) {
-    window.removeEventListener('pointermove', e.text._reviewLongPressPointerMoveHandler);
-    e.text._reviewLongPressPointerMoveHandler = null;
+  if (e.text._reviewLPTouchEndHandler) {
+    window.removeEventListener('touchend', e.text._reviewLPTouchEndHandler);
+    window.removeEventListener('touchcancel', e.text._reviewLPTouchEndHandler);
+    e.text._reviewLPTouchEndHandler = null;
   }
-  if (e.text._reviewLongPressPointerUpHandler) {
-    window.removeEventListener('pointerup', e.text._reviewLongPressPointerUpHandler);
-    window.removeEventListener('pointercancel', e.text._reviewLongPressPointerUpHandler);
-    e.text._reviewLongPressPointerUpHandler = null;
+  if (e.text._reviewLPTouchMoveHandler) {
+    window.removeEventListener('touchmove', e.text._reviewLPTouchMoveHandler);
+    e.text._reviewLPTouchMoveHandler = null;
+  }
+  if (e.text._reviewLPMouseDownHandler) {
+    e.text.removeEventListener('mousedown', e.text._reviewLPMouseDownHandler);
+    e.text._reviewLPMouseDownHandler = null;
+  }
+  if (e.text._reviewLPMouseUpHandler) {
+    window.removeEventListener('mouseup', e.text._reviewLPMouseUpHandler);
+    e.text._reviewLPMouseUpHandler = null;
+  }
+  if (e.text._reviewLPMouseMoveHandler) {
+    window.removeEventListener('mousemove', e.text._reviewLPMouseMoveHandler);
+    e.text._reviewLPMouseMoveHandler = null;
   }
   if (e.text._reviewCtrlKeyDownHandler) {
     document.removeEventListener('keydown', e.text._reviewCtrlKeyDownHandler, true);
@@ -1263,14 +1275,22 @@ function clearMailInteractionHandlers() {
     e.text.removeEventListener('click', e.text._mailRecordingClickHandler);
     e.text._mailRecordingClickHandler = null;
   }
-  if (e.text._mailRecordingPointerDownHandler) {
-    e.text.removeEventListener('pointerdown', e.text._mailRecordingPointerDownHandler);
-    e.text._mailRecordingPointerDownHandler = null;
+  if (e.text._mailRecordingTouchStartHandler) {
+    e.text.removeEventListener('touchstart', e.text._mailRecordingTouchStartHandler);
+    e.text._mailRecordingTouchStartHandler = null;
   }
-  if (e.text._mailRecordingPointerUpHandler) {
-    window.removeEventListener('pointerup', e.text._mailRecordingPointerUpHandler);
-    window.removeEventListener('pointercancel', e.text._mailRecordingPointerUpHandler);
-    e.text._mailRecordingPointerUpHandler = null;
+  if (e.text._mailRecordingTouchEndHandler) {
+    window.removeEventListener('touchend', e.text._mailRecordingTouchEndHandler);
+    window.removeEventListener('touchcancel', e.text._mailRecordingTouchEndHandler);
+    e.text._mailRecordingTouchEndHandler = null;
+  }
+  if (e.text._mailRecordingMouseDownHandler) {
+    e.text.removeEventListener('mousedown', e.text._mailRecordingMouseDownHandler);
+    e.text._mailRecordingMouseDownHandler = null;
+  }
+  if (e.text._mailRecordingMouseUpHandler) {
+    window.removeEventListener('mouseup', e.text._mailRecordingMouseUpHandler);
+    e.text._mailRecordingMouseUpHandler = null;
   }
   if (e.text._mailRecordingKeyDownHandler) {
     document.removeEventListener('keydown', e.text._mailRecordingKeyDownHandler);
@@ -3839,21 +3859,17 @@ function setupTextSelection(eventId) {
     });
     recorder.start(300);
     if (capture.stopRequested) {
-      await stopReviewVoiceMediaAndFlush(capture);
+      void stopAndSubmitReviewVoiceCapture(capture);
     }
   };
 
   const stopAndSubmitReviewVoiceCapture = async (capture) => {
     if (!capture || capture.stopping || capture.cancelled) return;
-    capture.stopping = true;
     capture.stopRequested = true;
+    if (!capture.active) return;
+    capture.stopping = true;
     let stoppedRemotely = false;
     try {
-      if (!capture.active) {
-        cleanupReviewVoiceCapture(capture, true);
-        clearReviewVoiceHint();
-        return;
-      }
       await stopReviewVoiceMediaAndFlush(capture);
       await (capture.appendChain || Promise.resolve());
       if (capture.appendError) {
@@ -3889,10 +3905,12 @@ function setupTextSelection(eventId) {
     }
   };
 
-  const onReviewLongPressPointerDown = (ev) => {
+  let reviewLongPressIsTouch = false;
+  const onReviewLongPressStart = (ev, isTouch) => {
     if (activeTextEventId !== eventId) return;
     if (e.text.classList.contains('mail-artifact')) return;
-    if (!(ev.button === 0 || ev.pointerType === 'touch')) return;
+    if (!isTouch && ev.button !== 0) return;
+    if (isTouch) ev.preventDefault();
     const target = ev.target;
     if (isInteractiveTarget(target)) return;
     const selection = window.getSelection();
@@ -3900,14 +3918,17 @@ function setupTextSelection(eventId) {
       return;
     }
     if (e.text._reviewVoiceCapture) return;
+    reviewLongPressIsTouch = isTouch;
+    const clientX = isTouch ? ev.touches[0].clientX : ev.clientX;
+    const clientY = isTouch ? ev.touches[0].clientY : ev.clientY;
     const capture = createReviewVoiceCapture({
-      pointerId: ev.pointerId,
+      pointerId: null,
       source: 'long_press',
-      clientX: ev.clientX,
-      clientY: ev.clientY,
-      startX: ev.clientX,
-      startY: ev.clientY,
-      target: pointTargetFromClientPoint(e.text, ev.clientX, ev.clientY),
+      clientX,
+      clientY,
+      startX: clientX,
+      startY: clientY,
+      target: pointTargetFromClientPoint(e.text, clientX, clientY),
     });
     capture.longPressTimer = window.setTimeout(() => {
       void beginReviewVoiceCapture(capture).catch((err) => {
@@ -3919,12 +3940,14 @@ function setupTextSelection(eventId) {
     e.text._reviewVoiceCapture = capture;
   };
 
-  const onReviewLongPressPointerMove = (ev) => {
+  const onReviewLongPressMove = (ev) => {
     const capture = e.text._reviewVoiceCapture;
-    if (!capture || capture.pointerId !== ev.pointerId) return;
+    if (!capture) return;
     if (!capture.longPressTimer) return;
-    const dx = ev.clientX - capture.startX;
-    const dy = ev.clientY - capture.startY;
+    const clientX = ev.touches ? ev.touches[0].clientX : ev.clientX;
+    const clientY = ev.touches ? ev.touches[0].clientY : ev.clientY;
+    const dx = clientX - capture.startX;
+    const dy = clientY - capture.startY;
     const distance = Math.hypot(dx, dy);
     if (distance < REVIEW_LONG_PRESS_MOVE_TOLERANCE_PX) return;
     capture.cancelled = true;
@@ -3932,17 +3955,10 @@ function setupTextSelection(eventId) {
     clearReviewVoiceHint();
   };
 
-  const onReviewLongPressPointerUp = (ev) => {
+  const onReviewLongPressEnd = (ev) => {
     const capture = e.text._reviewVoiceCapture;
-    if (!capture) return;
-    if (capture.source !== 'long_press' || capture.pointerId !== ev.pointerId) return;
+    if (!capture || capture.source !== 'long_press') return;
     if (capture.longPressTimer) {
-      capture.cancelled = true;
-      cleanupReviewVoiceCapture(capture, false);
-      clearReviewVoiceHint();
-      return;
-    }
-    if (!capture.active) {
       capture.cancelled = true;
       cleanupReviewVoiceCapture(capture, false);
       clearReviewVoiceHint();
@@ -3951,13 +3967,39 @@ function setupTextSelection(eventId) {
     void stopAndSubmitReviewVoiceCapture(capture);
   };
 
-  e.text._reviewLongPressPointerDownHandler = onReviewLongPressPointerDown;
-  e.text._reviewLongPressPointerMoveHandler = onReviewLongPressPointerMove;
-  e.text._reviewLongPressPointerUpHandler = onReviewLongPressPointerUp;
-  e.text.addEventListener('pointerdown', onReviewLongPressPointerDown);
-  window.addEventListener('pointermove', onReviewLongPressPointerMove);
-  window.addEventListener('pointerup', onReviewLongPressPointerUp);
-  window.addEventListener('pointercancel', onReviewLongPressPointerUp);
+  const onReviewLPTouchStart = (ev) => onReviewLongPressStart(ev, true);
+  const onReviewLPTouchEnd = (ev) => {
+    if (reviewLongPressIsTouch) onReviewLongPressEnd(ev);
+  };
+  const onReviewLPTouchMove = (ev) => {
+    if (reviewLongPressIsTouch) onReviewLongPressMove(ev);
+  };
+  const onReviewLPMouseDown = (ev) => {
+    if (reviewLongPressIsTouch) return;
+    onReviewLongPressStart(ev, false);
+  };
+  const onReviewLPMouseUp = (ev) => {
+    if (reviewLongPressIsTouch) return;
+    onReviewLongPressEnd(ev);
+  };
+  const onReviewLPMouseMove = (ev) => {
+    if (reviewLongPressIsTouch) return;
+    onReviewLongPressMove(ev);
+  };
+
+  e.text._reviewLPTouchStartHandler = onReviewLPTouchStart;
+  e.text._reviewLPTouchEndHandler = onReviewLPTouchEnd;
+  e.text._reviewLPTouchMoveHandler = onReviewLPTouchMove;
+  e.text._reviewLPMouseDownHandler = onReviewLPMouseDown;
+  e.text._reviewLPMouseUpHandler = onReviewLPMouseUp;
+  e.text._reviewLPMouseMoveHandler = onReviewLPMouseMove;
+  e.text.addEventListener('touchstart', onReviewLPTouchStart, { passive: false });
+  window.addEventListener('touchend', onReviewLPTouchEnd);
+  window.addEventListener('touchcancel', onReviewLPTouchEnd);
+  window.addEventListener('touchmove', onReviewLPTouchMove);
+  e.text.addEventListener('mousedown', onReviewLPMouseDown);
+  window.addEventListener('mouseup', onReviewLPMouseUp);
+  window.addEventListener('mousemove', onReviewLPMouseMove);
 
   const onReviewAnchorPointer = (ev) => {
     if (activeTextEventId !== eventId) return;
