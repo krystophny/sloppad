@@ -225,6 +225,75 @@ func TestSessionClosedAfterError(t *testing.T) {
 	}
 }
 
+func TestSessionItemCompletedForwarding(t *testing.T) {
+	srv := newTestServer(t, func(conn *websocket.Conn, msg map[string]interface{}, _ int) {
+		id := msg["id"]
+		_ = conn.WriteJSON(map[string]interface{}{
+			"id": id,
+			"result": map[string]interface{}{
+				"turn": map[string]interface{}{"id": "turn-edit"},
+			},
+		})
+		// Emit a fileChange item before the agentMessage.
+		_ = conn.WriteJSON(map[string]interface{}{
+			"method": "item/completed",
+			"params": map[string]interface{}{
+				"item": map[string]interface{}{
+					"type": "fileChange",
+				},
+			},
+		})
+		_ = conn.WriteJSON(map[string]interface{}{
+			"method": "item/completed",
+			"params": map[string]interface{}{
+				"item": map[string]interface{}{
+					"type": "agentMessage",
+					"text": "done editing",
+				},
+			},
+		})
+		_ = conn.WriteJSON(map[string]interface{}{
+			"method": "turn/completed",
+			"params": map[string]interface{}{
+				"turn": map[string]interface{}{"id": "turn-edit", "status": "completed"},
+			},
+		})
+	})
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	client, err := NewClient(wsURL)
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	ctx := context.Background()
+	sess, err := client.OpenSession(ctx, "/tmp", "")
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	defer sess.Close()
+
+	var itemEvents []StreamEvent
+	resp, err := sess.SendTurn(ctx, "edit file", "", func(ev StreamEvent) {
+		if ev.Type == "item_completed" {
+			itemEvents = append(itemEvents, ev)
+		}
+	})
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if resp.Message != "done editing" {
+		t.Fatalf("unexpected message: %q", resp.Message)
+	}
+	if len(itemEvents) != 1 {
+		t.Fatalf("expected 1 item_completed event, got %d", len(itemEvents))
+	}
+	if itemEvents[0].Message != "fileChange" {
+		t.Fatalf("expected fileChange type, got %q", itemEvents[0].Message)
+	}
+}
+
 func TestSessionCompactEvent(t *testing.T) {
 	srv := newTestServer(t, func(conn *websocket.Conn, msg map[string]interface{}, _ int) {
 		id := msg["id"]

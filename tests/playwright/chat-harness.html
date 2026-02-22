@@ -22,29 +22,25 @@
       </header>
 
       <div id="workspace">
-        <div id="canvas-tab-bar" role="tablist" aria-label="Canvas tabs"></div>
-        <div id="canvas-viewport">
-          <section id="canvas-chat" class="canvas-pane is-active" aria-label="Chat">
-            <div id="chat-history" aria-live="polite"></div>
-          </section>
-          <section id="canvas-text" class="canvas-pane" aria-label="Text artifact" style="display:none"></section>
-          <section id="canvas-image" class="canvas-pane" aria-label="Image artifact" style="display:none"><img id="canvas-img" alt="artifact"></section>
-          <section id="canvas-pdf" class="canvas-pane" aria-label="PDF artifact" style="display:none"></section>
+        <div id="canvas-column" style="display:none">
+          <div id="canvas-viewport">
+            <section id="canvas-text" class="canvas-pane" aria-label="Text artifact"></section>
+            <section id="canvas-image" class="canvas-pane" aria-label="Image artifact"><img id="canvas-img" alt="artifact"></section>
+            <section id="canvas-pdf" class="canvas-pane" aria-label="PDF artifact"></section>
+          </div>
         </div>
-        <form id="prompt-bar" autocomplete="off">
-          <span id="prompt-status" class="prompt-status is-idle" aria-live="polite"></span>
-          <textarea id="prompt-input" rows="1" placeholder="Message, or hold to speak"></textarea>
-          <button id="prompt-send" type="submit">Send</button>
-        </form>
+        <div id="chat-column">
+          <div id="chat-history" aria-live="polite"></div>
+          <form id="prompt-bar" autocomplete="off">
+            <span id="prompt-status" class="prompt-status is-idle" aria-live="polite"></span>
+            <textarea id="prompt-input" rows="1" placeholder="Message, or hold to speak"></textarea>
+            <button id="prompt-send" type="submit">Send</button>
+          </form>
+        </div>
       </div>
     </div>
   </div>
 
-  <select id="canvas-mark-type" style="display:none">
-    <option value="highlight">Highlight</option>
-    <option value="comment_point">Point Comment</option>
-  </select>
-  <input id="canvas-mark-comment" type="text" style="display:none">
   <div id="project-overview" class="project-overview is-hidden"></div>
   <div id="project-cards" class="project-cards"></div>
   <form id="project-create-form" style="display:none"></form>
@@ -175,21 +171,27 @@
       }
       start(timeslice) {
         this.state = 'recording';
+        this._timeslice = timeslice;
         window.__harnessLog.push({ type: 'recorder', action: 'start', timeslice });
-        this._chunkInterval = setInterval(() => {
-          if (this.state !== 'recording') {
-            clearInterval(this._chunkInterval);
-            return;
-          }
-          const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' });
-          this._emit('dataavailable', { data: blob });
-        }, 50);
+        if (timeslice && timeslice > 0) {
+          this._chunkInterval = setInterval(() => {
+            if (this.state !== 'recording') {
+              clearInterval(this._chunkInterval);
+              return;
+            }
+            const blob = new Blob([new Uint8Array([1, 2, 3])], { type: this.mimeType });
+            this._emit('dataavailable', { data: blob });
+          }, 50);
+        }
       }
       stop() {
         this.state = 'inactive';
         if (this._chunkInterval) clearInterval(this._chunkInterval);
         window.__harnessLog.push({ type: 'recorder', action: 'stop' });
+        // Per spec: stop() fires a final dataavailable then stop event.
+        const blob = new Blob([new Uint8Array([1, 2, 3, 4, 5])], { type: this.mimeType });
         setTimeout(() => {
+          this._emit('dataavailable', { data: blob });
           this._emit('stop', {});
         }, 10);
       }

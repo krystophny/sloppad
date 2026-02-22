@@ -1,5 +1,5 @@
 import { marked } from './vendor/marked.esm.js';
-import { renderCanvas, clearCanvas, initCanvasControls } from './canvas.js';
+import { renderCanvas, clearCanvas, getLocationFromPoint, getLocationFromSelection, showLineHighlight, clearLineHighlight, escapeHtml, sanitizeHtml } from './canvas.js';
 
 const state = {
   sessionId: 'local',
@@ -10,9 +10,8 @@ const state = {
   chatWsHasConnected: false,
   chatSessionId: '',
   chatMode: 'chat',
-  activePane: 'chat',
-  artifactTabs: [],
-  dismissedArtifactIds: new Set(),
+  hasArtifact: false,
+  promptContext: null,
   projects: [],
   defaultProjectId: '',
   serverActiveProjectId: '',
@@ -37,7 +36,7 @@ export function getState() {
   return state;
 }
 
-window._taburaApp = { getState, acquireMicStream, sttStart, sttSendChunk, sttStop, sttCancel };
+window._taburaApp = { getState, acquireMicStream, sttStart, sttSendBlob, sttStop, sttCancel };
 
 const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_CHAT_MATH_SEGMENT_';
 const DEV_UI_RELOAD_POLL_MS = 1500;
@@ -59,34 +58,6 @@ renderer.code = ({ text, lang }) => {
   return `<pre><code class="language-${safeLang}">${escapeHtml(text || '')}</code></pre>\n`;
 };
 marked.setOptions({ breaks: true, renderer });
-
-function escapeHtml(text) {
-  return String(text || '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function sanitizeHtml(html) {
-  const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-  const dangerous = doc.querySelectorAll('script,iframe,object,embed,link[rel="import"],form,svg,base,style');
-  dangerous.forEach((el) => el.remove());
-  doc.querySelectorAll('*').forEach((el) => {
-    for (const attr of [...el.attributes]) {
-      const val = attr.value.trim().toLowerCase();
-      const isDangerous = attr.name.startsWith('on')
-        || val.startsWith('javascript:')
-        || val.startsWith('vbscript:')
-        || (val.startsWith('data:') && !val.startsWith('data:image/'));
-      if (isDangerous) {
-        el.removeAttribute(attr.name);
-      }
-    }
-  });
-  return doc.body.innerHTML;
-}
 
 function extractMathSegments(markdownSource) {
   const source = String(markdownSource || '');
@@ -274,19 +245,21 @@ function setActiveProjectID(projectID) {
 
 
 function newMediaRecorder(stream) {
-  let recorder = null;
-  try {
-    const preferredType = 'audio/webm;codecs=opus';
-    if (typeof window.MediaRecorder?.isTypeSupported === 'function'
-      && window.MediaRecorder.isTypeSupported(preferredType)) {
-      recorder = new window.MediaRecorder(stream, { mimeType: preferredType });
-    } else {
-      recorder = new window.MediaRecorder(stream);
+  const candidates = [
+    'audio/ogg;codecs=opus',
+    'audio/webm;codecs=opus',
+  ];
+  const isSupported = typeof window.MediaRecorder?.isTypeSupported === 'function'
+    ? (t) => window.MediaRecorder.isTypeSupported(t)
+    : () => false;
+  for (const mt of candidates) {
+    if (isSupported(mt)) {
+      try {
+        return new window.MediaRecorder(stream, { mimeType: mt });
+      } catch (_) { /* try next */ }
     }
-  } catch (_) {
-    recorder = new window.MediaRecorder(stream);
   }
-  return recorder;
+  return new window.MediaRecorder(stream);
 }
 
 
@@ -308,7 +281,9 @@ function acquireMicStream() {
     _cachedMicStream = null;
   }
   if (_micStreamPromise) return _micStreamPromise;
-  _micStreamPromise = navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+  _micStreamPromise = navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, autoGainControl: true, noiseSuppression: true },
+  }).then((stream) => {
     _cachedMicStream = stream;
     _micStreamPromise = null;
     return stream;
@@ -338,13 +313,12 @@ function sttStart(mimeType) {
   ws.send(JSON.stringify({ type: 'stt_start', mime_type: mimeType || 'audio/webm' }));
 }
 
-function sttSendChunk(blob) {
-  if (!_sttActive) return;
+function sttSendBlob(blob) {
+  if (!_sttActive) return Promise.resolve();
   const ws = state.chatWs;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  if (!blob || typeof blob.arrayBuffer !== 'function' || blob.size <= 0) return;
-  blob.arrayBuffer().then((buf) => {
-    if (!_sttActive) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return Promise.resolve();
+  if (!blob || blob.size <= 0) return Promise.resolve();
+  return blob.arrayBuffer().then((buf) => {
     if (!state.chatWs || state.chatWs.readyState !== WebSocket.OPEN) return;
     state.chatWs.send(buf);
   });
@@ -476,24 +450,27 @@ async function beginChatVoiceCapture(opts) {
     autoSend: Boolean(opts?.autoSend),
     mediaStream: null,
     mediaRecorder: null,
+    chunks: [],
   };
   state.chatVoiceCapture = capture;
   showStatus('recording...');
   try {
     const stream = await acquireMicStream();
     if (state.chatVoiceCapture !== capture) return;
-    sttStart('audio/webm');
-    if (state.chatVoiceCapture !== capture) return;
     const recorder = newMediaRecorder(stream);
+    capture.mimeType = recorder.mimeType || 'audio/webm';
+    if (state.chatVoiceCapture !== capture) return;
     capture.mediaStream = stream;
     capture.mediaRecorder = recorder;
     capture.active = true;
     setSendButtonRecording(true);
     recorder.addEventListener('dataavailable', (ev) => {
       if (!ev?.data || ev.data.size <= 0) return;
-      sttSendChunk(ev.data);
+      capture.chunks.push(ev.data);
     });
-    recorder.start(300);
+    // No timeslice: one dataavailable fires on stop() with all audio
+    // in a single valid container. Avoids Firefox chunk concatenation bugs.
+    recorder.start();
     if (capture.stopRequested) {
       void stopChatVoiceCaptureAndApply();
     }
@@ -518,6 +495,14 @@ async function stopChatVoiceCaptureAndApply() {
   let remoteStopped = false;
   try {
     await stopChatVoiceMediaAndFlush(capture);
+    // Send all collected audio as one blob, then stt_stop.
+    const mimeType = capture.mimeType || 'audio/webm';
+    sttStart(mimeType);
+    if (capture.chunks.length > 0) {
+      const blob = new Blob(capture.chunks, { type: mimeType });
+      capture.chunks = [];
+      await sttSendBlob(blob);
+    }
     const result = await sttStop();
     remoteStopped = true;
     const transcript = String(result?.text || '').trim();
@@ -560,84 +545,93 @@ function cancelChatVoiceCapture() {
   state.chatVoiceCapture = null;
 }
 
-function switchPane(paneId) {
-  const viewport = document.getElementById('canvas-viewport');
-  if (!viewport) return;
-  const panes = viewport.querySelectorAll('.canvas-pane');
-  panes.forEach((pane) => pane.classList.remove('is-active'));
-  const target = paneId === 'chat'
-    ? document.getElementById('canvas-chat')
-    : document.getElementById(paneId);
-  if (target) {
-    target.classList.add('is-active');
-  }
-  state.activePane = paneId || 'chat';
-  renderTabBar();
-  if (paneId === 'chat') {
-    const host = chatHistoryEl();
-    if (host) scrollChatToBottom(host);
-    window.setTimeout(() => focusChatInput({ placeCursorAtEnd: true }), 0);
-  }
-}
-
-function addArtifactTab(eventId, title, kind) {
-  if (state.dismissedArtifactIds.has(eventId)) return;
-  const existing = state.artifactTabs.find((t) => t.id === eventId);
-  if (existing) {
-    existing.title = title || existing.title;
-    existing.kind = kind || existing.kind;
-  } else {
-    state.artifactTabs.push({ id: eventId, title: title || 'Artifact', kind: kind || 'text' });
-  }
-  const paneId = kind === 'image' ? 'canvas-image'
-    : kind === 'pdf' ? 'canvas-pdf'
-    : 'canvas-text';
-  renderTabBar();
-  switchPane(paneId);
-}
-
-function removeArtifactTab(eventId) {
-  state.dismissedArtifactIds.add(eventId);
-  state.artifactTabs = state.artifactTabs.filter((t) => t.id !== eventId);
-  renderTabBar();
-  switchPane('chat');
-}
-
-function renderTabBar() {
-  const bar = document.getElementById('canvas-tab-bar');
-  if (!bar) return;
-  bar.innerHTML = '';
-
-  const chatTab = document.createElement('button');
-  chatTab.type = 'button';
-  chatTab.className = 'canvas-tab';
-  if (state.activePane === 'chat') chatTab.classList.add('is-active');
-  chatTab.textContent = 'Chat';
-  chatTab.addEventListener('click', () => switchPane('chat'));
-  bar.appendChild(chatTab);
-
-  for (const tab of state.artifactTabs) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'canvas-tab';
-    const paneId = tab.kind === 'image' ? 'canvas-image'
-      : tab.kind === 'pdf' ? 'canvas-pdf'
-      : 'canvas-text';
-    if (state.activePane === paneId) btn.classList.add('is-active');
-    btn.textContent = tab.title;
-
-    const close = document.createElement('span');
-    close.className = 'canvas-tab-close';
-    close.textContent = '\u00d7';
-    close.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      removeArtifactTab(tab.id);
+function showCanvasColumn(paneId) {
+  const col = document.getElementById('canvas-column');
+  if (!col) return;
+  const viewport = col.querySelector('#canvas-viewport');
+  if (viewport) {
+    viewport.querySelectorAll('.canvas-pane').forEach((p) => {
+      p.style.display = 'none';
+      p.classList.remove('is-active');
     });
-
-    btn.appendChild(close);
-    btn.addEventListener('click', () => switchPane(paneId));
-    bar.appendChild(btn);
+    const target = document.getElementById(paneId);
+    if (target) {
+      target.style.display = '';
+      target.classList.add('is-active');
+    }
   }
+  col.style.display = '';
+  state.hasArtifact = true;
+  // On mobile, add close button if not present
+  if (window.innerWidth < 768 && !col.querySelector('.canvas-close-btn')) {
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'canvas-close-btn';
+    closeBtn.textContent = '\u00d7 Close';
+    closeBtn.addEventListener('click', () => hideCanvasColumn());
+    col.appendChild(closeBtn);
+  }
+}
+
+function hideCanvasColumn() {
+  const col = document.getElementById('canvas-column');
+  if (col) col.style.display = 'none';
+  state.hasArtifact = false;
+  clearPromptContext();
+  clearLineHighlight();
+  const host = chatHistoryEl();
+  if (host) scrollChatToBottom(host);
+  window.setTimeout(() => focusChatInput({ placeCursorAtEnd: true }), 0);
+}
+
+function setPromptContext(ctx) {
+  state.promptContext = ctx || null;
+  renderPromptContext();
+}
+
+function clearPromptContext() {
+  state.promptContext = null;
+  renderPromptContext();
+}
+
+function renderPromptContext() {
+  const bar = document.getElementById('prompt-bar');
+  if (!bar) return;
+  let badge = bar.querySelector('.prompt-context');
+  if (!state.promptContext) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'prompt-context';
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'prompt-context-dismiss';
+    dismiss.textContent = '\u00d7';
+    dismiss.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      clearPromptContext();
+      clearLineHighlight();
+    });
+    badge.appendChild(document.createTextNode(''));
+    badge.appendChild(dismiss);
+    const status = bar.querySelector('.prompt-status');
+    if (status) {
+      status.after(badge);
+    } else {
+      bar.prepend(badge);
+    }
+  }
+  const ctx = state.promptContext;
+  let label = `Line ${ctx.line} of "${ctx.title}"`;
+  if (ctx.selectedText) {
+    const preview = ctx.selectedText.length > 30
+      ? ctx.selectedText.slice(0, 30) + '...'
+      : ctx.selectedText;
+    label = `"${preview}" (Line ${ctx.line})`;
+  }
+  badge.firstChild.textContent = label;
 }
 
 function chatHistoryEl() {
@@ -1204,11 +1198,9 @@ function handleChatEvent(payload) {
   if (type === 'action') {
     const action = String(payload.action || '').trim();
     if (action === 'open_canvas') {
-      switchPane('canvas-text');
+      showCanvasColumn('canvas-text');
     } else if (action === 'open_chat') {
-      switchPane('chat');
-    } else if (action === 'commit_canvas') {
-      void commitCanvasFromChat();
+      hideCanvasColumn();
     }
     return;
   }
@@ -1285,6 +1277,23 @@ function handleChatEvent(payload) {
     return;
   }
 
+  if (type === 'chat_cleared') {
+    clearChatHistory();
+    resetAssistantTurnTracking({ clearError: true });
+    appendPlainMessage('system', 'Chat cleared.');
+    state.contextUsed = 0;
+    state.contextMax = 0;
+    updateContextIndicator();
+    return;
+  }
+
+  if (type === 'chat_compacted') {
+    void loadChatHistory().catch(() => {});
+    const message = String(payload.message || 'Chat compacted.').trim();
+    appendPlainMessage('system', message);
+    return;
+  }
+
   if (type === 'error') {
     const turnID = String(payload.turn_id || '').trim();
     const row = takePendingRow(turnID);
@@ -1317,9 +1326,7 @@ async function switchProject(projectID) {
   closeCanvasWs();
   clearChatHistory();
   clearCanvas();
-  state.artifactTabs = [];
-  renderTabBar();
-  switchPane('chat');
+  hideCanvasColumn();
   resetAssistantTurnTracking({ clearError: true });
   setActiveProjectID(nextProjectID);
   try {
@@ -1347,8 +1354,19 @@ async function switchProject(projectID) {
 async function sendChatMessage() {
   const input = document.getElementById('prompt-input');
   if (!(input instanceof HTMLTextAreaElement)) return;
-  const text = input.value.trim();
+  let text = input.value.trim();
   if (!text || !state.chatSessionId) return;
+  // Prepend prompt context (tap-to-reference location)
+  if (state.promptContext) {
+    const ctx = state.promptContext;
+    let prefix = `[Line ${ctx.line} of "${ctx.title}"]`;
+    if (ctx.selectedText) {
+      prefix = `[Line ${ctx.line} of "${ctx.title}": "${ctx.selectedText}"]`;
+    }
+    text = `${prefix} ${text}`;
+    clearPromptContext();
+    clearLineHighlight();
+  }
   state.assistantLastError = '';
   updateAssistantActivityIndicator();
   input.value = '';
@@ -1362,11 +1380,13 @@ async function sendChatMessage() {
     updateAssistantActivityIndicator();
   }
 
+  const body = { text };
+
   try {
     const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
     });
     if (!resp.ok) {
       const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
@@ -1448,16 +1468,13 @@ function openCanvasWs() {
       const payload = JSON.parse(event.data);
       renderCanvas(payload);
       if (payload.event_id && payload.kind && payload.kind !== 'clear_canvas') {
-        const kind = payload.kind === 'image_artifact' ? 'image'
-          : payload.kind === 'pdf_artifact' ? 'pdf'
-          : 'text';
-        addArtifactTab(payload.event_id, payload.title || 'Artifact', kind);
+        const paneId = payload.kind === 'image_artifact' ? 'canvas-image'
+          : payload.kind === 'pdf_artifact' ? 'canvas-pdf'
+          : 'canvas-text';
+        showCanvasColumn(paneId);
       }
       if (payload.kind === 'clear_canvas') {
-        state.artifactTabs = [];
-        state.dismissedArtifactIds.clear();
-        renderTabBar();
-        switchPane('chat');
+        hideCanvasColumn();
       }
     } catch (_) {
       // ignore malformed payloads
@@ -1486,10 +1503,10 @@ async function loadCanvasSnapshot(sessionID = state.sessionId) {
       renderCanvas(payload.event);
       const ev = payload.event;
       if (ev.event_id && ev.kind && ev.kind !== 'clear_canvas') {
-        const kind = ev.kind === 'image_artifact' ? 'image'
-          : ev.kind === 'pdf_artifact' ? 'pdf'
-          : 'text';
-        addArtifactTab(ev.event_id, ev.title || 'Artifact', kind);
+        const paneId = ev.kind === 'image_artifact' ? 'canvas-image'
+          : ev.kind === 'pdf_artifact' ? 'canvas-pdf'
+          : 'canvas-text';
+        showCanvasColumn(paneId);
       }
       return;
     }
@@ -1518,44 +1535,6 @@ async function runChatCommand(command) {
   }
 }
 
-async function commitCanvasFromChat() {
-  try {
-    const commitRequestTimeoutMs = 45000;
-    const controller = new AbortController();
-    const timeoutID = window.setTimeout(() => controller.abort(), commitRequestTimeoutMs);
-    let resp;
-    try {
-      resp = await fetch(`/api/canvas/${encodeURIComponent(state.sessionId)}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          include_draft: true,
-          chat_session_id: state.chatSessionId || '',
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      window.clearTimeout(timeoutID);
-    }
-    if (!resp.ok) {
-      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
-      appendPlainMessage('system', `Commit failed: ${detail}`);
-      return;
-    }
-    const data = await resp.json().catch(() => ({}));
-    if (data.routed_to_chat) {
-      switchPane('chat');
-    } else {
-      appendPlainMessage('system', 'Draft annotations committed.');
-    }
-  } catch (err) {
-    if (err && err.name === 'AbortError') {
-      appendPlainMessage('system', 'Commit failed: request timed out after 45s');
-      return;
-    }
-    appendPlainMessage('system', `Commit failed: ${String(err?.message || err)}`);
-  }
-}
 
 function bindUi() {
   document.getElementById('btn-projects')?.addEventListener('click', () => {
@@ -1687,7 +1666,7 @@ function bindUi() {
         inputHoldActive = true;
         if (isTouch) input.blur();
         input.classList.add('is-recording');
-        void beginChatVoiceCapture({ autoSend: true });
+        void beginChatVoiceCapture();
       }, CHAT_SEND_HOLD_MS);
     };
     const inputHoldEnd = () => {
@@ -1733,6 +1712,11 @@ function bindUi() {
     }
 
     if (ev.key === 'Escape' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+      if (state.promptContext) {
+        clearPromptContext();
+        clearLineHighlight();
+        return;
+      }
       ev.preventDefault();
       void cancelActiveAssistantTurn();
       return;
@@ -1814,8 +1798,8 @@ function bindUi() {
     window.setTimeout(() => focusChatInput({ placeCursorAtEnd: true }), 20);
   });
 
-  const chatPane = document.getElementById('canvas-chat');
-  chatPane?.addEventListener('click', (ev) => {
+  const chatColumn = document.getElementById('chat-column');
+  chatColumn?.addEventListener('click', (ev) => {
     const target = ev.target;
     if (target instanceof Element) {
       if (target.closest('button,a,input,textarea,select,[contenteditable="true"]')) return;
@@ -1824,6 +1808,103 @@ function bindUi() {
     }
     focusChatInput({ placeCursorAtEnd: true });
   });
+
+  const canvasText = document.getElementById('canvas-text');
+  if (canvasText) {
+    // Touch long-press for mobile PTT with context
+    let artHoldTimer = null;
+    let artHoldActive = false;
+    let artHoldX = 0;
+    let artHoldY = 0;
+    const ART_HOLD_MOVE_THRESHOLD = 5;
+
+    canvasText.addEventListener('touchstart', (ev) => {
+      if (ev.touches.length !== 1) return;
+      const t = ev.touches[0];
+      artHoldActive = false;
+      artHoldX = t.clientX;
+      artHoldY = t.clientY;
+      artHoldTimer = window.setTimeout(() => {
+        artHoldTimer = null;
+        artHoldActive = true;
+        const loc = getLocationFromPoint(artHoldX, artHoldY);
+        if (loc) {
+          setPromptContext(loc);
+          showLineHighlight(artHoldX, artHoldY);
+          void beginChatVoiceCapture({ autoSend: true });
+        }
+      }, CHAT_SEND_HOLD_MS);
+    }, { passive: true });
+
+    canvasText.addEventListener('touchmove', (ev) => {
+      if (!artHoldTimer) return;
+      if (ev.touches.length !== 1) return;
+      const t = ev.touches[0];
+      const dx = t.clientX - artHoldX;
+      const dy = t.clientY - artHoldY;
+      if (Math.sqrt(dx * dx + dy * dy) > ART_HOLD_MOVE_THRESHOLD) {
+        if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; }
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+      if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; return; }
+      if (artHoldActive || state.chatVoiceCapture) {
+        artHoldActive = false;
+        void stopChatVoiceCaptureAndApply();
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; }
+      artHoldActive = false;
+    });
+
+    // Mouse long-press for PTT with context (desktop)
+    canvasText.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      artHoldActive = false;
+      artHoldX = ev.clientX;
+      artHoldY = ev.clientY;
+      artHoldTimer = window.setTimeout(() => {
+        artHoldTimer = null;
+        artHoldActive = true;
+        const loc = getLocationFromPoint(artHoldX, artHoldY);
+        if (loc) {
+          setPromptContext(loc);
+          showLineHighlight(artHoldX, artHoldY);
+          void beginChatVoiceCapture({ autoSend: true });
+        }
+      }, CHAT_SEND_HOLD_MS);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; return; }
+      if (artHoldActive || state.chatVoiceCapture) {
+        artHoldActive = false;
+        void stopChatVoiceCaptureAndApply();
+      }
+    });
+
+    // Right-click sets prompt context (desktop tap-to-reference)
+    canvasText.addEventListener('contextmenu', (ev) => {
+      const loc = getLocationFromPoint(ev.clientX, ev.clientY);
+      if (loc) {
+        ev.preventDefault();
+        setPromptContext(loc);
+        showLineHighlight(ev.clientX, ev.clientY);
+        focusChatInput({ placeCursorAtEnd: true });
+      }
+    });
+
+    // Text selection sets prompt context with selected text
+    canvasText.addEventListener('mouseup', () => {
+      const loc = getLocationFromSelection();
+      if (loc) {
+        setPromptContext(loc);
+      }
+    });
+  }
 }
 
 function warmMicStream() {
@@ -1835,14 +1916,14 @@ function warmMicStream() {
 
 async function init() {
   bindUi();
+
   warmMicStream();
   updateAssistantActivityIndicator();
   startDevReloadWatcher();
   startAssistantActivityWatcher();
-  initCanvasControls();
   setProjectOverviewVisible(false);
   clearCanvas();
-  switchPane('chat');
+  hideCanvasColumn();
   showStatus('starting...');
 
   await fetchProjects();

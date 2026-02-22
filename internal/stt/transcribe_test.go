@@ -146,3 +146,35 @@ func TestIsAllowedMimeType(t *testing.T) {
 		})
 	}
 }
+
+func TestIsWhisperHallucination(t *testing.T) {
+	hallucinations := []string{
+		"Thank you.",
+		"thank you",
+		"THANK YOU!",
+		"Thank you for watching.",
+		"Thanks for watching",
+		"Subscribe to my channel",
+		"you",
+		"Bye.",
+		"The end",
+		"  thank you  ",
+	}
+	for _, s := range hallucinations {
+		if !IsWhisperHallucination(s) {
+			t.Errorf("IsWhisperHallucination(%q) = false, want true", s)
+		}
+	}
+	legitimate := []string{
+		"Hello world",
+		"Thank you very much for helping me with the code",
+		"Please fix the bug in the login form",
+		"Can you subscribe me to the newsletter",
+		"The meeting ended",
+	}
+	for _, s := range legitimate {
+		if IsWhisperHallucination(s) {
+			t.Errorf("IsWhisperHallucination(%q) = true, want false", s)
+		}
+	}
+}

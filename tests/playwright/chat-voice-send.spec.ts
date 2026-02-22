@@ -91,12 +91,14 @@ test('touch hold on Send button starts voice recording after threshold', async (
   await touchStart(page, '#prompt-send');
   await page.waitForTimeout(500);
 
-  await waitForSTTAction(page, 'start');
   await waitForLogEntry(page, 'recorder', 'start');
 
   await touchEnd(page, '#prompt-send');
-  await waitForSTTAction(page, 'stop');
   await waitForLogEntry(page, 'recorder', 'stop');
+  // stt_start, blob send, stt_stop all happen on release
+  await waitForSTTAction(page, 'start');
+  await waitForSTTAction(page, 'append');
+  await waitForSTTAction(page, 'stop');
 
   const log = await getLog(page);
   const sttActions = log.filter(e => e.type === 'stt').map(e => e.action);
@@ -154,9 +156,10 @@ test('mouse hold on Send button starts voice recording (desktop)', async ({ page
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   await page.mouse.up();
+  await waitForSTTAction(page, 'start');
   await waitForSTTAction(page, 'stop');
 
   const log = await getLog(page);
@@ -204,7 +207,7 @@ test('Send button shows recording state while voice capture is active', async ({
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   // During recording: recording state
   await expect(btn).toHaveText('Rec');
@@ -224,7 +227,6 @@ test('second tap on Send button stops recording (touch)', async ({ page }) => {
   // Start recording with touch hold
   await touchStart(page, '#prompt-send');
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
   await waitForLogEntry(page, 'recorder', 'start');
 
   // Release the first touch
@@ -235,7 +237,7 @@ test('second tap on Send button stops recording (touch)', async ({ page }) => {
   await clearLog(page);
   await touchStart(page, '#prompt-send');
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   // Second tap (touchstart again) should stop the recording
   await clearLog(page);
@@ -254,7 +256,7 @@ test('second click on Send button stops recording (mouse)', async ({ page }) => 
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   // Release mouse (first hold ends normally)
   await page.mouse.up();
@@ -264,7 +266,7 @@ test('second click on Send button stops recording (mouse)', async ({ page }) => 
   await clearLog(page);
   await page.mouse.down();
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   // Click (mousedown) while recording should stop it
   await clearLog(page);
@@ -279,7 +281,6 @@ test('touch hold on empty chat input starts voice recording', async ({ page }) =
   await touchStart(page, '#prompt-input');
   await page.waitForTimeout(500);
 
-  await waitForSTTAction(page, 'start');
   await waitForLogEntry(page, 'recorder', 'start');
 
   const inputRecording = await page.locator('#prompt-input').evaluate(
@@ -305,7 +306,7 @@ test('mouse hold on empty chat input starts voice recording (desktop)', async ({
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.waitForTimeout(500);
-  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
 
   await page.mouse.up();
   await waitForSTTAction(page, 'stop');
@@ -327,4 +328,60 @@ test('hold on chat input with text does NOT start voice recording', async ({ pag
   const log = await getLog(page);
   const sttActions = log.filter(e => e.type === 'stt');
   expect(sttActions).toHaveLength(0);
+});
+
+test('stt_start sends recorder mimeType to server', async ({ page }) => {
+  await clearLog(page);
+  await touchStart(page, '#prompt-send');
+  await page.waitForTimeout(500);
+  await waitForLogEntry(page, 'recorder', 'start');
+
+  await touchEnd(page, '#prompt-send');
+  await waitForSTTAction(page, 'start');
+
+  const log = await getLog(page);
+  const startEntry = log.find(e => e.type === 'stt' && e.action === 'start');
+  expect(startEntry).toBeTruthy();
+  // MockMediaRecorder sets mimeType to 'audio/webm;codecs=opus'
+  expect(startEntry!.mime_type).toBe('audio/webm;codecs=opus');
+});
+
+test('all audio data arrives before stt_stop', async ({ page }) => {
+  await clearLog(page);
+  await touchStart(page, '#prompt-send');
+  await page.waitForTimeout(500);
+  await waitForLogEntry(page, 'recorder', 'start');
+
+  await touchEnd(page, '#prompt-send');
+  await waitForSTTAction(page, 'stop');
+
+  const log = await getLog(page);
+  const sttLog = log.filter(e => e.type === 'stt');
+  const startIdx = sttLog.findIndex(e => e.action === 'start');
+  const appendIdx = sttLog.findIndex(e => e.action === 'append');
+  const stopIdx = sttLog.findIndex(e => e.action === 'stop');
+
+  expect(startIdx).toBeGreaterThanOrEqual(0);
+  expect(appendIdx).toBeGreaterThan(startIdx);
+  expect(stopIdx).toBeGreaterThan(appendIdx);
+});
+
+test('voice transcription result populates prompt input', async ({ page }) => {
+  // Use chat input hold (not send button) so autoSend is false
+  // and the transcription stays in the input field.
+  await clearLog(page);
+  const input = page.locator('#prompt-input');
+  const box = await input.boundingBox();
+  if (!box) throw new Error('chat input not found');
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(500);
+  await waitForLogEntry(page, 'recorder', 'start');
+
+  await page.mouse.up();
+  await waitForSTTAction(page, 'stop');
+
+  // MockWebSocket returns stt_result with text 'hello world'
+  await expect(input).toHaveValue('hello world');
 });

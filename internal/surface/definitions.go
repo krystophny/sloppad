@@ -30,31 +30,6 @@ var MCPTools = []Tool{
 		Required:    []string{"session_id", "kind"},
 	},
 	{
-		Name:        "canvas_mark_set",
-		Description: "Create or update a mark (selection/annotation) on the active artifact.",
-		Required:    []string{"session_id", "intent", "type", "target_kind", "target"},
-	},
-	{
-		Name:        "canvas_mark_delete",
-		Description: "Delete a mark by id.",
-		Required:    []string{"session_id", "mark_id"},
-	},
-	{
-		Name:        "canvas_marks_list",
-		Description: "List marks for a session, optionally filtered by artifact/intent.",
-		Required:    []string{"session_id"},
-	},
-	{
-		Name:        "canvas_mark_focus",
-		Description: "Set or clear currently focused mark.",
-		Required:    []string{"session_id"},
-	},
-	{
-		Name:        "canvas_commit",
-		Description: "Commit draft marks to persistent annotations and write sidecar/PDF annotations.",
-		Required:    []string{"session_id"},
-	},
-	{
 		Name:        "canvas_status",
 		Description: "Get current session status and active artifact metadata.",
 		Required:    []string{"session_id"},
@@ -105,7 +80,6 @@ var WebRouteSections = []RouteSection{
 		Title: "Canvas/files",
 		Routes: []string{
 			"GET /api/canvas/{session_id}/snapshot",
-			"POST /api/canvas/{session_id}/commit",
 			"GET /api/files/{session_id}/*",
 		},
 	},

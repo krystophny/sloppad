@@ -313,10 +313,13 @@ func (c *Client) readTurnUntilComplete(ctx context.Context, conn *websocket.Conn
 		switch method {
 		case "item/completed":
 			if item, _ := params["item"].(map[string]interface{}); item != nil {
-				if typ, _ := item["type"].(string); typ == "agentMessage" {
+				typ, _ := item["type"].(string)
+				if typ == "agentMessage" {
 					if text, _ := item["text"].(string); strings.TrimSpace(text) != "" {
 						message = text
 					}
+				} else if typ != "" && onEvent != nil {
+					onEvent(StreamEvent{Type: "item_completed", ThreadID: threadID, TurnID: turnID, Message: typ})
 				}
 			}
 		case "turn/completed":

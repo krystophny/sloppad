@@ -15,22 +15,12 @@
 </head>
 <body>
   <div id="harness-root">
-    <div id="canvas-tab-bar"></div>
     <div id="canvas-viewport">
       <section id="canvas-text" class="canvas-pane" style="display:none"></section>
       <section id="canvas-image" class="canvas-pane" style="display:none"><img id="canvas-img" alt="artifact"></section>
       <section id="canvas-pdf" class="canvas-pane" style="display:none"></section>
     </div>
   </div>
-
-  <select id="canvas-mark-type" style="display:none">
-    <option value="highlight">Highlight</option>
-    <option value="underline">Underline</option>
-    <option value="strikeout">Strikeout</option>
-    <option value="squiggly">Squiggly</option>
-    <option value="comment_point">Point Comment</option>
-  </select>
-  <input id="canvas-mark-comment" type="text" style="display:none">
 
   <script type="module">
     window.__TABURA_UNDO_TIMEOUT_MS = 80;
@@ -79,8 +69,7 @@
       sttFailStop = failStop;
     };
 
-    const { renderCanvas, clearCanvas, initCanvasControls } = await import('../../internal/web/static/canvas.js');
-    initCanvasControls();
+    const { renderCanvas, clearCanvas } = await import('../../internal/web/static/canvas.js');
     window.renderHarnessArtifact = (event) => renderCanvas(event);
     window.clearHarnessCanvas = () => clearCanvas();
     window.getHarnessMessages = () => harnessMessages.slice();

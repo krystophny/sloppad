@@ -315,6 +315,38 @@ func (a *App) executeChatCommand(sessionID, raw string) (map[string]interface{},
 			"queued_canceled": queuedCanceled,
 			"message":         message,
 		}, nil
+	case "clear":
+		if err := a.store.ClearChatMessages(sessionID); err != nil {
+			return nil, err
+		}
+		if err := a.store.ResetChatSessionThread(sessionID); err != nil {
+			return nil, err
+		}
+		a.closeAppSession(sessionID)
+		a.broadcastChatEvent(sessionID, map[string]interface{}{
+			"type": "chat_cleared",
+		})
+		return map[string]interface{}{
+			"name":    "clear",
+			"message": "Chat history cleared.",
+		}, nil
+	case "compact":
+		// Close the current app-server session, forcing a fresh thread on
+		// the next turn. The new thread gets only recent local history as
+		// initial context, which is equivalent to a context compaction.
+		a.closeAppSession(sessionID)
+		if err := a.store.ResetChatSessionThread(sessionID); err != nil {
+			return nil, err
+		}
+		message := "Context compacted. Next message starts a fresh app-server thread."
+		a.broadcastChatEvent(sessionID, map[string]interface{}{
+			"type":    "chat_compacted",
+			"message": message,
+		})
+		return map[string]interface{}{
+			"name":    "compact",
+			"message": message,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown command: /%s", name)
 	}
@@ -499,7 +531,6 @@ func (a *App) runAssistantTurn(sessionID string) {
 	cwd := a.cwdForProjectKey(session.ProjectKey)
 	appSess, resumed, sessErr := a.getOrCreateAppSession(sessionID, cwd)
 	if sessErr != nil {
-		// Fall back to single-shot mode.
 		a.runAssistantTurnLegacy(sessionID, session, messages)
 		return
 	}
@@ -525,11 +556,14 @@ func (a *App) runAssistantTurn(sessionID string) {
 		a.unregisterActiveChatTurn(sessionID, runID)
 	}()
 
+	go a.watchCanvasFile(ctx, session.ProjectKey)
+
 	latestMessage := ""
 	latestTurnID := ""
 	persistedAssistantID := int64(0)
 	persistedAssistantText := ""
 	persistWriteFailed := false
+
 	persistAssistantSnapshot := func(text string) {
 		candidate := strings.TrimSpace(text)
 		if candidate == "" {
@@ -660,6 +694,8 @@ func (a *App) runAssistantTurn(sessionID string) {
 		assistantText = cleaned
 	}
 
+	a.refreshCanvasFromDisk(session.ProjectKey)
+
 	if persistedAssistantID == 0 {
 		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
 		if storeErr != nil {
@@ -711,6 +747,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		cancel()
 		a.unregisterActiveChatTurn(sessionID, runID)
 	}()
+
+	go a.watchCanvasFile(ctx, session.ProjectKey)
 
 	latestMessage := ""
 	latestTurnID := ""
@@ -834,6 +872,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		}
 		assistantText = cleaned
 	}
+
+	a.refreshCanvasFromDisk(session.ProjectKey)
 
 	if persistedAssistantID == 0 {
 		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
@@ -965,11 +1005,10 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("When appropriate, include these action markers in your response:\n\n")
 	b.WriteString("- To show text/markdown as an artifact tab: wrap content in :::canvas_show{title=\"Title\"}...:::\n")
 	b.WriteString("- To show code as an artifact tab: wrap in :::canvas_show{title=\"file.go\" kind=\"code\"}...:::\n")
-	b.WriteString("- When asked to apply review comments, output the full revised document wrapped in canvas_show markers.\n\n")
+	b.WriteString("- When the user references a location in an artifact (e.g. [Line 42 of \"file.go\"]), apply the request at that location.\n\n")
 	b.WriteString("## Guidelines\n")
 	b.WriteString("- Use canvas_show for any substantial content (documents, code, analysis) so the user can review it in an artifact tab.\n")
 	b.WriteString("- For short answers or conversational replies, respond normally without canvas markers.\n")
-	b.WriteString("- When applying review comments from a commit, output the complete revised artifact.\n\n")
 
 	if canvas != nil && canvas.HasArtifact {
 		b.WriteString("## Current Artifact\n")

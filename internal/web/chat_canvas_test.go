@@ -1,6 +1,10 @@
 package web
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestParseCanvasActions_NoMarkers(t *testing.T) {
 	actions, cleaned := parseCanvasActions("Hello world, no markers here.")
@@ -132,6 +136,66 @@ func TestBuildPromptFromHistory_WithCanvasContext(t *testing.T) {
 	prompt := buildPromptFromHistory("chat", nil, ctx)
 	if !containsSubstring(prompt, "Report.md") {
 		t.Error("prompt should include artifact title")
+	}
+}
+
+func TestResolveArtifactFilePath_AbsoluteExists(t *testing.T) {
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "main.go")
+	if err := os.WriteFile(f, []byte("package main"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveArtifactFilePath(tmp, f)
+	if got != f {
+		t.Fatalf("expected %q, got %q", f, got)
+	}
+}
+
+func TestResolveArtifactFilePath_RelativeExists(t *testing.T) {
+	tmp := t.TempDir()
+	f := filepath.Join(tmp, "src", "app.go")
+	if err := os.MkdirAll(filepath.Join(tmp, "src"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("package app"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveArtifactFilePath(tmp, "src/app.go")
+	if got != f {
+		t.Fatalf("expected %q, got %q", f, got)
+	}
+}
+
+func TestResolveArtifactFilePath_NoExtension(t *testing.T) {
+	got := resolveArtifactFilePath("/tmp", "Meeting Notes")
+	if got != "" {
+		t.Fatalf("expected empty for non-file title, got %q", got)
+	}
+}
+
+func TestResolveArtifactFilePath_MissingFile(t *testing.T) {
+	got := resolveArtifactFilePath("/tmp", "nonexistent.go")
+	if got != "" {
+		t.Fatalf("expected empty for missing file, got %q", got)
+	}
+}
+
+func TestResolveArtifactFilePath_EmptyTitle(t *testing.T) {
+	got := resolveArtifactFilePath("/tmp", "")
+	if got != "" {
+		t.Fatalf("expected empty for empty title, got %q", got)
+	}
+}
+
+func TestResolveArtifactFilePath_Directory(t *testing.T) {
+	tmp := t.TempDir()
+	sub := filepath.Join(tmp, "subdir.d")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	got := resolveArtifactFilePath(tmp, "subdir.d")
+	if got != "" {
+		t.Fatalf("expected empty for directory, got %q", got)
 	}
 }
 

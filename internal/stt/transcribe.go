@@ -77,6 +77,9 @@ func TranscribeWithVoxType(mimeType string, data []byte) (string, error) {
 	if text == "" {
 		return "", errors.New("voxtype produced no transcript output")
 	}
+	if IsWhisperHallucination(text) {
+		return "", errors.New("rejected likely hallucination on silent audio")
+	}
 	return text, nil
 }
 
@@ -103,6 +106,37 @@ func ParseVoxTypeTranscript(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+// IsWhisperHallucination returns true if the text matches a known Whisper
+// phantom output produced on silent or near-silent audio.
+func IsWhisperHallucination(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	// Strip trailing punctuation for matching.
+	t = strings.TrimRight(t, ".!?,;: ")
+	for _, h := range whisperHallucinations {
+		if t == h {
+			return true
+		}
+	}
+	return false
+}
+
+var whisperHallucinations = []string{
+	"thank you",
+	"thanks for watching",
+	"thank you for watching",
+	"thanks for listening",
+	"thank you for listening",
+	"subscribe",
+	"subscribe to my channel",
+	"like and subscribe",
+	"please subscribe",
+	"subtitles by the amara.org community",
+	"subtitles created by amara.org community",
+	"you",
+	"bye",
+	"the end",
 }
 
 // FileExtFromMime returns a file extension (with leading dot) for common
