@@ -437,81 +437,53 @@ body.desktop-canvas-only #toolbar {
   outline: none;
 }
 
-.canvas-mark-overlay {
+.transient-marker {
   position: absolute;
-  inset: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffd400;
+  border: 1.5px solid #e0bc00;
   pointer-events: none;
-  z-index: 2;
+  z-index: 10;
+  animation: transient-marker-pulse 1.2s ease-in-out infinite;
 }
 
-.canvas-mark-rect {
-  position: absolute;
-  border-radius: 2px;
-  opacity: 0.35;
-  pointer-events: none;
+@keyframes transient-marker-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.3); }
 }
 
-.canvas-mark-highlight { background: #ffd400; }
-.canvas-mark-underline { background: rgba(0, 0, 0, 0.08); border-bottom: 2px solid #111111; opacity: 0.9; }
-.canvas-mark-strikeout { background: rgba(255, 90, 90, 0.2); border-top: 2px solid #ff5a5a; opacity: 0.9; }
-.canvas-mark-squiggly { background: rgba(89, 206, 143, 0.25); border-bottom: 2px dotted #59ce8f; opacity: 0.9; }
-.canvas-mark-comment_point { background: #ffd400; border: 1px solid #e0bc00; border-radius: 4px; opacity: 0.45; }
-
-.canvas-review-popover {
-  position: absolute;
-  z-index: 12;
-  min-width: 220px;
-  max-width: min(360px, calc(100% - 20px));
-  background: var(--bg-surface);
+.prompt-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
   border: 1px solid var(--border);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
-  border-radius: 6px;
-  padding: 0.55rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
 }
 
-.canvas-review-popover input {
-  width: 100%;
-  box-sizing: border-box;
+.prompt-context-dismiss {
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 0.65rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 0 0.1rem;
 }
 
-.canvas-review-popover-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.35rem;
-}
-
-.canvas-review-voice-hint {
-  position: absolute;
-  right: 0.65rem;
-  top: 0.65rem;
-  z-index: 13;
-  max-width: min(420px, calc(100% - 1.3rem));
-  padding: 0.35rem 0.55rem;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  color: var(--text);
-  font-size: 0.76rem;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-}
-
-.canvas-review-voice-hint[data-tone="recording"] {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.canvas-review-voice-hint[data-tone="ok"] {
-  border-color: #2d8a49;
-  color: #2d8a49;
-}
-
-.canvas-review-voice-hint[data-tone="error"] {
-  border-color: var(--error);
-  color: var(--error);
+.prompt-context-dismiss:hover {
+  opacity: 1;
 }
 
 .sr-only {

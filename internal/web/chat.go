@@ -965,11 +965,10 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("When appropriate, include these action markers in your response:\n\n")
 	b.WriteString("- To show text/markdown as an artifact tab: wrap content in :::canvas_show{title=\"Title\"}...:::\n")
 	b.WriteString("- To show code as an artifact tab: wrap in :::canvas_show{title=\"file.go\" kind=\"code\"}...:::\n")
-	b.WriteString("- When asked to apply review comments, output the full revised document wrapped in canvas_show markers.\n\n")
+	b.WriteString("- When the user references a location in an artifact (e.g. [Line 42 of \"file.go\"]), apply the request at that location.\n\n")
 	b.WriteString("## Guidelines\n")
 	b.WriteString("- Use canvas_show for any substantial content (documents, code, analysis) so the user can review it in an artifact tab.\n")
 	b.WriteString("- For short answers or conversational replies, respond normally without canvas markers.\n")
-	b.WriteString("- When applying review comments from a commit, output the complete revised artifact.\n\n")
 
 	if canvas != nil && canvas.HasArtifact {
 		b.WriteString("## Current Artifact\n")

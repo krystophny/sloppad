@@ -1,5 +1,5 @@
 import { marked } from './vendor/marked.esm.js';
-import { renderCanvas, clearCanvas, initCanvasControls } from './canvas.js';
+import { renderCanvas, clearCanvas, initCanvasControls, getLocationFromPoint, getLocationFromSelection, showTransientMarker, clearTransientMarker } from './canvas.js';
 
 const state = {
   sessionId: 'local',
@@ -31,6 +31,7 @@ const state = {
   chatVoiceCapture: null,
   contextUsed: 0,
   contextMax: 0,
+  promptContext: null,
 };
 
 export function getState() {
@@ -573,11 +574,59 @@ function switchPane(paneId) {
   }
   state.activePane = paneId || 'chat';
   renderTabBar();
+  clearPromptContext();
   if (paneId === 'chat') {
     const host = chatHistoryEl();
     if (host) scrollChatToBottom(host);
     window.setTimeout(() => focusChatInput({ placeCursorAtEnd: true }), 0);
   }
+}
+
+function setPromptContext(ctx) {
+  state.promptContext = ctx || null;
+  clearTransientMarker();
+  renderPromptContextBadge();
+}
+
+function clearPromptContext() {
+  state.promptContext = null;
+  clearTransientMarker();
+  renderPromptContextBadge();
+}
+
+function renderPromptContextBadge() {
+  const bar = document.getElementById('prompt-bar');
+  if (!bar) return;
+  let badge = bar.querySelector('.prompt-context');
+  if (!state.promptContext) {
+    if (badge) badge.remove();
+    return;
+  }
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.className = 'prompt-context';
+    const dismiss = document.createElement('button');
+    dismiss.className = 'prompt-context-dismiss';
+    dismiss.type = 'button';
+    dismiss.textContent = '\u00d7';
+    dismiss.addEventListener('click', () => clearPromptContext());
+    badge.appendChild(document.createTextNode(''));
+    badge.appendChild(dismiss);
+    const input = bar.querySelector('#prompt-input');
+    if (input) {
+      bar.insertBefore(badge, input);
+    } else {
+      bar.prepend(badge);
+    }
+  }
+  const ctx = state.promptContext;
+  let label = '';
+  if (ctx.text) {
+    label = `"${ctx.text}" on line ${ctx.line} of "${ctx.title}"`;
+  } else {
+    label = `Line ${ctx.line} of "${ctx.title}"`;
+  }
+  badge.firstChild.textContent = label;
 }
 
 function addArtifactTab(eventId, title, kind) {
@@ -1207,8 +1256,6 @@ function handleChatEvent(payload) {
       switchPane('canvas-text');
     } else if (action === 'open_chat') {
       switchPane('chat');
-    } else if (action === 'commit_canvas') {
-      void commitCanvasFromChat();
     }
     return;
   }
@@ -1347,8 +1394,16 @@ async function switchProject(projectID) {
 async function sendChatMessage() {
   const input = document.getElementById('prompt-input');
   if (!(input instanceof HTMLTextAreaElement)) return;
-  const text = input.value.trim();
+  let text = input.value.trim();
   if (!text || !state.chatSessionId) return;
+  if (state.promptContext) {
+    const ctx = state.promptContext;
+    const loc = ctx.text
+      ? `[Line ${ctx.line} of "${ctx.title}": "${ctx.text}"]`
+      : `[Line ${ctx.line} of "${ctx.title}"]`;
+    text = `${loc} ${text}`;
+  }
+  clearPromptContext();
   state.assistantLastError = '';
   updateAssistantActivityIndicator();
   input.value = '';
@@ -1518,44 +1573,6 @@ async function runChatCommand(command) {
   }
 }
 
-async function commitCanvasFromChat() {
-  try {
-    const commitRequestTimeoutMs = 45000;
-    const controller = new AbortController();
-    const timeoutID = window.setTimeout(() => controller.abort(), commitRequestTimeoutMs);
-    let resp;
-    try {
-      resp = await fetch(`/api/canvas/${encodeURIComponent(state.sessionId)}/commit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          include_draft: true,
-          chat_session_id: state.chatSessionId || '',
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      window.clearTimeout(timeoutID);
-    }
-    if (!resp.ok) {
-      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
-      appendPlainMessage('system', `Commit failed: ${detail}`);
-      return;
-    }
-    const data = await resp.json().catch(() => ({}));
-    if (data.routed_to_chat) {
-      switchPane('chat');
-    } else {
-      appendPlainMessage('system', 'Draft annotations committed.');
-    }
-  } catch (err) {
-    if (err && err.name === 'AbortError') {
-      appendPlainMessage('system', 'Commit failed: request timed out after 45s');
-      return;
-    }
-    appendPlainMessage('system', `Commit failed: ${String(err?.message || err)}`);
-  }
-}
 
 function bindUi() {
   document.getElementById('btn-projects')?.addEventListener('click', () => {
@@ -1824,6 +1841,107 @@ function bindUi() {
     }
     focusChatInput({ placeCursorAtEnd: true });
   });
+
+  const canvasText = document.getElementById('canvas-text');
+  if (canvasText) {
+    let artHoldTimer = null;
+    let artHoldActive = false;
+    let artHoldIsTouch = false;
+    let artHoldX = 0;
+    let artHoldY = 0;
+
+    const artStartHold = (clientX, clientY, isTouch) => {
+      artHoldActive = false;
+      artHoldIsTouch = isTouch;
+      artHoldX = clientX;
+      artHoldY = clientY;
+      artHoldTimer = window.setTimeout(() => {
+        artHoldTimer = null;
+        artHoldActive = true;
+        const loc = getLocationFromPoint(artHoldX, artHoldY);
+        if (loc) {
+          showTransientMarker(artHoldX, artHoldY);
+          setPromptContext(loc);
+          void beginChatVoiceCapture({ autoSend: true });
+        }
+      }, CHAT_SEND_HOLD_MS);
+    };
+
+    const artEndHold = () => {
+      if (artHoldTimer) {
+        clearTimeout(artHoldTimer);
+        artHoldTimer = null;
+        artHoldIsTouch = false;
+        return;
+      }
+      if (artHoldActive || state.chatVoiceCapture) {
+        artHoldActive = false;
+        artHoldIsTouch = false;
+        void stopChatVoiceCaptureAndApply();
+      }
+    };
+
+    canvasText.addEventListener('touchstart', (ev) => {
+      if (ev.touches.length !== 1) return;
+      const t = ev.touches[0];
+      artStartHold(t.clientX, t.clientY, true);
+    }, { passive: true });
+
+    window.addEventListener('touchend', () => {
+      if (!artHoldIsTouch) return;
+      artEndHold();
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      if (!artHoldIsTouch) return;
+      if (artHoldTimer) {
+        clearTimeout(artHoldTimer);
+        artHoldTimer = null;
+      }
+      artHoldIsTouch = false;
+    });
+
+    canvasText.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      if (artHoldIsTouch) return;
+      artStartHold(ev.clientX, ev.clientY, false);
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (artHoldIsTouch) return;
+      artEndHold();
+    });
+
+    canvasText.addEventListener('click', (ev) => {
+      if (artHoldActive) {
+        artHoldActive = false;
+        return;
+      }
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      const loc = getLocationFromPoint(ev.clientX, ev.clientY);
+      if (loc) {
+        showTransientMarker(ev.clientX, ev.clientY);
+        setPromptContext(loc);
+        focusChatInput({ placeCursorAtEnd: true });
+      }
+    });
+
+    let selDebounce = null;
+    document.addEventListener('selectionchange', () => {
+      if (selDebounce) clearTimeout(selDebounce);
+      selDebounce = window.setTimeout(() => {
+        selDebounce = null;
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) return;
+        if (!canvasText.contains(sel.anchorNode)) return;
+        const loc = getLocationFromSelection();
+        if (loc) {
+          setPromptContext(loc);
+        }
+      }, 200);
+    });
+  }
 }
 
 function warmMicStream() {

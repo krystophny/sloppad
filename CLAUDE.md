@@ -9,6 +9,14 @@ Do not scan source/docs unless the command fails.
 
 Chat is the default pane. Artifacts (text, image, PDF) appear as closeable tabs in the canvas tab bar. A single prompt bar (`#prompt-input` + `#prompt-send`) serves all modes. No dual-mode switching.
 
+## Artifact Interaction (Tap-to-Reference)
+
+Tap/click on artifact text sets a transient marker and location context badge in the prompt bar (`Line N of "title"`). Long-press starts PTT voice recording with location context. Text selection captures the selected text as context. Context is prepended to the chat message on send and cleared after. No persistent marks, overlays, popovers, or commit lifecycle.
+
+Key selectors: `.transient-marker` (pulsing dot), `.prompt-context` (badge chip), `.prompt-context-dismiss` (X button).
+
+JS modules: `canvas.js` (core rendering + location capture, <500 lines), `canvas-mail.js` (mail triage UI), `app.js` (prompt context state + artifact interaction listeners).
+
 ## Post-Adjustment Artifact Rule
 
 After making a UI/interaction adjustment, always render a new test artifact in the local session (`session_id: local`) so the user can immediately try the latest behavior.

@@ -167,33 +167,10 @@ func (s *Server) callTool(name string, args map[string]interface{}) (map[string]
 		return s.adapter.CanvasArtifactShow(sid, "pdf", strArg(args, "title"), "", strArg(args, "path"), intArg(args, "page", 0), "", nil)
 	case "canvas_clear":
 		return s.adapter.CanvasArtifactShow(sid, "clear", "", "", "", 0, strArg(args, "reason"), nil)
-	case "canvas_mark_set":
-		target, _ := args["target"].(map[string]interface{})
-		return s.adapter.CanvasMarkSet(
-			sid,
-			strArg(args, "mark_id"),
-			strArg(args, "artifact_id"),
-			canvas.MarkIntent(strArg(args, "intent")),
-			canvas.MarkType(strArg(args, "type")),
-			canvas.TargetKind(strArg(args, "target_kind")),
-			target,
-			strArg(args, "comment"),
-			strArg(args, "author"),
-		)
-	case "canvas_mark_delete":
-		return s.adapter.CanvasMarkDelete(sid, strArg(args, "mark_id"))
-	case "canvas_marks_list":
-		return s.adapter.CanvasMarksList(sid, strArg(args, "artifact_id"), canvas.MarkIntent(strArg(args, "intent")), intArg(args, "limit", 0)), nil
-	case "canvas_mark_focus":
-		return s.adapter.CanvasMarkFocus(sid, strArg(args, "mark_id"))
-	case "canvas_commit":
-		return s.adapter.CanvasCommit(sid, strArg(args, "artifact_id"), boolArg(args, "include_draft", true))
 	case "canvas_status":
 		return s.adapter.CanvasStatus(sid), nil
 	case "canvas_history":
 		return s.adapter.CanvasHistory(sid, intArg(args, "limit", 20)), nil
-	case "canvas_selection":
-		return s.adapter.CanvasSelection(sid), nil
 	case "canvas_import_handoff":
 		return s.canvasImportHandoff(sid, args)
 	default:
@@ -611,7 +588,6 @@ func toolDefinitions() []map[string]interface{} {
 func resourceTemplates() []map[string]interface{} {
 	return []map[string]interface{}{
 		{"uriTemplate": "tabura://session/{session_id}", "name": "Canvas Session Status", "mimeType": "application/json", "description": "Current status for a canvas session."},
-		{"uriTemplate": "tabura://session/{session_id}/marks", "name": "Canvas Session Marks", "mimeType": "application/json", "description": "Current marks for a canvas session."},
 		{"uriTemplate": "tabura://session/{session_id}/history", "name": "Canvas Session History", "mimeType": "application/json", "description": "Recent event history for a canvas session."},
 	}
 }
@@ -619,7 +595,7 @@ func resourceTemplates() []map[string]interface{} {
 func resourcesList(adapter *canvas.Adapter) []map[string]interface{} {
 	out := []map[string]interface{}{}
 	for _, sid := range adapter.ListSessions() {
-		for _, uri := range []string{"tabura://session/" + sid, "tabura://session/" + sid + "/marks", "tabura://session/" + sid + "/history"} {
+		for _, uri := range []string{"tabura://session/" + sid, "tabura://session/" + sid + "/history"} {
 			out = append(out, map[string]interface{}{"uri": uri, "name": uri, "mimeType": "application/json"})
 		}
 	}
@@ -641,8 +617,6 @@ func readResource(adapter *canvas.Adapter, uri string) (map[string]interface{}, 
 		payload = adapter.CanvasStatus(sid)
 	} else {
 		switch parts[1] {
-		case "marks":
-			payload = adapter.CanvasMarksList(sid, "", "", 0)
 		case "history":
 			payload = adapter.CanvasHistory(sid, 100)
 		default:

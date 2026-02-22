@@ -4,354 +4,91 @@ import (
 	"testing"
 )
 
-func marksFromResult(t *testing.T, resp map[string]interface{}) []*Mark {
-	t.Helper()
-	list, ok := resp["marks"].([]*Mark)
-	if !ok {
-		t.Fatalf("expected []*Mark in marks result, got %T", resp["marks"])
-	}
-	return list
-}
-
-func TestClearDraftRemovesFocusedMarkAndDraftIndex(t *testing.T) {
+func TestCanvasSessionOpenAndStatus(t *testing.T) {
 	a := NewAdapter(t.TempDir(), nil, true)
-	sessionID := "s-clear-draft"
-
-	_, err := a.CanvasMarkSet(
-		sessionID,
-		"draft-a",
-		"artifact-a",
-		IntentDraft,
-		MarkHighlight,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 1, "line_end": 1},
-		"",
-		"",
-	)
-	if err != nil {
-		t.Fatalf("set draft mark a: %v", err)
+	resp := a.CanvasSessionOpen("s1", "review")
+	if resp["active"] != true {
+		t.Fatalf("expected active=true, got %v", resp["active"])
 	}
-	_, err = a.CanvasMarkSet(
-		sessionID,
-		"draft-b",
-		"artifact-b",
-		IntentDraft,
-		MarkHighlight,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 2, "line_end": 2},
-		"",
-		"",
-	)
-	if err != nil {
-		t.Fatalf("set draft mark b: %v", err)
-	}
-	if _, err := a.CanvasMarkFocus(sessionID, "draft-a"); err != nil {
-		t.Fatalf("focus draft mark: %v", err)
+	if resp["mode"] != "review" {
+		t.Fatalf("expected mode=review, got %v", resp["mode"])
 	}
 
-	a.HandleFeedback(`{"kind":"mark_clear_draft","session_id":"s-clear-draft","artifact_id":"artifact-a"}`)
-
-	marks := marksFromResult(t, a.CanvasMarksList(sessionID, "", "", 0))
-	if len(marks) != 1 || marks[0].MarkID != "draft-b" {
-		t.Fatalf("expected only draft-b to remain, got %#v", marks)
-	}
-	status := a.CanvasStatus(sessionID)
-	if status["focused_mark_id"] != nil {
-		t.Fatalf("expected focused_mark_id to clear after draft deletion, got %#v", status["focused_mark_id"])
-	}
-
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	record := a.sessions[sessionID]
-	if record == nil {
-		t.Fatalf("missing session record")
-	}
-	if _, ok := record.DraftByArtifactID["artifact-a"]; ok {
-		t.Fatalf("artifact-a draft index should be removed")
-	}
-	if got := record.DraftByArtifactID["artifact-b"]; got != "draft-b" {
-		t.Fatalf("expected artifact-b draft index to remain draft-b, got %q", got)
+	status := a.CanvasStatus("s1")
+	if status["mode"] != "review" {
+		t.Fatalf("expected status mode=review, got %v", status["mode"])
 	}
 }
 
-func TestCanvasCommitConvertsDraftAndCleansDraftIndex(t *testing.T) {
+func TestCanvasArtifactShowAndHistory(t *testing.T) {
 	a := NewAdapter(t.TempDir(), nil, true)
-	sessionID := "s-commit"
-
-	_, err := a.CanvasMarkSet(
-		sessionID,
-		"draft-a",
-		"artifact-a",
-		IntentDraft,
-		MarkHighlight,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 1, "line_end": 1},
-		"",
-		"",
-	)
+	resp, err := a.CanvasArtifactShow("s1", "text", "Doc", "# Hello", "", 0, "", nil)
 	if err != nil {
-		t.Fatalf("set draft mark: %v", err)
+		t.Fatalf("show text: %v", err)
 	}
-	_, err = a.CanvasMarkSet(
-		sessionID,
-		"persist-a",
-		"artifact-a",
-		IntentPersistent,
-		MarkCommentPoint,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 1, "line_end": 1},
-		"keep",
-		"",
-	)
-	if err != nil {
-		t.Fatalf("set persistent mark: %v", err)
+	if resp["kind"] != EventText {
+		t.Fatalf("expected kind=text_artifact, got %v", resp["kind"])
+	}
+	artifactID, _ := resp["artifact_id"].(string)
+	if artifactID == "" {
+		t.Fatalf("expected artifact_id")
 	}
 
-	resp, err := a.CanvasCommit(sessionID, "artifact-a", true)
-	if err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if got, _ := resp["converted_to_persistent"].(int); got != 1 {
-		t.Fatalf("expected converted_to_persistent=1, got %#v", resp["converted_to_persistent"])
-	}
-	if got, _ := resp["persistent_count"].(int); got != 2 {
-		t.Fatalf("expected persistent_count=2, got %#v", resp["persistent_count"])
-	}
-	sidecarPath, _ := resp["sidecar_path"].(string)
-	if sidecarPath == "" {
-		t.Fatalf("expected sidecar path from commit response")
+	status := a.CanvasStatus("s1")
+	if status["active_artifact_id"] != artifactID {
+		t.Fatalf("expected active_artifact_id=%s, got %v", artifactID, status["active_artifact_id"])
 	}
 
-	a.mu.RLock()
-	record := a.sessions[sessionID]
-	a.mu.RUnlock()
-	if record == nil {
-		t.Fatalf("missing session record")
-	}
-	if _, ok := record.DraftByArtifactID["artifact-a"]; ok {
-		t.Fatalf("artifact-a should not remain in draft index after commit")
-	}
-
-	marks := marksFromResult(t, a.CanvasMarksList(sessionID, "artifact-a", "", 0))
-	if len(marks) != 2 {
-		t.Fatalf("expected 2 marks for artifact-a, got %d", len(marks))
-	}
-	for _, m := range marks {
-		if m.Intent != IntentPersistent {
-			t.Fatalf("expected mark %s to be persistent after commit, got %q", m.MarkID, m.Intent)
-		}
+	hist := a.CanvasHistory("s1", 10)
+	events, _ := hist["history"].([]Event)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 history event, got %d", len(events))
 	}
 }
 
-func TestHandleFeedbackSelectionMarkCommitPipelineRetainsComment(t *testing.T) {
+func TestCanvasArtifactClear(t *testing.T) {
 	a := NewAdapter(t.TempDir(), nil, true)
-	const sessionID = "s-feedback-pipeline"
-	const artifactID = "artifact-review-1"
-	const markID = "draft-review-1"
-	const comment = "Persist this review note"
-
-	a.HandleFeedback(`{"kind":"text_selection","session_id":"s-feedback-pipeline","line_start":2,"line_end":2,"start_offset":7,"end_offset":18,"text":"review span"}`)
-	selectionResp := a.CanvasSelection(sessionID)
-	selection, ok := selectionResp["selection"].(Selection)
-	if !ok {
-		t.Fatalf("expected Selection payload, got %T", selectionResp["selection"])
-	}
-	if !selection.HasSelection {
-		t.Fatalf("expected selection to be set")
-	}
-	if selection.Text != "review span" {
-		t.Fatalf("expected selection text to persist, got %q", selection.Text)
-	}
-
-	a.HandleFeedback(`{"kind":"mark_set","session_id":"s-feedback-pipeline","mark_id":"draft-review-1","artifact_id":"artifact-review-1","intent":"draft","type":"highlight","target_kind":"text_range","target":{"line_start":2,"line_end":2,"start_offset":7,"end_offset":18},"comment":"Persist this review note"}`)
-
-	marks := marksFromResult(t, a.CanvasMarksList(sessionID, artifactID, "", 0))
-	if len(marks) != 1 {
-		t.Fatalf("expected one draft mark after mark_set feedback, got %d", len(marks))
-	}
-	if marks[0].MarkID != markID {
-		t.Fatalf("expected draft mark id %q, got %q", markID, marks[0].MarkID)
-	}
-	if marks[0].Intent != IntentDraft {
-		t.Fatalf("expected draft intent before commit, got %q", marks[0].Intent)
-	}
-	if marks[0].Comment != comment {
-		t.Fatalf("expected draft comment %q, got %q", comment, marks[0].Comment)
-	}
-
-	a.HandleFeedback(`{"kind":"mark_commit","session_id":"s-feedback-pipeline","artifact_id":"artifact-review-1","include_draft":true}`)
-
-	marks = marksFromResult(t, a.CanvasMarksList(sessionID, artifactID, "", 0))
-	if len(marks) != 1 {
-		t.Fatalf("expected one mark after commit, got %d", len(marks))
-	}
-	if marks[0].Intent != IntentPersistent {
-		t.Fatalf("expected committed mark intent %q, got %q", IntentPersistent, marks[0].Intent)
-	}
-	if marks[0].Comment != comment {
-		t.Fatalf("expected committed comment %q, got %q", comment, marks[0].Comment)
-	}
-
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	record := a.sessions[sessionID]
-	if record == nil {
-		t.Fatalf("missing session record")
-	}
-	if _, ok := record.DraftByArtifactID[artifactID]; ok {
-		t.Fatalf("expected no draft index for artifact after commit")
-	}
-}
-
-func TestHandleFeedbackMarkDeleteRemovesOnlyTargetMark(t *testing.T) {
-	a := NewAdapter(t.TempDir(), nil, true)
-	const sessionID = "s-feedback-delete"
-
-	a.HandleFeedback(`{"kind":"mark_set","session_id":"s-feedback-delete","mark_id":"draft-a","artifact_id":"artifact-a","intent":"draft","type":"comment_point","target_kind":"text_range","target":{"line_start":1,"line_end":1,"start_offset":0,"end_offset":0},"comment":"A"}`)
-	a.HandleFeedback(`{"kind":"mark_set","session_id":"s-feedback-delete","mark_id":"draft-b","artifact_id":"artifact-a","intent":"draft","type":"comment_point","target_kind":"text_range","target":{"line_start":2,"line_end":2,"start_offset":1,"end_offset":1},"comment":"B"}`)
-
-	a.HandleFeedback(`{"kind":"mark_delete","session_id":"s-feedback-delete","mark_id":"draft-a"}`)
-
-	marks := marksFromResult(t, a.CanvasMarksList(sessionID, "artifact-a", "", 0))
-	if len(marks) != 1 {
-		t.Fatalf("expected one remaining mark after mark_delete, got %d", len(marks))
-	}
-	if marks[0].MarkID != "draft-b" {
-		t.Fatalf("expected draft-b to remain, got %q", marks[0].MarkID)
-	}
-}
-
-func TestCanvasSessionOpenLoadsPersistedAnnotations(t *testing.T) {
-	tmpDir := t.TempDir()
-	const sessionID = "s-reload"
-
-	writer := NewAdapter(tmpDir, nil, true)
-	if _, err := writer.CanvasMarkSet(
-		sessionID,
-		"draft-to-persist",
-		"artifact-1",
-		IntentDraft,
-		MarkHighlight,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 3, "line_end": 3},
-		"",
-		"",
-	); err != nil {
-		t.Fatalf("set draft mark: %v", err)
-	}
-	if _, err := writer.CanvasMarkSet(
-		sessionID,
-		"persist-existing",
-		"artifact-2",
-		IntentPersistent,
-		MarkCommentPoint,
-		TargetTextRange,
-		map[string]interface{}{"line_start": 4, "line_end": 4},
-		"saved",
-		"",
-	); err != nil {
-		t.Fatalf("set persistent mark: %v", err)
-	}
-	if _, err := writer.CanvasCommit(sessionID, "", true); err != nil {
-		t.Fatalf("commit persisted annotations: %v", err)
-	}
-
-	reloaded := NewAdapter(tmpDir, nil, true)
-	openResp := reloaded.CanvasSessionOpen(sessionID, "")
-	if got, _ := openResp["marks_total"].(int); got != 2 {
-		t.Fatalf("expected marks_total=2 on open, got %#v", openResp["marks_total"])
-	}
-
-	marks := marksFromResult(t, reloaded.CanvasMarksList(sessionID, "", "", 0))
-	if len(marks) != 2 {
-		t.Fatalf("expected 2 reloaded marks, got %d", len(marks))
-	}
-	byID := map[string]*Mark{}
-	for _, m := range marks {
-		byID[m.MarkID] = m
-	}
-	if byID["draft-to-persist"] == nil || byID["persist-existing"] == nil {
-		t.Fatalf("reloaded mark ids mismatch: %#v", byID)
-	}
-	for id, m := range byID {
-		if m.Intent != IntentPersistent {
-			t.Fatalf("expected reloaded mark %s to be persistent, got %q", id, m.Intent)
-		}
-	}
-
-	reloaded.mu.RLock()
-	defer reloaded.mu.RUnlock()
-	record := reloaded.sessions[sessionID]
-	if record == nil {
-		t.Fatalf("missing reloaded session record")
-	}
-	if len(record.DraftByArtifactID) != 0 {
-		t.Fatalf("expected empty draft index after reload, got %#v", record.DraftByArtifactID)
-	}
-}
-
-func TestCanvasMarkLifecycleForPDFAndImageArtifacts(t *testing.T) {
-	a := NewAdapter(t.TempDir(), nil, true)
-	const sessionID = "s-media"
-
-	pdfShown, err := a.CanvasArtifactShow(sessionID, "pdf", "Doc", "", "/tmp/doc.pdf", 0, "", nil)
+	_, _ = a.CanvasArtifactShow("s1", "text", "Doc", "body", "", 0, "", nil)
+	_, err := a.CanvasArtifactShow("s1", "clear", "", "", "", 0, "done", nil)
 	if err != nil {
-		t.Fatalf("show pdf artifact: %v", err)
-	}
-	pdfArtifactID, _ := pdfShown["artifact_id"].(string)
-	if pdfArtifactID == "" {
-		t.Fatalf("expected pdf artifact_id")
-	}
-	if _, err := a.CanvasMarkSet(
-		sessionID,
-		"pdf-draft",
-		pdfArtifactID,
-		IntentDraft,
-		MarkHighlight,
-		TargetPDFQuads,
-		map[string]interface{}{"page": 1, "quads": []interface{}{map[string]interface{}{"x1": 1.0}}},
-		"",
-		"",
-	); err != nil {
-		t.Fatalf("set pdf draft mark: %v", err)
-	}
-	if _, err := a.CanvasCommit(sessionID, pdfArtifactID, true); err != nil {
-		t.Fatalf("commit pdf mark: %v", err)
-	}
-	pdfMarks := marksFromResult(t, a.CanvasMarksList(sessionID, pdfArtifactID, "", 0))
-	if len(pdfMarks) != 1 {
-		t.Fatalf("expected 1 pdf mark after commit, got %d", len(pdfMarks))
-	}
-	if pdfMarks[0].Intent != IntentPersistent {
-		t.Fatalf("expected committed pdf mark to be persistent, got %q", pdfMarks[0].Intent)
+		t.Fatalf("clear: %v", err)
 	}
 
-	imageShown, err := a.CanvasArtifactShow(sessionID, "image", "Image", "", "/tmp/image.png", 0, "", nil)
-	if err != nil {
-		t.Fatalf("show image artifact: %v", err)
+	status := a.CanvasStatus("s1")
+	if status["mode"] != "prompt" {
+		t.Fatalf("expected mode=prompt after clear, got %v", status["mode"])
 	}
-	imageArtifactID, _ := imageShown["artifact_id"].(string)
-	if imageArtifactID == "" {
-		t.Fatalf("expected image artifact_id")
+	if status["active_artifact_id"] != nil {
+		t.Fatalf("expected nil active_artifact_id after clear, got %v", status["active_artifact_id"])
 	}
-	if _, err := a.CanvasMarkSet(
-		sessionID,
-		"image-draft",
-		imageArtifactID,
-		IntentDraft,
-		MarkCommentPoint,
-		TargetPDFPoint,
-		map[string]interface{}{"x": 12.5, "y": 24.0},
-		"point",
-		"",
-	); err != nil {
-		t.Fatalf("set image draft mark: %v", err)
+}
+
+func TestHandleFeedbackNoOp(t *testing.T) {
+	a := NewAdapter(t.TempDir(), nil, true)
+	a.HandleFeedback(`{"kind":"mark_set","session_id":"s1"}`)
+	a.HandleFeedback(`{"kind":"text_selection","session_id":"s1"}`)
+	a.HandleFeedback("")
+	a.HandleFeedback("{invalid")
+}
+
+func TestListSessions(t *testing.T) {
+	a := NewAdapter(t.TempDir(), nil, true)
+	a.CanvasSessionOpen("b", "")
+	a.CanvasSessionOpen("a", "")
+	sessions := a.ListSessions()
+	if len(sessions) != 2 || sessions[0] != "a" || sessions[1] != "b" {
+		t.Fatalf("expected sorted [a, b], got %v", sessions)
 	}
-	if _, err := a.CanvasMarkDelete(sessionID, "image-draft"); err != nil {
-		t.Fatalf("delete image draft mark: %v", err)
+}
+
+func TestSetProcessState(t *testing.T) {
+	a := NewAdapter(t.TempDir(), nil, false)
+	a.SetProcessState(true, true, "")
+	status := a.CanvasStatus("new")
+	if status["headless"] != true {
+		t.Fatalf("expected headless=true, got %v", status["headless"])
 	}
-	imageMarks := marksFromResult(t, a.CanvasMarksList(sessionID, imageArtifactID, "", 0))
-	if len(imageMarks) != 0 {
-		t.Fatalf("expected deleted image mark to be gone, got %#v", imageMarks)
+	if status["canvas_process_alive"] != true {
+		t.Fatalf("expected canvas_process_alive=true, got %v", status["canvas_process_alive"])
 	}
 }
