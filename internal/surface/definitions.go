@@ -3,8 +3,8 @@ package surface
 import "strings"
 
 const (
-	ProtocolBlockBeginMarker = "<!-- TABULA_PROTOCOL:BEGIN -->"
-	ProtocolBlockEndMarker   = "<!-- TABULA_PROTOCOL:END -->"
+	ProtocolBlockBeginMarker = "<!-- TABURA_PROTOCOL:BEGIN -->"
+	ProtocolBlockEndMarker   = "<!-- TABURA_PROTOCOL:END -->"
 )
 
 type Tool struct {
@@ -119,7 +119,6 @@ var WebRouteSections = []RouteSection{
 			"POST /api/mail/draft-reply",
 			"POST /api/mail/draft-intent",
 			"POST /api/mail/stt",
-			"POST /api/stt/push-to-prompt",
 		},
 	},
 	{

@@ -299,7 +299,16 @@ body.desktop-canvas-only #panel-canvas {
   line-height: 1.6;
   white-space: pre-wrap;
   user-select: text;
+  -webkit-user-select: text;
   position: relative;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+}
+
+#canvas-text.review-longpress-active,
+#canvas-text.review-longpress-active * {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #canvas-pdf {
@@ -499,6 +508,10 @@ button[data-mail-record-action="trigger"],
 button[data-mail-record-action="stop"] {
   padding: 0.22rem 0.5rem;
   font-size: 0.74rem;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
 }
 
 .mail-record-indicator {
@@ -513,6 +526,12 @@ button[data-mail-record-action="stop"] {
 
 .mail-recording-active .mail-record-controls {
   border-color: var(--accent);
+}
+
+.mail-recording-active #canvas-text {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .mail-triage-table {
@@ -1234,6 +1253,24 @@ button[data-mail-record-action="stop"] {
   justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
+}
+#btn-chat-send {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s, color 0.15s;
+}
+#btn-chat-send.is-recording {
+  background: var(--bg);
+  color: var(--accent);
+  border: 2px solid var(--accent);
+}
+#chat-input.is-recording {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  caret-color: transparent;
 }
 
 .chat-compose-meta {

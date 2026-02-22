@@ -3,14 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tabula</title>
+  <title>タブラ tabura</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script>if(!Array.prototype.at){Array.prototype.at=function(i){return i<0?this[this.length+i]:this[i]};String.prototype.at=function(i){return i<0?this[this.length+i]:this[i]}}</script>
 </head>
 <body>
   <div id="app">
-    <div id="view-main" class="view">
+    <div id="view-login" class="view" style="display:none">
+      <div class="auth-card">
+        <h1>タブラ</h1>
+        <p id="login-prompt"></p>
+        <form id="login-form" autocomplete="off">
+          <input id="login-password" type="password" placeholder="Password" autofocus>
+          <button id="btn-login" type="submit">Login</button>
+          <div id="login-error" class="error"></div>
+        </form>
+      </div>
+    </div>
+    <div id="view-main" class="view" style="display:none">
       <header id="toolbar">
-        <span class="brand">Tabula</span>
+        <span class="brand">タブラ</span>
         <div id="project-tab-strip" role="tablist" aria-label="Projects"></div>
         <button id="btn-projects" class="tab-btn tab-btn-subtle" type="button">Projects</button>
         <span id="status-text">starting...</span>
@@ -63,10 +75,10 @@
               <button type="button" id="btn-open-canvas">Open Canvas</button>
               <button type="button" id="btn-commit-from-chat">Commit Draft</button>
             </div>
-            <textarea id="chat-input" rows="2" placeholder="Ask Tabula anything. Use /plan for planning mode."></textarea>
+            <textarea id="chat-input" rows="2" placeholder="Message, or hold to speak"></textarea>
             <div class="chat-compose-row">
               <div class="chat-compose-meta">
-                <span id="chat-hint">Enter sends. Shift+Enter inserts newline. Press Esc to stop.</span>
+                <span id="chat-hint">Enter sends. Shift+Enter newline. Hold input area to voice-send. Esc stops.</span>
                 <span id="chat-assistant-state" class="chat-assistant-state is-idle" aria-live="polite">Assistant idle</span>
               </div>
               <button id="btn-chat-send" type="submit">Send</button>

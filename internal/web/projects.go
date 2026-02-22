@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/krystophny/tabula/internal/protocol"
-	"github.com/krystophny/tabula/internal/serve"
-	"github.com/krystophny/tabula/internal/store"
+	"github.com/krystophny/tabura/internal/protocol"
+	"github.com/krystophny/tabura/internal/serve"
+	"github.com/krystophny/tabura/internal/store"
 )
 
 const projectServeStartTimeout = 10 * time.Second
@@ -469,6 +469,7 @@ func (a *App) startProjectServe(sessionID, projectDir string) error {
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
+			cancel()
 			return errors.New("project serve canceled")
 		default:
 		}
@@ -491,7 +492,7 @@ func (a *App) startProjectServe(sessionID, projectDir string) error {
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer stopCancel()
 	_ = projectApp.Stop(stopCtx)
-	return errors.New("project tabula serve did not become healthy in time")
+	return errors.New("project tabura serve did not become healthy in time")
 }
 
 func (a *App) ensureProjectCanvasReady(project store.Project) error {

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tabura Chat Harness</title>
+  <link rel="stylesheet" href="../../internal/web/static/style.css">
+  <style>
+    body { margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="view-main" class="view">
+      <header id="toolbar">
+        <span class="brand">Tabura</span>
+        <div id="project-tab-strip" role="tablist" aria-label="Projects"></div>
+        <button id="btn-projects" class="tab-btn tab-btn-subtle" type="button">Projects</button>
+        <span id="status-text">ready</span>
+        <span id="chat-mode-pill" class="badge">chat</span>
+        <div class="toolbar-spacer"></div>
+        <div id="main-tabs" role="tablist" aria-label="Primary views">
+          <button id="tab-chat" class="tab-btn is-active" type="button" role="tab" aria-selected="true">Chat</button>
+          <button id="tab-canvas" class="tab-btn" type="button" role="tab" aria-selected="false">Canvas</button>
+        </div>
+      </header>
+
+      <div id="workspace" class="workspace-chat">
+        <section id="panel-chat" class="panel" aria-label="Chat canvas">
+          <div id="chat-history" aria-live="polite"></div>
+          <form id="chat-form" autocomplete="off">
+            <div id="chat-action-row">
+              <button type="button" id="btn-plan-toggle">/plan</button>
+              <button type="button" id="btn-open-canvas">Open Canvas</button>
+              <button type="button" id="btn-commit-from-chat">Commit Draft</button>
+            </div>
+            <textarea id="chat-input" rows="2" placeholder="Message, or hold to speak"></textarea>
+            <div class="chat-compose-row">
+              <div class="chat-compose-meta">
+                <span id="chat-hint">Enter sends. Shift+Enter newline. Hold input area to voice-send. Esc stops.</span>
+                <span id="chat-assistant-state" class="chat-assistant-state is-idle" aria-live="polite">Assistant idle</span>
+              </div>
+              <button id="btn-chat-send" type="submit">Send</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="panel-canvas" class="panel" aria-label="Review canvas">
+          <div id="canvas-header"><span id="canvas-title">Canvas</span><span id="canvas-mode" class="badge">prompt</span></div>
+          <div id="canvas-content">
+            <div id="canvas-empty">No artifact.</div>
+            <div id="canvas-text" style="display:none"></div>
+            <div id="canvas-image" style="display:none"><img id="canvas-img" alt="artifact"></div>
+            <div id="canvas-pdf" style="display:none"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <select id="canvas-mark-type" style="display:none">
+    <option value="highlight">Highlight</option>
+    <option value="comment_point">Point Comment</option>
+  </select>
+  <input id="canvas-mark-comment" type="text" style="display:none">
+  <button id="btn-canvas-commit" type="button" style="display:none">Commit</button>
+  <button id="btn-canvas-clear-draft" type="button" style="display:none">Clear Draft</button>
+  <div id="project-overview" class="project-overview is-hidden"></div>
+  <div id="project-cards" class="project-cards"></div>
+  <form id="project-create-form" style="display:none"></form>
+  <span id="tab-canvas-indicator" style="display:none"></span>
+
+  <script>
+    // Harness log for test assertions
+    window.__harnessLog = [];
+
+    // Mock fetch for /api/setup etc.
+    const _realFetch = window.fetch;
+    window.fetch = async function(url, opts) {
+      const u = String(url);
+      if (u.includes('/api/setup')) {
+        return new Response(JSON.stringify({
+          has_password: true,
+          authenticated: true,
+          local_session: 'local',
+        }), { status: 200 });
+      }
+      if (u.includes('/api/projects') && u.includes('/activate')) {
+        return new Response(JSON.stringify({
+          project: {
+            id: 'test', name: 'Test', kind: 'managed', root_path: '/tmp',
+            chat_session_id: 'chat-1', canvas_session_id: 'local', chat_mode: 'chat',
+          },
+        }), { status: 200 });
+      }
+      if (u.includes('/api/projects')) {
+        return new Response(JSON.stringify({
+          projects: [{ id: 'test', name: 'Test', kind: 'managed', root_path: '/tmp' }],
+          default_project_id: 'test',
+          active_project_id: 'test',
+        }), { status: 200 });
+      }
+      if (u.includes('/api/chat/')) {
+        return new Response(JSON.stringify({ messages: [], turns: [] }), { status: 200 });
+      }
+      if (u.includes('/api/assistant/')) {
+        return new Response(JSON.stringify({ active: 0, queued: 0 }), { status: 200 });
+      }
+      if (u.includes('/api/runtime')) {
+        return new Response(JSON.stringify({ dev_mode: false, boot_id: 'test' }), { status: 200 });
+      }
+      return _realFetch.apply(this, arguments);
+    };
+
+    // Mock WebSocket with STT message handling
+    const _NativeWebSocket = window.WebSocket;
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      constructor() {
+        this.readyState = MockWebSocket.OPEN;
+        this.onopen = null;
+        this.onmessage = null;
+        this.onclose = null;
+        setTimeout(() => { if (this.onopen) this.onopen({}); }, 10);
+      }
+      send(data) {
+        if (data instanceof ArrayBuffer || data instanceof Blob) {
+          window.__harnessLog.push({ type: 'stt', action: 'append' });
+          return;
+        }
+        try {
+          const msg = JSON.parse(String(data));
+          if (msg.type === 'stt_start') {
+            window.__harnessLog.push({ type: 'stt', action: 'start', mime_type: msg.mime_type });
+          } else if (msg.type === 'stt_stop') {
+            window.__harnessLog.push({ type: 'stt', action: 'stop' });
+            const ws = this;
+            setTimeout(() => {
+              if (ws.onmessage) {
+                ws.onmessage({ data: JSON.stringify({ type: 'stt_result', text: 'hello world' }) });
+              }
+            }, 5);
+          } else if (msg.type === 'stt_cancel') {
+            window.__harnessLog.push({ type: 'stt', action: 'cancel' });
+          }
+        } catch (_) {}
+      }
+      close() { this.readyState = MockWebSocket.CLOSED; }
+    }
+    window.WebSocket = MockWebSocket;
+
+    // Mock getUserMedia - resolve instantly with a fake stream
+    const fakeTrack = {
+      stop() {},
+      kind: 'audio',
+      enabled: true,
+      readyState: 'live',
+    };
+    const fakeStream = {
+      getTracks() { return [fakeTrack]; },
+      getAudioTracks() { return [fakeTrack]; },
+    };
+    if (!navigator.mediaDevices) {
+      navigator.mediaDevices = {};
+    }
+    navigator.mediaDevices.getUserMedia = async () => fakeStream;
+
+    // Mock MediaRecorder: use ondataavailable/onstop callbacks (like real API)
+    // to avoid EventTarget dispatch issues with synthetic events
+    window.MediaRecorder = class MockMediaRecorder {
+      constructor() {
+        this.state = 'inactive';
+        this.mimeType = 'audio/webm;codecs=opus';
+        this._handlers = {};
+      }
+      static isTypeSupported() { return true; }
+      addEventListener(type, fn, opts) {
+        if (!this._handlers[type]) this._handlers[type] = [];
+        this._handlers[type].push({ fn, once: !!(opts && opts.once) });
+      }
+      removeEventListener(type, fn) {
+        if (!this._handlers[type]) return;
+        this._handlers[type] = this._handlers[type].filter(h => h.fn !== fn);
+      }
+      _emit(type, ev) {
+        const list = (this._handlers[type] || []).slice();
+        const keep = [];
+        for (const h of list) {
+          h.fn(ev);
+          if (!h.once) keep.push(h);
+        }
+        this._handlers[type] = keep;
+      }
+      start(timeslice) {
+        this.state = 'recording';
+        window.__harnessLog.push({ type: 'recorder', action: 'start', timeslice });
+        this._chunkInterval = setInterval(() => {
+          if (this.state !== 'recording') {
+            clearInterval(this._chunkInterval);
+            return;
+          }
+          const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' });
+          this._emit('dataavailable', { data: blob });
+        }, 50);
+      }
+      stop() {
+        this.state = 'inactive';
+        if (this._chunkInterval) clearInterval(this._chunkInterval);
+        window.__harnessLog.push({ type: 'recorder', action: 'stop' });
+        setTimeout(() => {
+          this._emit('stop', {});
+        }, 10);
+      }
+    };
+  </script>
+  <script type="module" src="../../internal/web/static/app.js"></script>
+  <script>
+    // Spy on unhandled promise rejections
+    window.addEventListener('unhandledrejection', (ev) => {
+      window.__harnessLog.push({ type: 'unhandled_rejection', message: String(ev.reason?.message || ev.reason) });
+    });
+  </script>
+</body>
+</html>

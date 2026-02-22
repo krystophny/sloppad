@@ -34,18 +34,15 @@ export function getState() {
   return state;
 }
 
-window._tabulaApp = { getState };
+window._taburaApp = { getState, acquireMicStream, sttStart, sttSendChunk, sttStop, sttCancel };
 
-const MATH_SEGMENT_TOKEN_PREFIX = '@@TABULA_CHAT_MATH_SEGMENT_';
+const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_CHAT_MATH_SEGMENT_';
 const DEV_UI_RELOAD_POLL_MS = 1500;
 const ASSISTANT_ACTIVITY_POLL_MS = 1200;
-const ACTIVE_PROJECT_STORAGE_KEY = 'tabula.activeProjectId';
+const ACTIVE_PROJECT_STORAGE_KEY = 'tabura.activeProjectId';
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
-const sttActionStart = 'start';
-const sttActionAppend = 'append';
-const sttActionStop = 'stop';
-const sttActionCancel = 'cancel';
+const CHAT_SEND_HOLD_MS = 300;
 let devReloadBootID = '';
 let devReloadTimer = null;
 let devReloadInFlight = false;
@@ -148,7 +145,7 @@ function showStatus(text) {
 
 function forceUiHardReload() {
   const url = new URL(window.location.href);
-  url.searchParams.set('__tabula_reload', Date.now().toString(36));
+  url.searchParams.set('__tabura_reload', Date.now().toString(36));
   window.location.replace(url.toString());
 }
 
@@ -273,21 +270,6 @@ function setActiveProjectID(projectID) {
   renderProjectCards();
 }
 
-function createPushToPromptSessionID() {
-  const rand = Math.random().toString(36).slice(2, 10);
-  return `ptp-chat-${Date.now().toString(36)}-${rand}`;
-}
-
-function base64FromBytes(bytes) {
-  if (!bytes || !bytes.length) return '';
-  const chunkSize = 0x8000;
-  let out = '';
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    out += String.fromCharCode(...chunk);
-  }
-  return btoa(out);
-}
 
 function newMediaRecorder(stream) {
   let recorder = null;
@@ -305,41 +287,6 @@ function newMediaRecorder(stream) {
   return recorder;
 }
 
-async function callPushToPromptAction(action, actionPayload = {}) {
-  const req = {
-    action,
-    ...actionPayload,
-  };
-  const customMCPURL = String(window.__TABULA_VOXTYPE_MCP_URL || '').trim();
-  if (customMCPURL) {
-    req.voxtype_mcp_url = customMCPURL;
-  }
-  const resp = await fetch('/api/stt/push-to-prompt', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  });
-  let responsePayload = {};
-  const raw = await resp.text();
-  if (raw) {
-    try {
-      responsePayload = JSON.parse(raw);
-    } catch (_) {
-      if (!resp.ok) {
-        throw new Error(raw);
-      }
-    }
-  }
-  if (!resp.ok) {
-    throw new Error(typeof responsePayload === 'object' && responsePayload !== null && responsePayload.error
-      ? responsePayload.error
-      : raw || 'push-to-prompt request failed');
-  }
-  if (typeof responsePayload !== 'object' || responsePayload === null) {
-    throw new Error('push-to-prompt request returned invalid response');
-  }
-  return responsePayload;
-}
 
 function canUseMicrophoneCapture() {
   return Boolean(window.MediaRecorder)
@@ -347,21 +294,124 @@ function canUseMicrophoneCapture() {
     && typeof navigator.mediaDevices.getUserMedia === 'function';
 }
 
-async function appendChatVoiceChunk(capture, chunkBlob) {
-  if (!capture?.sttSessionID) return;
-  if (!chunkBlob || typeof chunkBlob.arrayBuffer !== 'function' || chunkBlob.size <= 0) return;
-  const bytes = new Uint8Array(await chunkBlob.arrayBuffer());
-  if (!bytes.length) return;
-  const seq = Number(capture.appendSeq || 0);
-  capture.appendSeq = seq + 1;
-  const payload = {
-    session_id: capture.sttSessionID,
-    seq,
-    audio_base64: base64FromBytes(bytes),
-  };
-  const chain = capture.appendChain || Promise.resolve();
-  capture.appendChain = chain.then(() => callPushToPromptAction(sttActionAppend, payload));
-  await capture.appendChain;
+let _cachedMicStream = null;
+let _micStreamPromise = null;
+
+function acquireMicStream() {
+  if (_cachedMicStream) {
+    const tracks = _cachedMicStream.getAudioTracks();
+    if (tracks.length > 0 && tracks[0].readyState === 'live') {
+      return Promise.resolve(_cachedMicStream);
+    }
+    _cachedMicStream = null;
+  }
+  if (_micStreamPromise) return _micStreamPromise;
+  _micStreamPromise = navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    _cachedMicStream = stream;
+    _micStreamPromise = null;
+    return stream;
+  }).catch((err) => {
+    _micStreamPromise = null;
+    throw err;
+  });
+  return _micStreamPromise;
+}
+
+function releaseMicStream() {
+  if (!_cachedMicStream) return;
+  _cachedMicStream.getTracks().forEach((t) => t.stop());
+  _cachedMicStream = null;
+}
+
+let _sttResolve = null;
+let _sttReject = null;
+let _sttActive = false;
+
+function sttStart(mimeType) {
+  const ws = state.chatWs;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('chat WebSocket not connected'));
+  }
+  _sttActive = true;
+  ws.send(JSON.stringify({ type: 'stt_start', mime_type: mimeType || 'audio/webm' }));
+}
+
+function sttSendChunk(blob) {
+  if (!_sttActive) return;
+  const ws = state.chatWs;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!blob || typeof blob.arrayBuffer !== 'function' || blob.size <= 0) return;
+  blob.arrayBuffer().then((buf) => {
+    if (!_sttActive) return;
+    if (!state.chatWs || state.chatWs.readyState !== WebSocket.OPEN) return;
+    state.chatWs.send(buf);
+  });
+}
+
+function sttStop() {
+  const ws = state.chatWs;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    _sttActive = false;
+    return Promise.reject(new Error('chat WebSocket not connected'));
+  }
+  _sttActive = false;
+  return new Promise((resolve, reject) => {
+    _sttResolve = resolve;
+    _sttReject = reject;
+    ws.send(JSON.stringify({ type: 'stt_stop' }));
+  });
+}
+
+function sttCancel() {
+  _sttActive = false;
+  if (_sttReject) {
+    _sttReject(new Error('STT cancelled'));
+    _sttResolve = null;
+    _sttReject = null;
+  }
+  const ws = state.chatWs;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'stt_cancel' }));
+  }
+}
+
+function handleSTTWSMessage(payload) {
+  const type = String(payload?.type || '');
+  if (type === 'stt_result') {
+    if (_sttResolve) {
+      _sttResolve({ text: payload.text || '' });
+      _sttResolve = null;
+      _sttReject = null;
+    }
+    return true;
+  }
+  if (type === 'stt_error') {
+    if (_sttReject) {
+      _sttReject(new Error(payload.error || 'STT failed'));
+      _sttResolve = null;
+      _sttReject = null;
+    }
+    return true;
+  }
+  if (type === 'stt_started' || type === 'stt_cancelled') {
+    return true;
+  }
+  return false;
+}
+
+function setSendButtonRecording(active) {
+  const btn = document.getElementById('btn-chat-send');
+  if (!btn) return;
+  const inputEl = document.getElementById('chat-input');
+  if (active) {
+    btn.classList.add('is-recording');
+    btn.textContent = 'Rec';
+    inputEl?.classList.add('is-recording');
+  } else {
+    btn.classList.remove('is-recording');
+    btn.textContent = 'Send';
+    inputEl?.classList.remove('is-recording');
+  }
 }
 
 function stopChatVoiceMedia(capture) {
@@ -375,15 +425,9 @@ function stopChatVoiceMedia(capture) {
       // noop
     }
   }
-  if (capture.mediaStream && typeof capture.mediaStream.getTracks === 'function') {
-    capture.mediaStream.getTracks().forEach((track) => {
-      if (track && typeof track.stop === 'function') {
-        track.stop();
-      }
-    });
-  }
   capture.mediaRecorder = null;
   capture.mediaStream = null;
+  releaseMicStream();
 }
 
 function stopChatVoiceMediaAndFlush(capture) {
@@ -420,62 +464,43 @@ function stopChatVoiceMediaAndFlush(capture) {
   });
 }
 
-async function beginChatVoiceCapture() {
+async function beginChatVoiceCapture(opts) {
   if (state.activeTab !== 'chat') return;
   if (state.chatVoiceCapture) return;
+  if (!canUseMicrophoneCapture()) return;
   const capture = {
     active: false,
     stopping: false,
     stopRequested: false,
-    sttSessionID: createPushToPromptSessionID(),
-    appendSeq: 0,
-    appendChain: Promise.resolve(),
-    appendError: '',
+    autoSend: Boolean(opts?.autoSend),
     mediaStream: null,
     mediaRecorder: null,
   };
   state.chatVoiceCapture = capture;
-  showStatus('push-to-prompt recording...');
+  showStatus('recording...');
   try {
-    const startResp = await callPushToPromptAction(sttActionStart, {
-      session_id: capture.sttSessionID,
-      mime_type: 'audio/webm',
-    });
-    capture.active = true;
-    if (!canUseMicrophoneCapture()) {
-      throw new Error('Microphone capture is unavailable in this browser.');
-    }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (state.chatVoiceCapture !== capture) {
-      if (typeof stream.getTracks === 'function') {
-        stream.getTracks().forEach((track) => {
-          if (track && typeof track.stop === 'function') track.stop();
-        });
-      }
-      return;
-    }
+    const stream = await acquireMicStream();
+    if (state.chatVoiceCapture !== capture) return;
+    sttStart('audio/webm');
+    if (state.chatVoiceCapture !== capture) return;
     const recorder = newMediaRecorder(stream);
     capture.mediaStream = stream;
     capture.mediaRecorder = recorder;
+    capture.active = true;
+    setSendButtonRecording(true);
     recorder.addEventListener('dataavailable', (ev) => {
       if (!ev?.data || ev.data.size <= 0) return;
-      const chain = appendChatVoiceChunk(capture, ev.data);
-      capture.appendChain = chain.catch((err) => {
-        capture.appendError = String(err?.message || err || 'audio chunk append failed');
-        throw err;
-      });
-      void capture.appendChain.catch(() => {});
+      sttSendChunk(ev.data);
     });
     recorder.start(300);
     if (capture.stopRequested) {
-      await stopChatVoiceMediaAndFlush(capture);
+      void stopChatVoiceCaptureAndApply();
     }
   } catch (err) {
-    const message = String(err?.message || err || 'push-to-prompt failed');
-    showStatus(`push-to-prompt failed: ${message}`);
-    if (capture.sttSessionID) {
-      void callPushToPromptAction(sttActionCancel, { session_id: capture.sttSessionID }).catch(() => {});
-    }
+    setSendButtonRecording(false);
+    const message = String(err?.message || err || 'voice capture failed');
+    showStatus(`voice capture failed: ${message}`);
+    sttCancel();
     stopChatVoiceMedia(capture);
     if (state.chatVoiceCapture === capture) {
       state.chatVoiceCapture = null;
@@ -486,21 +511,15 @@ async function beginChatVoiceCapture() {
 async function stopChatVoiceCaptureAndApply() {
   const capture = state.chatVoiceCapture;
   if (!capture || capture.stopping) return;
-  capture.stopping = true;
   capture.stopRequested = true;
+  if (!capture.active) return;
+  capture.stopping = true;
   let remoteStopped = false;
   try {
-    if (!capture.active) {
-      return;
-    }
     await stopChatVoiceMediaAndFlush(capture);
-    await (capture.appendChain || Promise.resolve());
-    if (capture.appendError) {
-      throw new Error(capture.appendError);
-    }
-    const stt = await callPushToPromptAction(sttActionStop, { session_id: capture.sttSessionID });
+    const result = await sttStop();
     remoteStopped = true;
-    const transcript = String(stt?.text || '').trim();
+    const transcript = String(result?.text || '').trim();
     if (!transcript) {
       throw new Error('speech recognizer returned empty text');
     }
@@ -509,14 +528,20 @@ async function stopChatVoiceCaptureAndApply() {
     const needsSpace = input.value.trim() && !/[ \n]$/.test(input.value);
     input.value = `${input.value}${needsSpace ? ' ' : ''}${transcript}`;
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    if (capture.autoSend) {
+      showStatus('sending...');
+      void sendChatMessage();
+      return;
+    }
     focusChatInput({ placeCursorAtEnd: true });
     showStatus('dictation ready (press Enter to send)');
   } catch (err) {
-    const message = String(err?.message || err || 'push-to-prompt failed');
-    showStatus(`push-to-prompt failed: ${message}`);
+    const message = String(err?.message || err || 'voice capture failed');
+    showStatus(`voice capture failed: ${message}`);
   } finally {
-    if (!remoteStopped && capture?.sttSessionID) {
-      void callPushToPromptAction(sttActionCancel, { session_id: capture.sttSessionID }).catch(() => {});
+    setSendButtonRecording(false);
+    if (!remoteStopped) {
+      sttCancel();
     }
     stopChatVoiceMedia(capture);
     if (state.chatVoiceCapture === capture) {
@@ -528,9 +553,8 @@ async function stopChatVoiceCaptureAndApply() {
 function cancelChatVoiceCapture() {
   const capture = state.chatVoiceCapture;
   if (!capture) return;
-  if (capture.sttSessionID) {
-    void callPushToPromptAction(sttActionCancel, { session_id: capture.sttSessionID }).catch(() => {});
-  }
+  setSendButtonRecording(false);
+  sttCancel();
   stopChatVoiceMedia(capture);
   state.chatVoiceCapture = null;
 }
@@ -1027,12 +1051,14 @@ function openChatWs() {
 
   ws.onmessage = (event) => {
     if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
+    if (typeof event.data !== 'string') return;
     let payload = null;
     try {
       payload = JSON.parse(event.data);
     } catch (_) {
       return;
     }
+    if (handleSTTWSMessage(payload)) return;
     handleChatEvent(payload);
   };
 
@@ -1371,7 +1397,10 @@ async function commitCanvasFromChat() {
       resp = await fetch(`/api/canvas/${encodeURIComponent(state.sessionId)}/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ include_draft: true }),
+        body: JSON.stringify({
+          include_draft: true,
+          chat_session_id: state.chatSessionId || '',
+        }),
         signal: controller.signal,
       });
     } finally {
@@ -1382,7 +1411,12 @@ async function commitCanvasFromChat() {
       appendPlainMessage('system', `Commit failed: ${detail}`);
       return;
     }
-    appendPlainMessage('system', 'Draft annotations committed.');
+    const data = await resp.json().catch(() => ({}));
+    if (data.routed_to_chat) {
+      setActiveTab('chat');
+    } else {
+      appendPlainMessage('system', 'Draft annotations committed.');
+    }
   } catch (err) {
     if (err && err.name === 'AbortError') {
       appendPlainMessage('system', 'Commit failed: request timed out after 45s');
@@ -1415,6 +1449,66 @@ function bindUi() {
     ev.preventDefault();
     void sendChatMessage();
   });
+
+  const sendBtn = document.getElementById('btn-chat-send');
+  if (sendBtn) {
+    let sendHoldTimer = null;
+    let sendHoldActive = false;
+    let sendHoldIsTouch = false;
+    const startHold = (ev, isTouch) => {
+      if (state.chatVoiceCapture) {
+        if (isTouch) ev.preventDefault();
+        void stopChatVoiceCaptureAndApply();
+        return;
+      }
+      if (isTouch) ev.preventDefault();
+      sendHoldActive = false;
+      sendHoldIsTouch = isTouch;
+      sendHoldTimer = window.setTimeout(() => {
+        sendHoldTimer = null;
+        sendHoldActive = true;
+        void beginChatVoiceCapture({ autoSend: true });
+      }, CHAT_SEND_HOLD_MS);
+    };
+    const endHold = () => {
+      if (sendHoldTimer) {
+        clearTimeout(sendHoldTimer);
+        sendHoldTimer = null;
+        sendHoldIsTouch = false;
+        return;
+      }
+      if (sendHoldActive || state.chatVoiceCapture) {
+        sendHoldActive = false;
+        sendHoldIsTouch = false;
+        void stopChatVoiceCaptureAndApply();
+      }
+    };
+    sendBtn.addEventListener('touchstart', (ev) => startHold(ev, true), { passive: false });
+    window.addEventListener('touchend', (ev) => {
+      if (!sendHoldIsTouch) return;
+      if (sendHoldTimer || sendHoldActive || state.chatVoiceCapture) ev.preventDefault();
+      endHold();
+    }, { passive: false });
+    window.addEventListener('touchcancel', () => {
+      if (!sendHoldIsTouch) return;
+      endHold();
+    });
+    sendBtn.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      if (sendHoldIsTouch) return;
+      startHold(ev, false);
+    });
+    window.addEventListener('mouseup', () => {
+      if (sendHoldIsTouch) return;
+      endHold();
+    });
+    sendBtn.addEventListener('click', (ev) => {
+      if (sendHoldActive || state.chatVoiceCapture) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+      }
+    }, true);
+  }
 
   const projectCreateForm = document.getElementById('project-create-form');
   projectCreateForm?.addEventListener('submit', (ev) => {
@@ -1453,6 +1547,60 @@ function bindUi() {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
+    });
+
+    let inputHoldTimer = null;
+    let inputHoldActive = false;
+    let inputHoldIsTouch = false;
+    const inputHoldStart = (ev, isTouch) => {
+      if (state.chatVoiceCapture) {
+        if (isTouch) ev.preventDefault();
+        void stopChatVoiceCaptureAndApply();
+        return;
+      }
+      if (input.value.trim()) return;
+      inputHoldActive = false;
+      inputHoldIsTouch = isTouch;
+      inputHoldTimer = window.setTimeout(() => {
+        inputHoldTimer = null;
+        inputHoldActive = true;
+        if (isTouch) input.blur();
+        input.classList.add('is-recording');
+        void beginChatVoiceCapture({ autoSend: true });
+      }, CHAT_SEND_HOLD_MS);
+    };
+    const inputHoldEnd = () => {
+      if (inputHoldTimer) {
+        clearTimeout(inputHoldTimer);
+        inputHoldTimer = null;
+        inputHoldIsTouch = false;
+        return;
+      }
+      if (inputHoldActive || state.chatVoiceCapture) {
+        inputHoldActive = false;
+        inputHoldIsTouch = false;
+        input.classList.remove('is-recording');
+        void stopChatVoiceCaptureAndApply();
+      }
+    };
+    input.addEventListener('touchstart', (ev) => inputHoldStart(ev, true), { passive: false });
+    window.addEventListener('touchend', (ev) => {
+      if (!inputHoldIsTouch) return;
+      if (inputHoldTimer || inputHoldActive || state.chatVoiceCapture) ev.preventDefault();
+      inputHoldEnd();
+    }, { passive: false });
+    window.addEventListener('touchcancel', () => {
+      if (!inputHoldIsTouch) return;
+      inputHoldEnd();
+    });
+    input.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      if (inputHoldIsTouch) return;
+      inputHoldStart(ev, false);
+    });
+    window.addEventListener('mouseup', () => {
+      if (inputHoldIsTouch) return;
+      inputHoldEnd();
     });
   }
 
@@ -1561,8 +1709,16 @@ function bindUi() {
   });
 }
 
+function warmMicStream() {
+  if (!canUseMicrophoneCapture()) return;
+  // Acquire mic to trigger permission prompt, then immediately release
+  // so the hardware is not kept active between recordings.
+  acquireMicStream().then(() => releaseMicStream()).catch(() => {});
+}
+
 async function init() {
   bindUi();
+  warmMicStream();
   updateAssistantActivityIndicator();
   startDevReloadWatcher();
   startAssistantActivityWatcher();
@@ -1580,7 +1736,66 @@ async function init() {
   await switchProject(initialProjectID);
 }
 
-init().catch((err) => {
-  showStatus('failed');
-  appendPlainMessage('system', `Initialization failed: ${String(err?.message || err)}`);
-});
+async function authGate() {
+  const resp = await fetch('/api/setup');
+  const data = await resp.json();
+  if (data.authenticated) return;
+
+  const loginView = document.getElementById('view-login');
+  const mainView = document.getElementById('view-main');
+  const loginForm = document.getElementById('login-form');
+  const loginPassword = document.getElementById('login-password');
+  const loginError = document.getElementById('login-error');
+  const loginPrompt = document.getElementById('login-prompt');
+  const loginBtn = document.getElementById('btn-login');
+
+  if (!data.has_password) {
+    loginPrompt.textContent = 'No password set. Run "tabura set-password" on the server.';
+    loginBtn.style.display = 'none';
+    loginPassword.style.display = 'none';
+    loginView.style.display = '';
+    mainView.style.display = 'none';
+    return new Promise(() => {});
+  }
+
+  loginPrompt.textContent = 'Enter your password.';
+  loginView.style.display = '';
+  mainView.style.display = 'none';
+
+  await new Promise((resolve) => {
+    loginForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      loginError.textContent = '';
+      const pw = loginPassword.value;
+      if (!pw) return;
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        if (!r.ok) {
+          const msg = (await r.text()).trim();
+          loginError.textContent = msg || `Error ${r.status}`;
+          return;
+        }
+        resolve();
+      } catch (err) {
+        loginError.textContent = String(err?.message || err);
+      }
+    });
+  });
+
+  loginView.style.display = 'none';
+  mainView.style.display = '';
+}
+
+authGate()
+  .then(() => {
+    document.getElementById('view-main').style.display = '';
+    return init();
+  })
+  .catch((err) => {
+    showStatus('failed');
+    appendPlainMessage('system', `Initialization failed: ${String(err?.message || err)}`);
+  });
