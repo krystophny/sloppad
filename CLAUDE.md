@@ -119,13 +119,14 @@ kill "$PID"
 Development uses `-dev` suffix: after releasing `v0.0.5`, immediately bump to `v0.0.6-dev`. On release, strip the suffix.
 
 Workflow:
-1. After release: `scripts/bump-version.sh v0.0.X-dev` (next version with -dev)
-2. Develop on `-dev` version (all commits during development carry this)
-3. To release: `scripts/bump-version.sh v0.0.X` (strip -dev suffix)
-4. Create `docs/release-v0.0.X.md`, update README.md and docs/spec-index.md release links
-5. Tag and push: `git tag v0.0.X && git push origin v0.0.X`
-6. Create GitHub release: `gh release create v0.0.X --title "v0.0.X" --notes-file docs/release-v0.0.X.md`
-7. Immediately after: `scripts/bump-version.sh v0.0.Y-dev` (next cycle)
+1. Develop on `-dev` version (all commits during development carry `-dev` suffix)
+2. To release: `scripts/bump-version.sh v0.0.X` (strip -dev suffix)
+3. Create `docs/release-v0.0.X.md`, update README.md and docs/spec-index.md release links
+4. Commit release: `git add` the bump files + release docs + README + spec-index, then `git commit -m "release: v0.0.X"`
+5. Bump to next dev: `scripts/bump-version.sh v0.0.Y-dev` and commit
+6. Push: `git push origin main`
+7. Tag the release commit (not HEAD): `git tag v0.0.X <release-commit-hash> && git push origin v0.0.X`
+8. Create GitHub release: `gh release create v0.0.X --title "v0.0.X" --notes-file docs/release-v0.0.X.md`
 
 The bump script updates: `.zenodo.json`, `CITATION.cff`, `internal/mcp/server.go`, `internal/web/server.go`, `internal/appserver/client.go`, `internal/voxtypemcp/server.go`.
 

@@ -17,8 +17,8 @@ Risk notice: see [`DISCLAIMER.md`](DISCLAIMER.md)
 - **Integrated handoff protocol spec**: [`docs/handoff-protocol/README.md`](docs/handoff-protocol/README.md)
 - **System architecture**: [`docs/architecture.md`](docs/architecture.md)
 - **Codex app-server pivot notes**: [`docs/codex-app-server-pivot.md`](docs/codex-app-server-pivot.md)
-- **Published release (v0.0.6)**: [`docs/release-v0.0.6.md`](docs/release-v0.0.6.md)
-- **Previous release (v0.0.5)**: [`docs/release-v0.0.5.md`](docs/release-v0.0.5.md)
+- **Published release (v0.0.7)**: [`docs/release-v0.0.7.md`](docs/release-v0.0.7.md)
+- **Previous release (v0.0.6)**: [`docs/release-v0.0.6.md`](docs/release-v0.0.6.md)
 - **Published baseline (v0.0.1)**: [`docs/release-v0.0.1.md`](docs/release-v0.0.1.md)
 
 ## Install
