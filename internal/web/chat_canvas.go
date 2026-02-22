@@ -67,15 +67,11 @@ func (a *App) executeCanvasActions(canvasSessionID string, actions []canvasActio
 		return
 	}
 	for _, action := range actions {
-		kind := "text_artifact"
-		if action.Kind == "code" {
-			kind = "text_artifact"
-		}
 		_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
-			"session_id": canvasSessionID,
-			"kind":       kind,
-			"title":      action.Title,
-			"text":       action.Content,
+			"session_id":       canvasSessionID,
+			"kind":             "text",
+			"title":            action.Title,
+			"markdown_or_text": action.Content,
 		})
 	}
 }
