@@ -920,12 +920,6 @@ function openReviewCommentPopover(eventId, options = {}) {
     } else {
       popover.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     }
-    window.setTimeout(() => {
-      const commitBtn = document.getElementById('btn-canvas-commit');
-      if (commitBtn) {
-        commitBtn.click();
-      }
-    }, 0);
   };
   document.addEventListener('keydown', keyDownHandler, true);
   e.text._reviewPopoverKeyDownHandler = keyDownHandler;
@@ -4362,11 +4356,23 @@ export function initCanvasControls() {
 	        const isCommitShortcut = ev.key === 'Enter' && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && !ev.altKey;
 	        if (!isCommitShortcut) return;
 
+	        const appState = window._tabulaApp?.getState?.();
+	        if (appState?.activeTab && appState.activeTab !== 'canvas') {
+	          return;
+	        }
+
 	        if (document.querySelector('[data-review-popover="true"]')) {
+	          return;
+	        }
+	        const eventTarget = ev.target instanceof Element ? ev.target : null;
+	        if (eventTarget && eventTarget.closest('form, [role="dialog"], #project-overview')) {
 	          return;
 	        }
 	        const activeEl = document.activeElement;
 	        if (activeEl && activeEl.matches('input,textarea,select,[contenteditable="true"]')) {
+	          return;
+	        }
+	        if (activeEl instanceof Element && activeEl.closest('form, [role="dialog"], #project-overview')) {
 	          return;
 	        }
 	        if (activeEl && document.getElementById('terminal-container')?.contains(activeEl)) {
