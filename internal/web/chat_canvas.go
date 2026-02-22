@@ -2,6 +2,8 @@ package web
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -74,4 +76,85 @@ func (a *App) executeCanvasActions(canvasSessionID string, actions []canvasActio
 			"markdown_or_text": action.Content,
 		})
 	}
+}
+
+// resolveArtifactFilePath maps an artifact title to an absolute file path.
+// Returns "" if title has no file-like indicator (dot or separator) or the
+// resolved file does not exist on disk.
+func resolveArtifactFilePath(cwd, title string) string {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return ""
+	}
+	if !strings.Contains(t, ".") && !strings.Contains(t, "/") {
+		return ""
+	}
+	var abs string
+	if filepath.IsAbs(t) {
+		abs = t
+	} else {
+		abs = filepath.Join(cwd, t)
+	}
+	abs = filepath.Clean(abs)
+	info, err := os.Stat(abs)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	return abs
+}
+
+// refreshCanvasFromDisk checks whether the active canvas artifact corresponds
+// to a file on disk and pushes updated content via MCP if the file has changed.
+func (a *App) refreshCanvasFromDisk(projectKey string) {
+	key := strings.TrimSpace(projectKey)
+	if key == "" {
+		return
+	}
+	project, err := a.store.GetProjectByProjectKey(key)
+	if err != nil {
+		return
+	}
+	sid := a.canvasSessionIDForProject(project)
+	a.mu.Lock()
+	port, ok := a.tunnelPorts[sid]
+	a.mu.Unlock()
+	if !ok {
+		return
+	}
+	status, err := a.mcpToolsCall(port, "canvas_status", map[string]interface{}{"session_id": sid})
+	if err != nil {
+		return
+	}
+	active, _ := status["active_artifact"].(map[string]interface{})
+	if active == nil {
+		return
+	}
+	kind := strings.TrimSpace(fmt.Sprint(active["kind"]))
+	if kind != "text_artifact" && kind != "text" {
+		return
+	}
+	title := strings.TrimSpace(fmt.Sprint(active["title"]))
+	if title == "" || title == "<nil>" {
+		return
+	}
+	cwd := a.cwdForProjectKey(key)
+	filePath := resolveArtifactFilePath(cwd, title)
+	if filePath == "" {
+		return
+	}
+	diskBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		return
+	}
+	diskContent := string(diskBytes)
+	currentText, _ := active["text"].(string)
+	if strings.TrimSpace(diskContent) == strings.TrimSpace(currentText) {
+		return
+	}
+	_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+		"session_id":       sid,
+		"kind":             "text",
+		"title":            title,
+		"markdown_or_text": diskContent,
+	})
 }

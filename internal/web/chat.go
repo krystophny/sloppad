@@ -629,6 +629,9 @@ func (a *App) runAssistantTurn(sessionID string) {
 		case "context_usage":
 			payload["context_used"] = ev.ContextUsed
 			payload["context_max"] = ev.ContextMax
+		case "item_completed":
+			go a.refreshCanvasFromDisk(session.ProjectKey)
+			shouldBroadcast = false
 		case "context_compact":
 			// pass through to frontend
 		case "error":
@@ -691,6 +694,8 @@ func (a *App) runAssistantTurn(sessionID string) {
 		}
 		assistantText = cleaned
 	}
+
+	a.refreshCanvasFromDisk(session.ProjectKey)
 
 	if persistedAssistantID == 0 {
 		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
@@ -866,6 +871,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		}
 		assistantText = cleaned
 	}
+
+	a.refreshCanvasFromDisk(session.ProjectKey)
 
 	if persistedAssistantID == 0 {
 		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
