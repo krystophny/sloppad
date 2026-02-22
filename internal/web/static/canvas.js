@@ -117,7 +117,7 @@ const SWIPE_LEFT_DELETE_THRESHOLD_PX = -260;
 const SWIPE_RIGHT_DEFER_THRESHOLD_PX = 120;
 const SWIPE_MAX_TRANSLATE_PX = 320;
 const DETAIL_SWIPE_NAV_THRESHOLD_PX = 90;
-const UNDO_TIMEOUT_MS = Number(window.__TABULA_UNDO_TIMEOUT_MS || 5000);
+const UNDO_TIMEOUT_MS = Number(window.__TABURA_UNDO_TIMEOUT_MS || 5000);
 
 let pendingUndoAction = null;
 const MAIL_ASSIST_STATE = Object.freeze({
@@ -151,7 +151,7 @@ const mailAssistActionRegistry = new Map();
 const DRAFT_PROMPT_CANCELLED_CODE = 'draft_prompt_cancelled';
 let pendingDraftPromptCapture = null;
 const POINT_COMMENT_MARK_SIZE_PX = 16;
-const MATH_SEGMENT_TOKEN_PREFIX = '@@TABULA_MATH_SEGMENT_';
+const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_MATH_SEGMENT_';
 
 function getEls() {
   if (!els.empty) {
@@ -580,7 +580,7 @@ function pointTargetFromClientPoint(root, clientX, clientY) {
 function submitPointDraftMark(eventId, target, comment, localMarkID = '') {
   const markID = String(localMarkID || '').trim() || nextSubmittedDraftMarkID();
   const normalizedComment = String(comment || '').trim();
-  const state = window._tabulaApp?.getState?.();
+  const state = window._taburaApp?.getState?.();
   sendSelectionFeedback({
     kind: 'mark_set',
     session_id: state?.sessionId || '',
@@ -808,7 +808,7 @@ function openReviewCommentPopover(eventId, options = {}) {
     ev.preventDefault();
     const input = popover.querySelector(`#${CSS.escape(inputId)}`);
     const comment = String(input?.value || '').trim();
-    const state = window._tabulaApp?.getState?.();
+    const state = window._taburaApp?.getState?.();
     let outgoingMarkID = '';
     if (options.source === 'selection' && draftMark && draftMark.event_id === eventId) {
       if (!draftMark.local_id) {
@@ -927,7 +927,7 @@ function openReviewCommentPopover(eventId, options = {}) {
 }
 
 function sendSelectionFeedback(payload) {
-  const { getState } = window._tabulaApp || {};
+  const { getState } = window._taburaApp || {};
   if (!getState) return;
   const state = getState();
   if (!state.canvasWs || state.canvasWs.readyState !== WebSocket.OPEN) return;
@@ -960,7 +960,7 @@ function waitForCanvasWsOpen(ws, timeoutMs = 450) {
 }
 
 async function commitCanvasDraft() {
-  const { getState } = window._tabulaApp || {};
+  const { getState } = window._taburaApp || {};
   if (!getState) throw new Error('app state unavailable');
   const state = getState();
   const sessionID = String(state?.sessionId || '').trim();
@@ -988,6 +988,7 @@ async function commitCanvasDraft() {
         body: JSON.stringify({
           artifact_id: artifactID || '',
           include_draft: true,
+          chat_session_id: String(state?.chatSessionId || '').trim(),
         }),
         signal: controller.signal,
       });
@@ -1129,6 +1130,10 @@ function clearSelectionInteractionHandlers() {
     e.text.removeEventListener('scroll', e.text._scrollHandler);
     e.text._scrollHandler = null;
   }
+  if (e.text._reviewSelectStartHandler) {
+    e.text.removeEventListener('selectstart', e.text._reviewSelectStartHandler);
+    e.text._reviewSelectStartHandler = null;
+  }
   if (e.text._reviewContextMenuHandler) {
     e.text.removeEventListener('contextmenu', e.text._reviewContextMenuHandler, true);
     e.text._reviewContextMenuHandler = null;
@@ -1195,7 +1200,7 @@ function clearSelectionInteractionHandlers() {
       clearTimeout(reviewVoiceCapture.longPressTimer);
       reviewVoiceCapture.longPressTimer = null;
     }
-    void window._tabulaApp.sttCancel();
+    void window._taburaApp.sttCancel();
     if (reviewVoiceCapture.mediaRecorder) {
       try {
         if (reviewVoiceCapture.mediaRecorder.state !== 'inactive') {
@@ -1859,7 +1864,7 @@ async function startMailRecordingMediaCapture(context, token) {
   recording.mediaRecorder = null;
   recording.chunks = [];
   recording.mimeType = 'audio/webm';
-  window._tabulaApp.sttStart(recording.mimeType);
+  window._taburaApp.sttStart(recording.mimeType);
   if (!window.MediaRecorder || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
     throw new Error('Microphone capture is unavailable in this browser.');
   }
@@ -1881,7 +1886,7 @@ async function startMailRecordingMediaCapture(context, token) {
   recorder.addEventListener('dataavailable', (ev) => {
     if (ev?.data && ev.data.size > 0) {
       recording.chunks.push(ev.data);
-      window._tabulaApp.sttSendChunk(ev.data);
+      window._taburaApp.sttSendChunk(ev.data);
     }
   });
   recorder.start(300);
@@ -1959,7 +1964,7 @@ async function transcribePendingDraftPrompt(context, token) {
       throw new Error('No audio captured. Hold to record and try again.');
     }
     try {
-      stt = await window._tabulaApp.sttStop();
+      stt = await window._taburaApp.sttStop();
     } catch (_) {
       stt = await callMailSTT(context, audioBlob);
     }
@@ -2049,7 +2054,7 @@ function startMailRecording(context, origin) {
       recording.error = `Recording failed: ${String(err?.message || err || 'capture failed')}`;
       pushMailRecordingTransition(recording, 'stop:capture_error');
       pushMailRecordingTransition(recording, 'state:idle');
-      window._tabulaApp.sttCancel();
+      window._taburaApp.sttCancel();
       stopMailRecordingMedia(recording);
       setMailRecordingDomState(context);
       if (pending) {
@@ -2082,7 +2087,7 @@ function stopMailRecording(context, reason) {
   if (pendingDraftPromptCapture) {
     void transcribePendingDraftPrompt(context, recording.captureToken);
   } else {
-    window._tabulaApp.sttCancel();
+    window._taburaApp.sttCancel();
     stopMailRecordingMedia(recording);
   }
   return true;
@@ -3434,7 +3439,7 @@ function setupTextSelection(eventId) {
     if (draftMark && draftMark.event_id === eventId) {
       draftMark = null;
       renderDraftOverlay();
-      const state = window._tabulaApp?.getState?.();
+      const state = window._taburaApp?.getState?.();
       sendSelectionFeedback({
         kind: 'mark_clear_draft',
         session_id: state?.sessionId || '',
@@ -3475,7 +3480,7 @@ function setupTextSelection(eventId) {
 
     const markType = getSelectedMarkType();
     const rects = computeRectsFromRange(e.text, range);
-    const state = window._tabulaApp?.getState?.();
+    const state = window._taburaApp?.getState?.();
     draftMark = {
       event_id: eventId,
       type: markType,
@@ -3619,7 +3624,22 @@ function setupTextSelection(eventId) {
 
   const setReviewLongPressSelectionGuard = (enabled) => {
     e.text.classList.toggle('review-longpress-active', Boolean(enabled));
+    if (enabled) {
+      e.text.style.webkitUserSelect = 'none';
+      e.text.style.userSelect = 'none';
+    } else {
+      e.text.style.webkitUserSelect = '';
+      e.text.style.userSelect = '';
+    }
   };
+
+  const onReviewSelectStart = (ev) => {
+    if (e.text.classList.contains('review-longpress-active')) {
+      ev.preventDefault();
+    }
+  };
+  e.text.addEventListener('selectstart', onReviewSelectStart);
+  e.text._reviewSelectStartHandler = onReviewSelectStart;
 
   const stopReviewVoiceMedia = (capture) => {
     if (!capture) return;
@@ -3684,7 +3704,7 @@ function setupTextSelection(eventId) {
       capture.longPressTimer = null;
     }
     if (cancelRemote) {
-      window._tabulaApp.sttCancel();
+      window._taburaApp.sttCancel();
     }
     stopReviewVoiceMedia(capture);
     setReviewLongPressSelectionGuard(false);
@@ -3705,7 +3725,7 @@ function setupTextSelection(eventId) {
       : 'Recording voice note... release to submit.';
     showReviewVoiceHint(recordingHint, 'recording');
 
-    window._tabulaApp.sttStart('audio/webm');
+    window._taburaApp.sttStart('audio/webm');
     if (!canUseReviewVoiceCapture()) {
       throw new Error('Microphone capture is unavailable in this browser.');
     }
@@ -3725,7 +3745,7 @@ function setupTextSelection(eventId) {
     capture.mediaRecorder = recorder;
     recorder.addEventListener('dataavailable', (ev) => {
       if (!ev?.data || ev.data.size <= 0) return;
-      window._tabulaApp.sttSendChunk(ev.data);
+      window._taburaApp.sttSendChunk(ev.data);
     });
     recorder.start(300);
     if (capture.stopRequested) {
@@ -3741,7 +3761,7 @@ function setupTextSelection(eventId) {
     let sttCompleted = false;
     try {
       await stopReviewVoiceMediaAndFlush(capture);
-      const stt = await window._tabulaApp.sttStop();
+      const stt = await window._taburaApp.sttStop();
       sttCompleted = true;
       const transcript = String(stt?.text || '').trim();
       if (!transcript) {
@@ -3798,6 +3818,8 @@ function setupTextSelection(eventId) {
       target: pointTargetFromClientPoint(e.text, clientX, clientY),
     });
     capture.longPressTimer = window.setTimeout(() => {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) sel.removeAllRanges();
       void beginReviewVoiceCapture(capture).catch((err) => {
         const message = String(err?.message || err || 'voice capture failed');
         showReviewVoiceHint(`Voice capture failed: ${message}`, 'error');
@@ -4072,7 +4094,7 @@ function setupPdfOverlay() {
 
     sendSelectionFeedback({
       kind: 'mark_set',
-      session_id: (window._tabulaApp?.getState?.().sessionId) || '',
+      session_id: (window._taburaApp?.getState?.().sessionId) || '',
       artifact_id: activePdfEvent.event_id,
       mark_id: localMarkID,
       intent: 'draft',
@@ -4128,7 +4150,7 @@ function setupPdfOverlay() {
 
 function renderPdfSurface(event) {
   const e = getEls();
-  const pdfState = (window._tabulaApp || {}).getState ? window._tabulaApp.getState() : {};
+  const pdfState = (window._taburaApp || {}).getState ? window._taburaApp.getState() : {};
   const pdfSid = pdfState.sessionId || '';
   const pdfURL = `/api/files/${encodeURIComponent(pdfSid)}/${encodeURIComponent(event.path)}`;
   e.pdf.innerHTML = '';
@@ -4190,7 +4212,7 @@ export function renderCanvas(event) {
     clearTextInteractionHandlers();
     hideAll();
     e.image.style.display = '';
-    const state = (window._tabulaApp || {}).getState ? window._tabulaApp.getState() : {};
+    const state = (window._taburaApp || {}).getState ? window._taburaApp.getState() : {};
     const sid = state.sessionId || '';
     e.img.src = `/api/files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`;
     e.img.alt = event.title || 'Image';
@@ -4266,12 +4288,12 @@ export function initCanvasControls() {
   if (commitBtn) {
     commitBtn.addEventListener('click', runCommit);
 
-	    if (!document.__tabulaCommitShortcutHandler) {
+	    if (!document.__taburaCommitShortcutHandler) {
 	      const shortcutHandler = (ev) => {
 	        const isCommitShortcut = ev.key === 'Enter' && !ev.shiftKey && !ev.altKey;
 	        if (!isCommitShortcut) return;
 
-	        const appState = window._tabulaApp?.getState?.();
+	        const appState = window._taburaApp?.getState?.();
 	        if (appState?.activeTab && appState.activeTab !== 'canvas') {
 	          return;
 	        }
@@ -4300,13 +4322,13 @@ export function initCanvasControls() {
         void runCommit();
       };
       document.addEventListener('keydown', shortcutHandler, true);
-      document.__tabulaCommitShortcutHandler = shortcutHandler;
+      document.__taburaCommitShortcutHandler = shortcutHandler;
     }
   }
 
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
-      const { getState } = window._tabulaApp || {};
+      const { getState } = window._taburaApp || {};
       if (!getState) return;
       const state = getState();
       if (!state.canvasWs || state.canvasWs.readyState !== WebSocket.OPEN) return;

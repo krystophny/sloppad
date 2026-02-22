@@ -1266,6 +1266,12 @@ button[data-mail-record-action="stop"] {
   color: var(--accent);
   border: 2px solid var(--accent);
 }
+#chat-input.is-recording {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  caret-color: transparent;
+}
 
 .chat-compose-meta {
   display: flex;

@@ -22,17 +22,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	"github.com/krystophny/tabula/internal/appserver"
-	"github.com/krystophny/tabula/internal/serve"
-	"github.com/krystophny/tabula/internal/stt"
-	"github.com/krystophny/tabula/internal/store"
+	"github.com/krystophny/tabura/internal/appserver"
+	"github.com/krystophny/tabura/internal/serve"
+	"github.com/krystophny/tabura/internal/stt"
+	"github.com/krystophny/tabura/internal/store"
 )
 
 const (
 	DefaultHost           = "127.0.0.1"
 	DefaultPort           = 8420
 	DefaultAppServerURL   = "ws://127.0.0.1:8787"
-	SessionCookie         = "tabula_session"
+	SessionCookie         = "tabura_session"
 	cookieMaxAgeSec       = 60 * 60 * 24 * 365
 	DaemonPort            = 9420
 	LocalSessionID        = "local"
@@ -50,7 +50,6 @@ type App struct {
 	appServerURL    string
 	appServerModel  string
 	devRuntime      bool
-	noAuth          bool
 
 	store *store.Store
 
@@ -77,7 +76,7 @@ type App struct {
 }
 
 func New(dataDir, localProjectDir, localMCPURL, appServerURL string, devRuntime bool) (*App, error) {
-	s, err := store.New(pathJoin(dataDir, "tabula.db"))
+	s, err := store.New(pathJoin(dataDir, "tabura.db"))
 	if err != nil {
 		return nil, err
 	}
@@ -90,18 +89,13 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL string, devRuntime 
 			return nil, err
 		}
 	}
-	noAuth := !envTruthy("TABULA_REQUIRE_AUTH")
-	if envTruthy("TABULA_NO_AUTH") {
-		noAuth = true
-	}
 	app := &App{
 		dataDir:          dataDir,
 		localProjectDir:  localProjectDir,
 		localMCPURL:      localMCPURL,
 		appServerURL:     appServerURL,
-		appServerModel:   strings.TrimSpace(os.Getenv("TABULA_APP_SERVER_MODEL")),
+		appServerModel:   strings.TrimSpace(os.Getenv("TABURA_APP_SERVER_MODEL")),
 		devRuntime:       devRuntime,
-		noAuth:           noAuth,
 		store:            s,
 		appServerClient:  appServerClient,
 		upgrader:         websocket.Upgrader{CheckOrigin: checkWSOrigin},
@@ -133,25 +127,27 @@ func randomToken() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 16) + "-" + strconv.FormatInt(time.Now().Unix()%99991, 16)
 }
 
-func (a *App) setAuthCookie(w http.ResponseWriter, token string) {
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func (a *App) setAuthCookieForRequest(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   cookieMaxAgeSec,
 	})
 }
 
 func (a *App) clearAuthCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: SessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
 func (a *App) hasAuth(r *http.Request) bool {
-	if a.noAuth {
-		return true
-	}
 	c, err := r.Cookie(SessionCookie)
 	if err != nil {
 		return false
@@ -171,7 +167,6 @@ func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	// auth/setup
 	r.Get("/api/setup", a.handleSetupCheck)
-	r.Post("/api/setup", a.handleSetupPassword)
 	r.Post("/api/login", a.handleLogin)
 	r.Post("/api/logout", a.handleLogout)
 
@@ -275,9 +270,6 @@ func writeJSON(w http.ResponseWriter, payload interface{}) {
 
 func (a *App) handleSetupCheck(w http.ResponseWriter, r *http.Request) {
 	hasPassword := a.store.HasAdminPassword()
-	if a.noAuth {
-		hasPassword = false
-	}
 	res := map[string]interface{}{
 		"has_password":  hasPassword,
 		"authenticated": a.hasAuth(r),
@@ -288,37 +280,7 @@ func (a *App) handleSetupCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-func (a *App) handleSetupPassword(w http.ResponseWriter, r *http.Request) {
-	if a.noAuth {
-		writeJSON(w, map[string]bool{"ok": true})
-		return
-	}
-	if a.store.HasAdminPassword() {
-		http.Error(w, "admin password already set", http.StatusConflict)
-		return
-	}
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		http.Error(w, "invalid JSON", http.StatusBadRequest)
-		return
-	}
-	if err := a.store.SetAdminPassword(req.Password); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	token := randomToken()
-	_ = a.store.AddAuthSession(token)
-	a.setAuthCookie(w, token)
-	writeJSON(w, map[string]bool{"ok": true})
-}
-
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if a.noAuth {
-		writeJSON(w, map[string]bool{"ok": true})
-		return
-	}
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -333,15 +295,11 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	token := randomToken()
 	_ = a.store.AddAuthSession(token)
-	a.setAuthCookie(w, token)
+	a.setAuthCookieForRequest(w, r, token)
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if a.noAuth {
-		writeJSON(w, map[string]bool{"ok": true})
-		return
-	}
 	if c, err := r.Cookie(SessionCookie); err == nil {
 		_ = a.store.DeleteAuthSession(c.Value)
 	}
@@ -349,15 +307,7 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
-func envTruthy(key string) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
+
 
 func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
@@ -461,8 +411,9 @@ func (a *App) handleCanvasCommit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		ArtifactID   string `json:"artifact_id"`
-		IncludeDraft *bool  `json:"include_draft"`
+		ArtifactID    string `json:"artifact_id"`
+		IncludeDraft  *bool  `json:"include_draft"`
+		ChatSessionID string `json:"chat_session_id"`
 	}
 	includeDraft := true
 	defer r.Body.Close()
@@ -498,18 +449,166 @@ func (a *App) handleCanvasCommit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	if a.appServerClient != nil {
-		aiSummary, aiErr := a.rewriteCommittedArtifactWithAppServer(r.Context(), sid, port, strings.TrimSpace(req.ArtifactID))
-		if aiErr != nil {
-			aiSummary = map[string]interface{}{
-				"enabled": false,
-				"applied": false,
-				"error":   aiErr.Error(),
-			}
-		}
-		resp["ai_review"] = aiSummary
+
+	chatSessionID := strings.TrimSpace(req.ChatSessionID)
+	if chatSessionID == "" {
+		chatSessionID = a.chatSessionIDForCanvasSession(sid)
 	}
+	if chatSessionID == "" || a.appServerClient == nil {
+		writeJSON(w, resp)
+		return
+	}
+
+	comments, artifactTitle, collectErr := a.collectArtifactReviewComments(port, sid, strings.TrimSpace(req.ArtifactID))
+	if collectErr != nil || len(comments) == 0 {
+		writeJSON(w, resp)
+		return
+	}
+
+	text := formatCommitChatMessage(artifactTitle, comments)
+	msgID, injectErr := a.injectChatMessage(chatSessionID, "user", text, true)
+	if injectErr != nil {
+		resp["routed_to_chat"] = false
+		resp["route_error"] = injectErr.Error()
+		writeJSON(w, resp)
+		return
+	}
+	resp["routed_to_chat"] = true
+	resp["chat_session_id"] = chatSessionID
+	resp["chat_message_id"] = msgID
 	writeJSON(w, resp)
+}
+
+func (a *App) chatSessionIDForCanvasSession(canvasSessionID string) string {
+	project, err := a.findProjectByCanvasSession(canvasSessionID)
+	if err != nil {
+		return ""
+	}
+	session, err := a.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		return ""
+	}
+	return session.ID
+}
+
+func (a *App) collectArtifactReviewComments(tunnelPort int, sessionID, requestedArtifactID string) ([]reviewComment, string, error) {
+	status, err := a.mcpToolsCall(tunnelPort, "canvas_status", map[string]interface{}{"session_id": sessionID})
+	if err != nil {
+		return nil, "", err
+	}
+	active, _ := status["active_artifact"].(map[string]interface{})
+	if active == nil {
+		return nil, "", nil
+	}
+	kind := strings.TrimSpace(fmt.Sprint(active["kind"]))
+	artifactID := strings.TrimSpace(fmt.Sprint(active["event_id"]))
+	if artifactID == "" || artifactID == "<nil>" {
+		artifactID = strings.TrimSpace(fmt.Sprint(status["active_artifact_id"]))
+	}
+	if artifactID == "" || artifactID == "<nil>" {
+		return nil, "", nil
+	}
+	if strings.TrimSpace(requestedArtifactID) != "" && strings.TrimSpace(requestedArtifactID) != artifactID {
+		return nil, "", nil
+	}
+	originalText := fmt.Sprint(active["text"])
+	if originalText == "<nil>" {
+		originalText = ""
+	}
+	title := strings.TrimSpace(fmt.Sprint(active["title"]))
+	if title == "<nil>" {
+		title = ""
+	}
+
+	marksResp, err := a.mcpToolsCall(tunnelPort, "canvas_marks_list", map[string]interface{}{
+		"session_id":  sessionID,
+		"artifact_id": artifactID,
+		"intent":      "persistent",
+		"limit":       250,
+	})
+	if err != nil {
+		return nil, title, err
+	}
+	rawMarks, _ := marksResp["marks"].([]interface{})
+	comments := make([]reviewComment, 0, len(rawMarks))
+	for _, rawMark := range rawMarks {
+		mark, _ := rawMark.(map[string]interface{})
+		if mark == nil {
+			continue
+		}
+		comment := strings.TrimSpace(fmt.Sprint(mark["comment"]))
+		if comment == "" || comment == "<nil>" {
+			continue
+		}
+		target, _ := mark["target"].(map[string]interface{})
+		lineStart := intFromAny(target["line_start"], 0)
+		lineEnd := intFromAny(target["line_end"], lineStart)
+		if lineEnd < lineStart {
+			lineEnd = lineStart
+		}
+		startOffset := intFromAny(target["start_offset"], 0)
+		endOffset := intFromAny(target["end_offset"], startOffset)
+		if endOffset < startOffset {
+			endOffset = startOffset
+		}
+		page := intFromAny(target["page"], 0)
+		targetExcerpt := ""
+		if kind == "text_artifact" {
+			targetExcerpt = extractTargetExcerpt(originalText, lineStart, lineEnd, startOffset, endOffset)
+		}
+		comments = append(comments, reviewComment{
+			Comment:       comment,
+			MarkType:      strings.TrimSpace(fmt.Sprint(mark["type"])),
+			TargetKind:    strings.TrimSpace(fmt.Sprint(mark["target_kind"])),
+			LineStart:     lineStart,
+			LineEnd:       lineEnd,
+			StartOffset:   startOffset,
+			EndOffset:     endOffset,
+			Page:          page,
+			UpdatedAt:     strings.TrimSpace(fmt.Sprint(mark["updated_at"])),
+			TargetExcerpt: targetExcerpt,
+			DeleteIntent:  isDeleteInstruction(comment),
+		})
+	}
+	sort.Slice(comments, func(i, j int) bool {
+		if comments[i].UpdatedAt == comments[j].UpdatedAt {
+			return comments[i].Comment < comments[j].Comment
+		}
+		return comments[i].UpdatedAt < comments[j].UpdatedAt
+	})
+	return comments, title, nil
+}
+
+func formatCommitChatMessage(title string, comments []reviewComment) string {
+	var b strings.Builder
+	if strings.TrimSpace(title) != "" {
+		fmt.Fprintf(&b, "Apply these review comments to artifact %q:\n\n", strings.TrimSpace(title))
+	} else {
+		b.WriteString("Apply these review comments to the current artifact:\n\n")
+	}
+	for i, c := range comments {
+		scope := ""
+		if c.LineStart > 0 && c.LineEnd > 0 {
+			if c.LineStart == c.LineEnd {
+				scope = fmt.Sprintf("[line %d] ", c.LineStart)
+			} else {
+				scope = fmt.Sprintf("[line %d-%d] ", c.LineStart, c.LineEnd)
+			}
+		} else if c.Page > 0 {
+			scope = fmt.Sprintf("[page %d] ", c.Page)
+		}
+		deleteTag := ""
+		if c.DeleteIntent {
+			deleteTag = "DELETE "
+		}
+		fmt.Fprintf(&b, "%d. %s%s%q", i+1, scope, deleteTag, c.Comment)
+		if excerpt := strings.TrimSpace(c.TargetExcerpt); excerpt != "" {
+			fmt.Fprintf(&b, " (target: `%s`)", truncatePromptSnippet(excerpt, 120))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nShow the updated artifact on canvas when done.")
+	return b.String()
 }
 
 func (a *App) handleMailActionCapabilities(w http.ResponseWriter, r *http.Request) {
@@ -659,7 +758,7 @@ func (a *App) handleMailDraftReply(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("TABULA_DRAFT_REPLY_DISABLED")), "1") {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("TABURA_DRAFT_REPLY_DISABLED")), "1") {
 		http.Error(w, "draft reply is disabled", http.StatusServiceUnavailable)
 		return
 	}
@@ -888,231 +987,6 @@ type reviewComment struct {
 	DeleteIntent  bool
 }
 
-func (a *App) rewriteCommittedArtifactWithAppServer(ctx context.Context, sessionID string, tunnelPort int, requestedArtifactID string) (map[string]interface{}, error) {
-	status, err := a.mcpToolsCall(tunnelPort, "canvas_status", map[string]interface{}{"session_id": sessionID})
-	if err != nil {
-		return nil, err
-	}
-	active, _ := status["active_artifact"].(map[string]interface{})
-	if active == nil {
-		return map[string]interface{}{
-			"enabled": true,
-			"applied": false,
-			"reason":  "no_active_artifact",
-		}, nil
-	}
-	kind := strings.TrimSpace(fmt.Sprint(active["kind"]))
-	if kind != "text_artifact" && kind != "pdf_artifact" {
-		return map[string]interface{}{
-			"enabled": true,
-			"applied": false,
-			"reason":  "active_artifact_unsupported",
-			"kind":    kind,
-		}, nil
-	}
-
-	artifactID := strings.TrimSpace(fmt.Sprint(active["event_id"]))
-	if artifactID == "" || artifactID == "<nil>" {
-		artifactID = strings.TrimSpace(fmt.Sprint(status["active_artifact_id"]))
-	}
-	if artifactID == "" || artifactID == "<nil>" {
-		return map[string]interface{}{
-			"enabled": true,
-			"applied": false,
-			"reason":  "missing_artifact_id",
-		}, nil
-	}
-	if strings.TrimSpace(requestedArtifactID) != "" && strings.TrimSpace(requestedArtifactID) != artifactID {
-		return map[string]interface{}{
-			"enabled":              true,
-			"applied":              false,
-			"reason":               "active_artifact_changed",
-			"requested_artifact":   requestedArtifactID,
-			"active_artifact_id":   artifactID,
-			"active_artifact_kind": kind,
-		}, nil
-	}
-
-	originalText := fmt.Sprint(active["text"])
-	if kind == "text_artifact" && (strings.TrimSpace(originalText) == "" || originalText == "<nil>") {
-		return map[string]interface{}{
-			"enabled":     true,
-			"applied":     false,
-			"reason":      "active_text_missing",
-			"artifact_id": artifactID,
-		}, nil
-	}
-	if originalText == "<nil>" {
-		originalText = ""
-	}
-	artifactPath := strings.TrimSpace(fmt.Sprint(active["path"]))
-	if artifactPath == "<nil>" {
-		artifactPath = ""
-	}
-	artifactPage := intFromAny(active["page"], 0)
-	title := strings.TrimSpace(fmt.Sprint(active["title"]))
-	if title == "<nil>" {
-		title = ""
-	}
-
-	marksResp, err := a.mcpToolsCall(tunnelPort, "canvas_marks_list", map[string]interface{}{
-		"session_id":  sessionID,
-		"artifact_id": artifactID,
-		"intent":      "persistent",
-		"limit":       250,
-	})
-	if err != nil {
-		return nil, err
-	}
-	rawMarks, _ := marksResp["marks"].([]interface{})
-	comments := make([]reviewComment, 0, len(rawMarks))
-	for _, rawMark := range rawMarks {
-		mark, _ := rawMark.(map[string]interface{})
-		if mark == nil {
-			continue
-		}
-		comment := strings.TrimSpace(fmt.Sprint(mark["comment"]))
-		if comment == "" || comment == "<nil>" {
-			continue
-		}
-		target, _ := mark["target"].(map[string]interface{})
-		lineStart := intFromAny(target["line_start"], 0)
-		lineEnd := intFromAny(target["line_end"], lineStart)
-		if lineEnd < lineStart {
-			lineEnd = lineStart
-		}
-		startOffset := intFromAny(target["start_offset"], 0)
-		endOffset := intFromAny(target["end_offset"], startOffset)
-		if endOffset < startOffset {
-			endOffset = startOffset
-		}
-		page := intFromAny(target["page"], 0)
-		targetExcerpt := ""
-		if kind == "text_artifact" {
-			targetExcerpt = extractTargetExcerpt(originalText, lineStart, lineEnd, startOffset, endOffset)
-		}
-		comments = append(comments, reviewComment{
-			Comment:       comment,
-			MarkType:      strings.TrimSpace(fmt.Sprint(mark["type"])),
-			TargetKind:    strings.TrimSpace(fmt.Sprint(mark["target_kind"])),
-			LineStart:     lineStart,
-			LineEnd:       lineEnd,
-			StartOffset:   startOffset,
-			EndOffset:     endOffset,
-			Page:          page,
-			UpdatedAt:     strings.TrimSpace(fmt.Sprint(mark["updated_at"])),
-			TargetExcerpt: targetExcerpt,
-			DeleteIntent:  isDeleteInstruction(comment),
-		})
-	}
-	if len(comments) == 0 {
-		return map[string]interface{}{
-			"enabled":       true,
-			"applied":       false,
-			"reason":        "no_persistent_comments",
-			"artifact_id":   artifactID,
-			"marks_total":   len(rawMarks),
-			"comments_used": 0,
-		}, nil
-	}
-	sort.Slice(comments, func(i, j int) bool {
-		if comments[i].UpdatedAt == comments[j].UpdatedAt {
-			return comments[i].Comment < comments[j].Comment
-		}
-		return comments[i].UpdatedAt < comments[j].UpdatedAt
-	})
-
-	prompt := buildArtifactRewritePrompt(kind, title, originalText, artifactPath, artifactPage, comments)
-	rewriteCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cwd := "."
-	if project, projectErr := a.findProjectByCanvasSession(sessionID); projectErr == nil {
-		if root := strings.TrimSpace(project.RootPath); root != "" {
-			cwd = root
-		}
-	} else if fallback := strings.TrimSpace(a.localProjectDir); fallback != "" {
-		cwd = fallback
-	}
-	appResp, err := a.appServerClient.SendPrompt(rewriteCtx, appserver.PromptRequest{
-		CWD:    cwd,
-		Model:  a.appServerModel,
-		Prompt: prompt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	threadID := appResp.ThreadID
-	turnID := appResp.TurnID
-	rewrittenText := sanitizeAppServerTextResponse(appResp.Message)
-	if strings.TrimSpace(rewrittenText) == "" {
-		return nil, errors.New("app-server returned empty rewrite result")
-	}
-
-	if kind == "text_artifact" {
-		if unappliedDeletes := collectUnappliedDeleteComments(comments, rewrittenText); len(unappliedDeletes) > 0 {
-			retryPrompt := buildArtifactDeleteRetryPrompt(title, rewrittenText, unappliedDeletes)
-			retryCtx, retryCancel := context.WithTimeout(ctx, 90*time.Second)
-			retryResp, retryErr := a.appServerClient.SendPrompt(retryCtx, appserver.PromptRequest{
-				CWD:    cwd,
-				Model:  a.appServerModel,
-				Prompt: retryPrompt,
-			})
-			retryCancel()
-			if retryErr == nil {
-				retryText := sanitizeAppServerTextResponse(retryResp.Message)
-				if strings.TrimSpace(retryText) != "" {
-					rewrittenText = retryText
-					threadID = retryResp.ThreadID
-					turnID = retryResp.TurnID
-				}
-			}
-		}
-		if normalizeLineEndings(strings.TrimSpace(rewrittenText)) == normalizeLineEndings(strings.TrimSpace(originalText)) {
-			return map[string]interface{}{
-				"enabled":       true,
-				"applied":       false,
-				"reason":        "unchanged",
-				"artifact_id":   artifactID,
-				"comments_used": len(comments),
-				"thread_id":     threadID,
-				"turn_id":       turnID,
-			}, nil
-		}
-	}
-
-	outputTitle := title
-	if kind == "pdf_artifact" {
-		if strings.TrimSpace(outputTitle) == "" {
-			outputTitle = "PDF Review Notes"
-		} else {
-			outputTitle = outputTitle + " (AI Review Notes)"
-		}
-	}
-	showResp, err := a.mcpToolsCall(tunnelPort, "canvas_artifact_show", map[string]interface{}{
-		"session_id":       sessionID,
-		"kind":             "text",
-		"title":            outputTitle,
-		"markdown_or_text": rewrittenText,
-		"reason":           "commit_review_rewrite",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return map[string]interface{}{
-		"enabled":            true,
-		"applied":            true,
-		"source":             "codex_app_server",
-		"artifact_kind":      kind,
-		"input_artifact_id":  artifactID,
-		"output_artifact_id": showResp["artifact_id"],
-		"comments_used":      len(comments),
-		"thread_id":          threadID,
-		"turn_id":            turnID,
-	}, nil
-}
-
 func isDeleteInstruction(comment string) bool {
 	s := strings.ToLower(strings.TrimSpace(comment))
 	if s == "" {
@@ -1157,32 +1031,6 @@ func extractTargetExcerpt(text string, lineStart, lineEnd, startOffset, endOffse
 	return strings.TrimSpace(strings.Join(lines[lineStart-1:lineEnd], "\n"))
 }
 
-func collectUnappliedDeleteComments(comments []reviewComment, rewrittenText string) []reviewComment {
-	rewritten := normalizeContainsText(rewrittenText)
-	if rewritten == "" {
-		return nil
-	}
-	missing := make([]reviewComment, 0, len(comments))
-	for _, c := range comments {
-		if !c.DeleteIntent {
-			continue
-		}
-		excerpt := normalizeContainsText(c.TargetExcerpt)
-		if len(excerpt) < 3 {
-			continue
-		}
-		if strings.Contains(rewritten, excerpt) {
-			missing = append(missing, c)
-		}
-	}
-	return missing
-}
-
-func normalizeContainsText(s string) string {
-	s = strings.ToLower(normalizeLineEndings(strings.TrimSpace(s)))
-	return strings.Join(strings.Fields(s), " ")
-}
-
 func truncatePromptSnippet(s string, maxRunes int) string {
 	s = strings.TrimSpace(s)
 	if maxRunes <= 0 {
@@ -1193,114 +1041,6 @@ func truncatePromptSnippet(s string, maxRunes int) string {
 		return s
 	}
 	return strings.TrimSpace(string(runes[:maxRunes])) + "..."
-}
-
-func buildArtifactDeleteRetryPrompt(title, currentText string, missing []reviewComment) string {
-	var b strings.Builder
-	b.WriteString("You are correcting a revised document.\n")
-	b.WriteString("Required deletions were missed in the previous output.\n")
-	b.WriteString("Delete each target excerpt from the draft and return only the full corrected document.\n")
-	b.WriteString("No preface. No explanations. No code fences.\n")
-	if strings.TrimSpace(title) != "" {
-		fmt.Fprintf(&b, "Artifact title: %s\n", strings.TrimSpace(title))
-	}
-	b.WriteString("\nRequired deletions:\n")
-	for i, c := range missing {
-		fmt.Fprintf(&b, "%d. %s\n", i+1, strings.TrimSpace(c.Comment))
-		if excerpt := strings.TrimSpace(c.TargetExcerpt); excerpt != "" {
-			fmt.Fprintf(&b, "   target excerpt: %q\n", truncatePromptSnippet(excerpt, 240))
-		}
-	}
-	b.WriteString("\nCurrent draft text:\n")
-	b.WriteString("<<<TEXT\n")
-	b.WriteString(currentText)
-	b.WriteString("\nTEXT\n")
-	b.WriteString(">>>")
-	return b.String()
-}
-
-func buildArtifactRewritePrompt(kind, title, text, path string, page int, comments []reviewComment) string {
-	var b strings.Builder
-	b.WriteString("You are revising a user artifact from review comments.\n")
-	b.WriteString("Apply all comments faithfully and return only the rewritten output.\n")
-	b.WriteString("No preface. No explanations. No code fences.\n")
-	switch kind {
-	case "text_artifact":
-		b.WriteString("Artifact type: text/markdown.\n")
-		b.WriteString("Preserve document structure and style unless comments request changes.\n")
-		b.WriteString("If a comment requests delete/remove/cut/omit, remove the targeted text from the final document.\n")
-		b.WriteString("A short comment like \"delete\" means delete the selected target span.\n")
-		b.WriteString("Return the full revised document text.\n")
-	case "pdf_artifact":
-		b.WriteString("Artifact type: PDF.\n")
-		b.WriteString("You cannot edit binary PDF content directly in this response.\n")
-		b.WriteString("Return a Markdown review-note document with proposed revisions covering all comments.\n")
-		b.WriteString("Use this format: title, summary, and numbered proposed edits.\n")
-	}
-	if strings.TrimSpace(title) != "" {
-		fmt.Fprintf(&b, "Artifact title: %s\n", strings.TrimSpace(title))
-	}
-	if kind == "pdf_artifact" {
-		if strings.TrimSpace(path) != "" {
-			fmt.Fprintf(&b, "PDF path: %s\n", strings.TrimSpace(path))
-		}
-		if page > 0 {
-			fmt.Fprintf(&b, "Current PDF page: %d\n", page)
-		}
-	}
-	b.WriteString("\nReview comments (chronological):\n")
-	for i, c := range comments {
-		scope := make([]string, 0, 4)
-		if strings.TrimSpace(c.MarkType) != "" && c.MarkType != "<nil>" {
-			scope = append(scope, strings.TrimSpace(c.MarkType))
-		}
-		if strings.TrimSpace(c.TargetKind) != "" && c.TargetKind != "<nil>" {
-			scope = append(scope, strings.TrimSpace(c.TargetKind))
-		}
-		if c.LineStart > 0 && c.LineEnd > 0 {
-			if c.LineStart == c.LineEnd {
-				scope = append(scope, fmt.Sprintf("line %d", c.LineStart))
-			} else {
-				scope = append(scope, fmt.Sprintf("lines %d-%d", c.LineStart, c.LineEnd))
-			}
-		}
-		if c.Page > 0 {
-			scope = append(scope, fmt.Sprintf("page %d", c.Page))
-		}
-		if c.DeleteIntent && kind == "text_artifact" {
-			scope = append(scope, "delete request")
-		}
-		prefix := fmt.Sprintf("%d.", i+1)
-		if len(scope) > 0 {
-			prefix += " [" + strings.Join(scope, ", ") + "]"
-		}
-		fmt.Fprintf(&b, "%s %s\n", prefix, c.Comment)
-		if kind == "text_artifact" && strings.TrimSpace(c.TargetExcerpt) != "" {
-			fmt.Fprintf(&b, "   target excerpt: %q\n", truncatePromptSnippet(c.TargetExcerpt, 240))
-		}
-	}
-	if kind == "text_artifact" {
-		b.WriteString("\nOriginal document text:\n")
-		b.WriteString("<<<TEXT\n")
-		b.WriteString(text)
-		b.WriteString("\nTEXT\n")
-		b.WriteString(">>>")
-	}
-	return b.String()
-}
-
-func sanitizeAppServerTextResponse(raw string) string {
-	text := strings.TrimSpace(raw)
-	if text == "" {
-		return ""
-	}
-	if strings.HasPrefix(text, "```") {
-		lines := strings.Split(text, "\n")
-		if len(lines) >= 3 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") && strings.TrimSpace(lines[len(lines)-1]) == "```" {
-			text = strings.Join(lines[1:len(lines)-1], "\n")
-		}
-	}
-	return strings.TrimSpace(text)
 }
 
 func normalizeLineEndings(text string) string {
@@ -1570,7 +1310,7 @@ func (a *App) startLocalServe() error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return errors.New("local tabula serve did not become healthy in time")
+	return errors.New("local tabura serve did not become healthy in time")
 }
 
 func (a *App) Start(host string, port int) error {
@@ -1578,7 +1318,7 @@ func (a *App) Start(host string, port int) error {
 		return err
 	}
 	srv := &http.Server{Addr: fmt.Sprintf("%s:%d", host, port), Handler: a.Router(), ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
-	fmt.Println("tabula web listening on:")
+	fmt.Println("tabura web listening on:")
 	for _, u := range serve.ListenURLs(host, port) {
 		fmt.Printf("  %s\n", u)
 	}

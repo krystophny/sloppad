@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tabula Chat Harness</title>
+  <title>Tabura Chat Harness</title>
   <link rel="stylesheet" href="../../internal/web/static/style.css">
   <style>
     body { margin: 0; padding: 0; }
@@ -13,7 +13,7 @@
   <div id="app">
     <div id="view-main" class="view">
       <header id="toolbar">
-        <span class="brand">Tabula</span>
+        <span class="brand">Tabura</span>
         <div id="project-tab-strip" role="tablist" aria-label="Projects"></div>
         <button id="btn-projects" class="tab-btn tab-btn-subtle" type="button">Projects</button>
         <span id="status-text">ready</span>
@@ -34,10 +34,10 @@
               <button type="button" id="btn-open-canvas">Open Canvas</button>
               <button type="button" id="btn-commit-from-chat">Commit Draft</button>
             </div>
-            <textarea id="chat-input" rows="2" placeholder="Ask anything."></textarea>
+            <textarea id="chat-input" rows="2" placeholder="Message, or hold to speak"></textarea>
             <div class="chat-compose-row">
               <div class="chat-compose-meta">
-                <span id="chat-hint">Enter sends. Shift+Enter newline. Hold Send to voice-send. Esc stops.</span>
+                <span id="chat-hint">Enter sends. Shift+Enter newline. Hold input area to voice-send. Esc stops.</span>
                 <span id="chat-assistant-state" class="chat-assistant-state is-idle" aria-live="polite">Assistant idle</span>
               </div>
               <button id="btn-chat-send" type="submit">Send</button>
@@ -78,6 +78,13 @@
     const _realFetch = window.fetch;
     window.fetch = async function(url, opts) {
       const u = String(url);
+      if (u.includes('/api/setup')) {
+        return new Response(JSON.stringify({
+          has_password: true,
+          authenticated: true,
+          local_session: 'local',
+        }), { status: 200 });
+      }
       if (u.includes('/api/projects') && u.includes('/activate')) {
         return new Response(JSON.stringify({
           project: {

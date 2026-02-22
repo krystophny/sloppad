@@ -12,8 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
-	"github.com/krystophny/tabula/internal/appserver"
-	"github.com/krystophny/tabula/internal/store"
+	"github.com/krystophny/tabura/internal/appserver"
+	"github.com/krystophny/tabura/internal/store"
 )
 
 const assistantTurnTimeout = 20 * time.Minute
@@ -818,4 +818,24 @@ func (a *App) broadcastChatEvent(sessionID string, payload map[string]interface{
 	for _, conn := range clients {
 		_ = conn.writeText(encoded)
 	}
+}
+
+// injectChatMessage stores a message in the chat session, broadcasts it to
+// WebSocket clients, and optionally enqueues an assistant turn so the LLM
+// processes it. Returns the stored message ID.
+func (a *App) injectChatMessage(chatSessionID, role, text string, triggerAssistant bool) (int64, error) {
+	stored, err := a.store.AddChatMessage(chatSessionID, role, text, text, "text")
+	if err != nil {
+		return 0, err
+	}
+	a.broadcastChatEvent(chatSessionID, map[string]interface{}{
+		"type":    "message_accepted",
+		"role":    role,
+		"content": text,
+		"id":      stored.ID,
+	})
+	if triggerAssistant {
+		a.enqueueAssistantTurn(chatSessionID)
+	}
+	return stored.ID, nil
 }

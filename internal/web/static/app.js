@@ -34,12 +34,12 @@ export function getState() {
   return state;
 }
 
-window._tabulaApp = { getState, acquireMicStream, sttStart, sttSendChunk, sttStop, sttCancel };
+window._taburaApp = { getState, acquireMicStream, sttStart, sttSendChunk, sttStop, sttCancel };
 
-const MATH_SEGMENT_TOKEN_PREFIX = '@@TABULA_CHAT_MATH_SEGMENT_';
+const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_CHAT_MATH_SEGMENT_';
 const DEV_UI_RELOAD_POLL_MS = 1500;
 const ASSISTANT_ACTIVITY_POLL_MS = 1200;
-const ACTIVE_PROJECT_STORAGE_KEY = 'tabula.activeProjectId';
+const ACTIVE_PROJECT_STORAGE_KEY = 'tabura.activeProjectId';
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
 const CHAT_SEND_HOLD_MS = 300;
@@ -145,7 +145,7 @@ function showStatus(text) {
 
 function forceUiHardReload() {
   const url = new URL(window.location.href);
-  url.searchParams.set('__tabula_reload', Date.now().toString(36));
+  url.searchParams.set('__tabura_reload', Date.now().toString(36));
   window.location.replace(url.toString());
 }
 
@@ -402,12 +402,15 @@ function handleSTTWSMessage(payload) {
 function setSendButtonRecording(active) {
   const btn = document.getElementById('btn-chat-send');
   if (!btn) return;
+  const inputEl = document.getElementById('chat-input');
   if (active) {
     btn.classList.add('is-recording');
     btn.textContent = 'Rec';
+    inputEl?.classList.add('is-recording');
   } else {
     btn.classList.remove('is-recording');
     btn.textContent = 'Send';
+    inputEl?.classList.remove('is-recording');
   }
 }
 
@@ -1393,7 +1396,10 @@ async function commitCanvasFromChat() {
       resp = await fetch(`/api/canvas/${encodeURIComponent(state.sessionId)}/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ include_draft: true }),
+        body: JSON.stringify({
+          include_draft: true,
+          chat_session_id: state.chatSessionId || '',
+        }),
         signal: controller.signal,
       });
     } finally {
@@ -1404,7 +1410,12 @@ async function commitCanvasFromChat() {
       appendPlainMessage('system', `Commit failed: ${detail}`);
       return;
     }
-    appendPlainMessage('system', 'Draft annotations committed.');
+    const data = await resp.json().catch(() => ({}));
+    if (data.routed_to_chat) {
+      setActiveTab('chat');
+    } else {
+      appendPlainMessage('system', 'Draft annotations committed.');
+    }
   } catch (err) {
     if (err && err.name === 'AbortError') {
       appendPlainMessage('system', 'Commit failed: request timed out after 45s');
@@ -1535,6 +1546,60 @@ function bindUi() {
     input.addEventListener('input', () => {
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 240)}px`;
+    });
+
+    let inputHoldTimer = null;
+    let inputHoldActive = false;
+    let inputHoldIsTouch = false;
+    const inputHoldStart = (ev, isTouch) => {
+      if (state.chatVoiceCapture) {
+        if (isTouch) ev.preventDefault();
+        void stopChatVoiceCaptureAndApply();
+        return;
+      }
+      if (input.value.trim()) return;
+      inputHoldActive = false;
+      inputHoldIsTouch = isTouch;
+      inputHoldTimer = window.setTimeout(() => {
+        inputHoldTimer = null;
+        inputHoldActive = true;
+        if (isTouch) input.blur();
+        input.classList.add('is-recording');
+        void beginChatVoiceCapture({ autoSend: true });
+      }, CHAT_SEND_HOLD_MS);
+    };
+    const inputHoldEnd = () => {
+      if (inputHoldTimer) {
+        clearTimeout(inputHoldTimer);
+        inputHoldTimer = null;
+        inputHoldIsTouch = false;
+        return;
+      }
+      if (inputHoldActive || state.chatVoiceCapture) {
+        inputHoldActive = false;
+        inputHoldIsTouch = false;
+        input.classList.remove('is-recording');
+        void stopChatVoiceCaptureAndApply();
+      }
+    };
+    input.addEventListener('touchstart', (ev) => inputHoldStart(ev, true), { passive: false });
+    window.addEventListener('touchend', (ev) => {
+      if (!inputHoldIsTouch) return;
+      if (inputHoldTimer || inputHoldActive || state.chatVoiceCapture) ev.preventDefault();
+      inputHoldEnd();
+    }, { passive: false });
+    window.addEventListener('touchcancel', () => {
+      if (!inputHoldIsTouch) return;
+      inputHoldEnd();
+    });
+    input.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0) return;
+      if (inputHoldIsTouch) return;
+      inputHoldStart(ev, false);
+    });
+    window.addEventListener('mouseup', () => {
+      if (inputHoldIsTouch) return;
+      inputHoldEnd();
     });
   }
 
@@ -1668,7 +1733,66 @@ async function init() {
   await switchProject(initialProjectID);
 }
 
-init().catch((err) => {
-  showStatus('failed');
-  appendPlainMessage('system', `Initialization failed: ${String(err?.message || err)}`);
-});
+async function authGate() {
+  const resp = await fetch('/api/setup');
+  const data = await resp.json();
+  if (data.authenticated) return;
+
+  const loginView = document.getElementById('view-login');
+  const mainView = document.getElementById('view-main');
+  const loginForm = document.getElementById('login-form');
+  const loginPassword = document.getElementById('login-password');
+  const loginError = document.getElementById('login-error');
+  const loginPrompt = document.getElementById('login-prompt');
+  const loginBtn = document.getElementById('btn-login');
+
+  if (!data.has_password) {
+    loginPrompt.textContent = 'No password set. Run "tabura set-password" on the server.';
+    loginBtn.style.display = 'none';
+    loginPassword.style.display = 'none';
+    loginView.style.display = '';
+    mainView.style.display = 'none';
+    return new Promise(() => {});
+  }
+
+  loginPrompt.textContent = 'Enter your password.';
+  loginView.style.display = '';
+  mainView.style.display = 'none';
+
+  await new Promise((resolve) => {
+    loginForm.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      loginError.textContent = '';
+      const pw = loginPassword.value;
+      if (!pw) return;
+      try {
+        const r = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pw }),
+        });
+        if (!r.ok) {
+          const msg = (await r.text()).trim();
+          loginError.textContent = msg || `Error ${r.status}`;
+          return;
+        }
+        resolve();
+      } catch (err) {
+        loginError.textContent = String(err?.message || err);
+      }
+    });
+  });
+
+  loginView.style.display = 'none';
+  mainView.style.display = '';
+}
+
+authGate()
+  .then(() => {
+    document.getElementById('view-main').style.display = '';
+    return init();
+  })
+  .catch((err) => {
+    showStatus('failed');
+    appendPlainMessage('system', `Initialization failed: ${String(err?.message || err)}`);
+  });

@@ -78,7 +78,7 @@ test.beforeEach(async ({ page }) => {
   page.on('pageerror', (err) => console.log(`PAGE ERROR: ${err.message}`));
   await page.goto('/tests/playwright/chat-harness.html');
   await page.waitForFunction(() => {
-    const app = (window as any)._tabulaApp;
+    const app = (window as any)._taburaApp;
     if (typeof app?.getState !== 'function') return false;
     const s = app.getState();
     return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
@@ -272,4 +272,59 @@ test('second click on Send button stops recording (mouse)', async ({ page }) => 
   await page.waitForTimeout(50);
   await page.mouse.down();
   await waitForSTTAction(page, 'stop');
+});
+
+test('touch hold on empty chat input starts voice recording', async ({ page }) => {
+  await clearLog(page);
+  await touchStart(page, '#chat-input');
+  await page.waitForTimeout(500);
+
+  await waitForSTTAction(page, 'start');
+  await waitForLogEntry(page, 'recorder', 'start');
+
+  const inputRecording = await page.locator('#chat-input').evaluate(
+    (el) => el.classList.contains('is-recording'),
+  );
+  expect(inputRecording).toBe(true);
+
+  await touchEnd(page, '#chat-input');
+  await waitForSTTAction(page, 'stop');
+
+  const inputDone = await page.locator('#chat-input').evaluate(
+    (el) => el.classList.contains('is-recording'),
+  );
+  expect(inputDone).toBe(false);
+});
+
+test('mouse hold on empty chat input starts voice recording (desktop)', async ({ page }) => {
+  await clearLog(page);
+  const input = page.locator('#chat-input');
+  const box = await input.boundingBox();
+  if (!box) throw new Error('chat input not found');
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(500);
+  await waitForSTTAction(page, 'start');
+
+  await page.mouse.up();
+  await waitForSTTAction(page, 'stop');
+
+  const log = await getLog(page);
+  const sttActions = log.filter(e => e.type === 'stt').map(e => e.action);
+  expect(sttActions).toContain('start');
+  expect(sttActions).toContain('stop');
+});
+
+test('hold on chat input with text does NOT start voice recording', async ({ page }) => {
+  await page.locator('#chat-input').fill('some text');
+  await clearLog(page);
+  await touchStart(page, '#chat-input');
+  await page.waitForTimeout(500);
+  await touchEnd(page, '#chat-input');
+  await page.waitForTimeout(300);
+
+  const log = await getLog(page);
+  const sttActions = log.filter(e => e.type === 'stt');
+  expect(sttActions).toHaveLength(0);
 });
