@@ -687,61 +687,9 @@ func (a *App) runAssistantTurn(sessionID string) {
 		assistantText = "(assistant returned no content)"
 	}
 
-	canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
-	hasCanvasOutput := false
-	if cBlocks, cleaned := parseCanvasBlocks(assistantText); len(cBlocks) > 0 {
-		hasCanvasOutput = true
-		if canvasSessionID != "" {
-			a.executeCanvasBlocks(canvasSessionID, cBlocks)
-		}
-		assistantText = cleaned
-	}
-	if fBlocks, cleaned := parseFileBlocks(assistantText); len(fBlocks) > 0 {
-		hasCanvasOutput = true
-		if canvasSessionID != "" {
-			a.executeFileBlocks(canvasSessionID, fBlocks)
-		}
-		assistantText = cleaned
-	}
-	assistantText = stripLangTags(assistantText)
-	if !hasCanvasOutput {
-		a.executeAssistantTextBlock(canvasSessionID, assistantText)
-	}
-
-	a.refreshCanvasFromDisk(session.ProjectKey)
-
-	if persistedAssistantID == 0 {
-		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
-		if storeErr != nil {
-			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":  "error",
-				"error": storeErr.Error(),
-			})
-			return
-		}
-		persistedAssistantID = storedAssistant.ID
-		persistedAssistantText = assistantText
-	} else if assistantText != persistedAssistantText {
-		if storeErr := a.store.UpdateChatMessageContent(persistedAssistantID, assistantText, assistantText, "markdown"); storeErr != nil {
-			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":  "error",
-				"error": storeErr.Error(),
-			})
-			return
-		}
-	}
-	turnID := strings.TrimSpace(appResp.TurnID)
-	if turnID == "" {
-		turnID = latestTurnID
-	}
-	a.broadcastChatEvent(sessionID, map[string]interface{}{
-		"type":      "message_persisted",
-		"role":      "assistant",
-		"id":        persistedAssistantID,
-		"turn_id":   turnID,
-		"thread_id": appResp.ThreadID,
-		"message":   assistantText,
-	})
+	assistantText = a.finalizeAssistantResponse(sessionID, session.ProjectKey, assistantText,
+		&persistedAssistantID, &persistedAssistantText, appResp.TurnID, latestTurnID, appResp.ThreadID)
+	_ = assistantText
 }
 
 // runAssistantTurnLegacy is the single-shot fallback when persistent session
@@ -807,12 +755,12 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 	}
 
 	appResp, err := a.appServerClient.SendPromptStream(ctx, appserver.PromptRequest{
-		CWD:     a.cwdForProjectKey(session.ProjectKey),
-		Prompt:  prompt,
-		Model:   a.appServerModel,
+		CWD:          a.cwdForProjectKey(session.ProjectKey),
+		Prompt:       prompt,
+		Model:        a.appServerModel,
 		ThreadParams: appServerReasoningParamsForModel(a.appServerModel, a.appServerSparkReasoningEffort),
 		TurnParams:   appServerReasoningParamsForModel(a.appServerModel, a.appServerSparkReasoningEffort),
-		Timeout: assistantTurnTimeout,
+		Timeout:      assistantTurnTimeout,
 	}, func(ev appserver.StreamEvent) {
 		payload := map[string]interface{}{
 			"type":      ev.Type,
@@ -881,54 +829,64 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		assistantText = "(assistant returned no content)"
 	}
 
-	canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
-	hasCanvasOutput := false
-	if cBlocks, cleaned := parseCanvasBlocks(assistantText); len(cBlocks) > 0 {
-		hasCanvasOutput = true
+	assistantText = a.finalizeAssistantResponse(sessionID, session.ProjectKey, assistantText,
+		&persistedAssistantID, &persistedAssistantText, appResp.TurnID, latestTurnID, appResp.ThreadID)
+	_ = assistantText
+}
+
+// finalizeAssistantResponse handles post-processing shared by both turn paths:
+// parse and execute canvas/file blocks, strip lang tags, persist final text,
+// and broadcast message_persisted. Only explicit :::canvas{}/:::file{} blocks
+// go to canvas; plain text stays in chat (overlay + TTS).
+func (a *App) finalizeAssistantResponse(
+	sessionID, projectKey, text string,
+	persistedID *int64, persistedText *string,
+	turnID, fallbackTurnID, threadID string,
+) string {
+	canvasSessionID := a.resolveCanvasSessionID(projectKey)
+	if cBlocks, cleaned := parseCanvasBlocks(text); len(cBlocks) > 0 {
 		if canvasSessionID != "" {
 			a.executeCanvasBlocks(canvasSessionID, cBlocks)
 		}
-		assistantText = cleaned
+		text = cleaned
 	}
-	if fBlocks, cleaned := parseFileBlocks(assistantText); len(fBlocks) > 0 {
-		hasCanvasOutput = true
+	if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
 		if canvasSessionID != "" {
 			a.executeFileBlocks(canvasSessionID, fBlocks)
 		}
-		assistantText = cleaned
+		text = cleaned
 	}
-	assistantText = stripLangTags(assistantText)
-	if !hasCanvasOutput {
-		a.executeAssistantTextBlock(canvasSessionID, assistantText)
-	}
+	text = stripLangTags(text)
 
-	a.refreshCanvasFromDisk(session.ProjectKey)
+	a.refreshCanvasFromDisk(projectKey)
 
-	if persistedAssistantID == 0 {
-		storedAssistant, storeErr := a.store.AddChatMessage(sessionID, "assistant", assistantText, assistantText, "markdown")
-		if storeErr != nil {
-			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":  "error",
-				"error": storeErr.Error(),
-			})
-			return
+	if *persistedID == 0 {
+		stored, err := a.store.AddChatMessage(sessionID, "assistant", text, text, "markdown")
+		if err != nil {
+			a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
+			return text
 		}
-		persistedAssistantID = storedAssistant.ID
-	} else if assistantText != persistedAssistantText {
-		_ = a.store.UpdateChatMessageContent(persistedAssistantID, assistantText, assistantText, "markdown")
+		*persistedID = stored.ID
+		*persistedText = text
+	} else if text != *persistedText {
+		if err := a.store.UpdateChatMessageContent(*persistedID, text, text, "markdown"); err != nil {
+			a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
+			return text
+		}
 	}
-	turnID := strings.TrimSpace(appResp.TurnID)
-	if turnID == "" {
-		turnID = latestTurnID
+	tid := strings.TrimSpace(turnID)
+	if tid == "" {
+		tid = fallbackTurnID
 	}
 	a.broadcastChatEvent(sessionID, map[string]interface{}{
 		"type":      "message_persisted",
 		"role":      "assistant",
-		"id":        persistedAssistantID,
-		"turn_id":   turnID,
-		"thread_id": appResp.ThreadID,
-		"message":   assistantText,
+		"id":        *persistedID,
+		"turn_id":   tid,
+		"thread_id": threadID,
+		"message":   text,
 	})
+	return text
 }
 
 func (a *App) cwdForProjectKey(projectKey string) string {

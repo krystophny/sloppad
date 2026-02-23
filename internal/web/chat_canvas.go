@@ -84,25 +84,6 @@ func stripLangTags(text string) string {
 	return strings.TrimSpace(langTagRe.ReplaceAllString(text, ""))
 }
 
-func (a *App) executeAssistantTextBlock(canvasSessionID, text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	a.mu.Lock()
-	port, ok := a.tunnelPorts[canvasSessionID]
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
-	_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
-		"session_id":       canvasSessionID,
-		"kind":             "text",
-		"title":            "Assistant Response",
-		"markdown_or_text": text,
-	})
-}
-
 func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) {
 	a.mu.Lock()
 	port, ok := a.tunnelPorts[canvasSessionID]
