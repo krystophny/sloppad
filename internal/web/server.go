@@ -205,6 +205,7 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/chat/sessions/{session_id}/messages", a.handleChatSessionMessage)
 	r.Post("/api/chat/sessions/{session_id}/commands", a.handleChatSessionCommand)
 	r.Post("/api/chat/sessions/{session_id}/cancel", a.handleChatSessionCancel)
+	r.Post("/api/chat/sessions/{session_id}/cancel-delegates", a.handleChatSessionCancelDelegates)
 
 	// canvas/file proxy
 	r.Get("/api/canvas/{session_id}/snapshot", a.handleCanvasSnapshot)

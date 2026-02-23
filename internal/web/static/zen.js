@@ -19,6 +19,7 @@ const zenState = {
   inputAnchor: null,
   inputVisible: false,
   indicatorVisible: false,
+  delegateIndicatorVisible: false,
   lastInputX: 0,
   lastInputY: 0,
 };
@@ -79,6 +80,10 @@ function inputEl() {
   return document.getElementById('zen-input');
 }
 
+function delegateIndicatorEl() {
+  return document.getElementById('zen-delegate-indicator');
+}
+
 function overlayEl() {
   return document.getElementById('zen-overlay');
 }
@@ -91,6 +96,7 @@ function overlayContentEl() {
 export function showIndicator(x, y) {
   const el = indicatorEl();
   if (!el) return;
+  el.classList.remove('is-thinking');
   el.style.display = '';
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
@@ -100,6 +106,7 @@ export function showIndicator(x, y) {
 export function hideIndicator() {
   const el = indicatorEl();
   if (!el) return;
+  el.classList.remove('is-thinking');
   el.style.display = 'none';
   const dot = el.querySelector('.zen-indicator-dot');
   const dots = el.querySelector('.zen-indicator-dots');
@@ -111,6 +118,7 @@ export function hideIndicator() {
 export function showThinkingIndicator(x, y) {
   const el = indicatorEl();
   if (!el) return;
+  el.classList.add('is-thinking');
   const dot = el.querySelector('.zen-indicator-dot');
   const dots = el.querySelector('.zen-indicator-dots');
   if (dot) dot.style.display = 'none';
@@ -119,6 +127,22 @@ export function showThinkingIndicator(x, y) {
   el.style.left = `${x}px`;
   el.style.top = `${y}px`;
   zenState.indicatorVisible = true;
+}
+
+export function showDelegateIndicator(x, y) {
+  const el = delegateIndicatorEl();
+  if (!el) return;
+  el.style.display = '';
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  zenState.delegateIndicatorVisible = true;
+}
+
+export function hideDelegateIndicator() {
+  const el = delegateIndicatorEl();
+  if (!el) return;
+  el.style.display = 'none';
+  zenState.delegateIndicatorVisible = false;
 }
 
 export function showTextInput(x, y, anchor) {

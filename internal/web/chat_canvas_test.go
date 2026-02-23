@@ -7,86 +7,6 @@ import (
 	"testing"
 )
 
-func TestParseCanvasBlocks_NoMarkers(t *testing.T) {
-	blocks, cleaned := parseCanvasBlocks("Hello world, no markers here.")
-	if len(blocks) != 0 {
-		t.Fatalf("expected 0 blocks, got %d", len(blocks))
-	}
-	if cleaned != "Hello world, no markers here." {
-		t.Fatalf("cleaned text should be unchanged, got %q", cleaned)
-	}
-}
-
-func TestParseCanvasBlocks_SingleBlock(t *testing.T) {
-	input := `Here is some analysis:
-
-:::canvas{title="Performance Analysis"}
-## Results
-
-The system is performing well.
-:::
-
-Let me know if you need more.`
-
-	blocks, cleaned := parseCanvasBlocks(input)
-	if len(blocks) != 1 {
-		t.Fatalf("expected 1 block, got %d", len(blocks))
-	}
-	if blocks[0].Title != "Performance Analysis" {
-		t.Errorf("title = %q, want %q", blocks[0].Title, "Performance Analysis")
-	}
-	if blocks[0].Content == "" {
-		t.Error("content should not be empty")
-	}
-	if cleaned == input {
-		t.Error("cleaned should differ from input (markers stripped)")
-	}
-	if !strings.Contains(cleaned, "[canvas: Performance Analysis]") {
-		t.Errorf("cleaned should contain reference, got %q", cleaned)
-	}
-}
-
-func TestParseCanvasBlocks_MultipleBlocks(t *testing.T) {
-	input := `First:
-
-:::canvas{title="Part 1"}
-Content A
-:::
-
-Second:
-
-:::canvas{title="Part 2"}
-Content B
-:::
-
-Done.`
-
-	blocks, cleaned := parseCanvasBlocks(input)
-	if len(blocks) != 2 {
-		t.Fatalf("expected 2 blocks, got %d", len(blocks))
-	}
-	if blocks[0].Title != "Part 1" {
-		t.Errorf("blocks[0].Title = %q, want %q", blocks[0].Title, "Part 1")
-	}
-	if blocks[1].Title != "Part 2" {
-		t.Errorf("blocks[1].Title = %q, want %q", blocks[1].Title, "Part 2")
-	}
-	if cleaned == "" {
-		t.Error("cleaned should not be empty")
-	}
-}
-
-func TestParseCanvasBlocks_CleanedContainsReference(t *testing.T) {
-	input := `:::canvas{title="Report"}
-Full report here.
-:::`
-	_, cleaned := parseCanvasBlocks(input)
-	want := "[canvas: Report]"
-	if cleaned != want {
-		t.Errorf("cleaned = %q, want %q", cleaned, want)
-	}
-}
-
 func TestParseFileBlocks_NoMarkers(t *testing.T) {
 	blocks, cleaned := parseFileBlocks("Hello world, no markers here.")
 	if len(blocks) != 0 {
@@ -146,24 +66,6 @@ package main
 	}
 }
 
-func TestParseCanvasBlocks_ContentWithCodeFences(t *testing.T) {
-	input := ":::canvas{title=\"Code Review\"}\nHere is the code:\n```go\nfunc main() {}\n```\nLooks good.\n:::\n"
-
-	blocks, cleaned := parseCanvasBlocks(input)
-	if len(blocks) != 1 {
-		t.Fatalf("expected 1 canvas block, got %d", len(blocks))
-	}
-	if blocks[0].Title != "Code Review" {
-		t.Errorf("title = %q, want %q", blocks[0].Title, "Code Review")
-	}
-	if !strings.Contains(blocks[0].Content, "```go") {
-		t.Errorf("content should preserve code fences, got %q", blocks[0].Content)
-	}
-	if !strings.Contains(cleaned, "[canvas: Code Review]") {
-		t.Errorf("cleaned should contain reference, got %q", cleaned)
-	}
-}
-
 func TestParseFileBlocks_ContentWithCodeFences(t *testing.T) {
 	input := ":::file{path=\"README.md\"}\n# Title\n```bash\necho hello\n```\n:::\n"
 
@@ -201,35 +103,46 @@ func TestStripLangTags_NoTags(t *testing.T) {
 	}
 }
 
-func TestMixedCanvasAndFileBlocks(t *testing.T) {
-	input := `[lang:en] Here is the summary and the code.
-
-:::canvas{title="Summary"}
-Everything looks good.
-:::
-
-:::file{path="main.go"}
-package main
-:::`
-
-	cBlocks, afterCanvas := parseCanvasBlocks(input)
-	fBlocks, afterFile := parseFileBlocks(afterCanvas)
-	final := stripLangTags(afterFile)
-
-	if len(cBlocks) != 1 {
-		t.Fatalf("expected 1 canvas block, got %d", len(cBlocks))
+func TestAssistantFinalChatContent_StructuredWithCompanion(t *testing.T) {
+	input := "Review ready. [file: .tabura/artifacts/tmp/diff.md] Let's discuss."
+	markdown, plain, format := assistantFinalChatContent(input, true)
+	normalized := strings.Join(strings.Fields(markdown), " ")
+	if normalized != "Review ready. Let's discuss." {
+		t.Fatalf("markdown = %q", markdown)
 	}
-	if len(fBlocks) != 1 {
-		t.Fatalf("expected 1 file block, got %d", len(fBlocks))
+	if plain != markdown {
+		t.Fatalf("plain = %q, want %q", plain, markdown)
 	}
-	if strings.Contains(final, "[lang:") {
-		t.Errorf("lang tags should be stripped from final, got %q", final)
+	if format != "markdown" {
+		t.Fatalf("format = %q, want markdown", format)
 	}
-	if !strings.Contains(final, "[canvas: Summary]") {
-		t.Errorf("canvas reference missing, got %q", final)
+}
+
+func TestAssistantFinalChatContent_StructuredMarkersOnly(t *testing.T) {
+	input := "[file: .tabura/artifacts/tmp/diff.md]"
+	markdown, plain, format := assistantFinalChatContent(input, true)
+	if markdown != "Canvas file updated." {
+		t.Fatalf("markdown = %q, want fallback", markdown)
 	}
-	if !strings.Contains(final, "[file: main.go]") {
-		t.Errorf("file reference missing, got %q", final)
+	if plain != markdown {
+		t.Fatalf("plain = %q, want %q", plain, markdown)
+	}
+	if format != "markdown" {
+		t.Fatalf("format = %q, want markdown", format)
+	}
+}
+
+func TestAssistantFinalChatContent_RegularChatResponse(t *testing.T) {
+	input := "Short spoken response."
+	markdown, plain, format := assistantFinalChatContent(input, false)
+	if markdown != input {
+		t.Fatalf("markdown = %q, want %q", markdown, input)
+	}
+	if plain != input {
+		t.Fatalf("plain = %q, want %q", plain, input)
+	}
+	if format != "markdown" {
+		t.Fatalf("format = %q, want markdown", format)
 	}
 }
 
@@ -241,11 +154,11 @@ func TestBuildPromptFromHistory_IncludesSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "You are Tabura") {
 		t.Error("prompt should contain system identity")
 	}
-	if !strings.Contains(prompt, ":::canvas{") {
-		t.Error("prompt should mention :::canvas{ markers")
-	}
 	if !strings.Contains(prompt, ":::file{") {
 		t.Error("prompt should mention :::file{ markers")
+	}
+	if !strings.Contains(prompt, "Do not use :::canvas blocks.") {
+		t.Error("prompt should explicitly disallow :::canvas blocks")
 	}
 	if !strings.Contains(prompt, "[lang:") {
 		t.Error("prompt should mention [lang:] markers")
@@ -267,6 +180,41 @@ func TestBuildPromptFromHistory_WithCanvasContext(t *testing.T) {
 	prompt := buildPromptFromHistory("chat", nil, ctx)
 	if !strings.Contains(prompt, "Report.md") {
 		t.Error("prompt should include artifact title")
+	}
+}
+
+func TestResolveCanvasFilePath_UsesProjectRelativeTitle(t *testing.T) {
+	tmp := t.TempDir()
+	abs, title, err := resolveCanvasFilePath(tmp, "notes/summary.md")
+	if err != nil {
+		t.Fatalf("resolveCanvasFilePath returned error: %v", err)
+	}
+	if !strings.HasPrefix(abs, tmp) {
+		t.Fatalf("expected absolute path inside %q, got %q", tmp, abs)
+	}
+	if title != "notes/summary.md" {
+		t.Fatalf("expected title notes/summary.md, got %q", title)
+	}
+}
+
+func TestResolveCanvasFilePath_RejectsEscapingProjectRoot(t *testing.T) {
+	tmp := t.TempDir()
+	if _, _, err := resolveCanvasFilePath(tmp, "../outside.md"); err == nil {
+		t.Fatal("expected error for escaping project root")
+	}
+}
+
+func TestResolveCanvasFilePath_DefaultsToTempArtifactPath(t *testing.T) {
+	tmp := t.TempDir()
+	abs, title, err := resolveCanvasFilePath(tmp, "")
+	if err != nil {
+		t.Fatalf("resolveCanvasFilePath returned error: %v", err)
+	}
+	if !strings.Contains(filepath.ToSlash(abs), "/.tabura/artifacts/tmp/") {
+		t.Fatalf("expected temp artifact path, got %q", abs)
+	}
+	if !strings.HasPrefix(title, ".tabura/artifacts/tmp/") {
+		t.Fatalf("expected temp artifact title, got %q", title)
 	}
 }
 

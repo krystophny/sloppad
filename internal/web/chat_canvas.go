@@ -7,26 +7,22 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
-
-type canvasBlock struct {
-	Title   string
-	Content string
-}
 
 type fileBlock struct {
 	Path    string
 	Content string
 }
 
-var canvasBlockRe = regexp.MustCompile(`(?s):::canvas\{([^}]*)\}\n?(.*?):::`)
 var fileBlockRe = regexp.MustCompile(`(?s):::file\{([^}]*)\}\n?(.*?):::`)
 var langTagRe = regexp.MustCompile(`\[lang:[a-z]{2}\]`)
-var canvasFileMarkerRe = regexp.MustCompile(`\[(?:canvas|file):[^\]]*\]`)
-var canvasFileDirectiveOpenRe = regexp.MustCompile(`(?m)^\\s*:::(?:canvas|file)\{[^}]*\}\s*$`)
-var canvasFileDirectiveCloseRe = regexp.MustCompile(`(?m)^\\s*:::\s*$`)
+var canvasFileMarkerRe = regexp.MustCompile(`\[file:[^\]]*\]`)
+var canvasFileDirectiveOpenRe = regexp.MustCompile(`(?m)^\s*:::file\{[^}]*\}\s*$`)
+var canvasFileDirectiveCloseRe = regexp.MustCompile(`(?m)^\s*:::\s*$`)
+var canvasTempFileStemRe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 var attrRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
@@ -37,28 +33,6 @@ func extractAttr(attrs, name string) string {
 		}
 	}
 	return ""
-}
-
-func parseCanvasBlocks(text string) ([]canvasBlock, string) {
-	matches := canvasBlockRe.FindAllStringSubmatchIndex(text, -1)
-	if len(matches) == 0 {
-		return nil, text
-	}
-	var blocks []canvasBlock
-	var cleaned strings.Builder
-	lastEnd := 0
-	for _, m := range matches {
-		title := extractAttr(text[m[2]:m[3]], "title")
-		blocks = append(blocks, canvasBlock{
-			Title:   title,
-			Content: strings.TrimSpace(text[m[4]:m[5]]),
-		})
-		cleaned.WriteString(text[lastEnd:m[0]])
-		fmt.Fprintf(&cleaned, "[canvas: %s]", title)
-		lastEnd = m[1]
-	}
-	cleaned.WriteString(text[lastEnd:])
-	return blocks, strings.TrimSpace(cleaned.String())
 }
 
 func parseFileBlocks(text string) ([]fileBlock, string) {
@@ -95,7 +69,53 @@ func stripCanvasFileMarkers(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) {
+func defaultCanvasTempFilePath(seed string) string {
+	stem := strings.TrimSpace(seed)
+	if stem == "" {
+		stem = "canvas"
+	}
+	stem = strings.ToLower(stem)
+	stem = canvasTempFileStemRe.ReplaceAllString(stem, "-")
+	stem = strings.Trim(stem, "-.")
+	if stem == "" {
+		stem = "canvas"
+	}
+	name := fmt.Sprintf("%s-%d.md", stem, time.Now().UnixNano())
+	return filepath.ToSlash(filepath.Join(".tabura", "artifacts", "tmp", name))
+}
+
+func resolveCanvasFilePath(cwd, requested string) (absolutePath, canvasTitle string, err error) {
+	root := strings.TrimSpace(cwd)
+	if root == "" {
+		root = "."
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", "", err
+	}
+	raw := strings.TrimSpace(requested)
+	if raw == "" {
+		raw = defaultCanvasTempFilePath("")
+	}
+	var abs string
+	if filepath.IsAbs(raw) {
+		abs = filepath.Clean(raw)
+	} else {
+		abs = filepath.Clean(filepath.Join(rootAbs, raw))
+	}
+	rel, err := filepath.Rel(rootAbs, abs)
+	if err != nil {
+		return "", "", err
+	}
+	rel = filepath.Clean(rel)
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("path escapes project root: %s", requested)
+	}
+	return abs, filepath.ToSlash(rel), nil
+}
+
+func (a *App) executeFileBlocks(projectKey, canvasSessionID string, blocks []fileBlock) {
+	cwd := a.cwdForProjectKey(projectKey)
 	a.mu.Lock()
 	port, ok := a.tunnelPorts[canvasSessionID]
 	a.mu.Unlock()
@@ -103,65 +123,30 @@ func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) 
 		return
 	}
 	for _, block := range blocks {
+		absPath, title, err := resolveCanvasFilePath(cwd, block.Path)
+		if err != nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+			continue
+		}
+		if err := os.WriteFile(absPath, []byte(block.Content), 0644); err != nil {
+			continue
+		}
 		_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
 			"session_id":       canvasSessionID,
 			"kind":             "text",
-			"title":            block.Title,
-			"markdown_or_text": block.Content,
-		})
-	}
-}
-
-func (a *App) executeAssistantTextBlock(canvasSessionID, title, text string) {
-	canvasSessionID = strings.TrimSpace(canvasSessionID)
-	text = strings.TrimSpace(text)
-	if canvasSessionID == "" || text == "" {
-		return
-	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		title = "Assistant Output"
-	}
-	a.mu.Lock()
-	port, ok := a.tunnelPorts[canvasSessionID]
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
-	_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
-		"session_id":       canvasSessionID,
-		"kind":             "text",
-		"title":            title,
-		"markdown_or_text": text,
-	})
-}
-
-func (a *App) executeFileBlocks(canvasSessionID string, blocks []fileBlock) {
-	a.mu.Lock()
-	port, ok := a.tunnelPorts[canvasSessionID]
-	a.mu.Unlock()
-	if !ok {
-		return
-	}
-	for _, block := range blocks {
-		_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
-			"session_id":       canvasSessionID,
-			"kind":             "text",
-			"title":            block.Path,
+			"title":            title,
 			"markdown_or_text": block.Content,
 		})
 	}
 }
 
 // resolveArtifactFilePath maps an artifact title to an absolute file path.
-// Returns "" if title has no file-like indicator (dot or separator) or the
-// resolved file does not exist on disk.
+// Returns "" when the resolved file does not exist on disk.
 func resolveArtifactFilePath(cwd, title string) string {
 	t := strings.TrimSpace(title)
 	if t == "" {
-		return ""
-	}
-	if !strings.Contains(t, ".") && !strings.Contains(t, "/") {
 		return ""
 	}
 	var abs string

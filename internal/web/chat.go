@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -18,21 +17,11 @@ import (
 	"github.com/krystophny/tabura/internal/store"
 )
 
-const assistantTurnTimeout = 20 * time.Minute
+const assistantTurnTimeout = 2 * time.Hour
 
 const (
-	turnOutputModeVoice  = "voice"
-	turnOutputModeCanvas = "canvas"
+	turnOutputModeVoice = "voice"
 )
-
-const (
-	assistantLongResponseRuneThreshold = 1400
-	assistantListLineThreshold         = 3
-	assistantListDensityThreshold      = 40
-)
-
-var assistantListLineRe = regexp.MustCompile(`(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)`)
-var codeFenceRe = regexp.MustCompile("(?s)```[\\s\\S]*?```|~~~[\\s\\S]*?~~~")
 
 type chatMessageRequest struct {
 	Text       string `json:"text"`
@@ -145,17 +134,41 @@ func (a *App) handleChatSessionActivity(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "missing session_id", http.StatusBadRequest)
 		return
 	}
-	if _, err := a.store.GetChatSession(sessionID); err != nil {
+	session, err := a.store.GetChatSession(sessionID)
+	if err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	activeTurns := a.activeChatTurnCount(sessionID)
 	queuedTurns := a.queuedChatTurnCount(sessionID)
+	delegateActive := a.delegateActiveJobsForProject(session.ProjectKey)
 	writeJSON(w, map[string]interface{}{
-		"ok":           true,
-		"active_turns": activeTurns,
-		"queued_turns": queuedTurns,
-		"is_working":   activeTurns > 0 || queuedTurns > 0,
+		"ok":              true,
+		"active_turns":    activeTurns,
+		"queued_turns":    queuedTurns,
+		"delegate_active": delegateActive,
+		"is_working":      activeTurns > 0 || queuedTurns > 0 || delegateActive > 0,
+	})
+}
+
+func (a *App) handleChatSessionCancelDelegates(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	sessionID := strings.TrimSpace(chi.URLParam(r, "session_id"))
+	if sessionID == "" {
+		http.Error(w, "missing session_id", http.StatusBadRequest)
+		return
+	}
+	session, err := a.store.GetChatSession(sessionID)
+	if err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	canceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
+	writeJSON(w, map[string]interface{}{
+		"ok":       true,
+		"canceled": canceled,
 	})
 }
 
@@ -432,6 +445,50 @@ func (a *App) cancelChatWork(sessionID string) (int, int) {
 	return activeCanceled, queuedCanceled
 }
 
+func (a *App) delegateActiveJobsForProject(projectKey string) int {
+	cwd := strings.TrimSpace(a.cwdForProjectKey(projectKey))
+	if cwd == "" {
+		return 0
+	}
+	canvasSessionID := strings.TrimSpace(a.resolveCanvasSessionID(projectKey))
+	if canvasSessionID == "" {
+		return 0
+	}
+	a.mu.Lock()
+	port, ok := a.tunnelPorts[canvasSessionID]
+	a.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	status, err := a.mcpToolsCall(port, "delegate_to_model_active_count", map[string]interface{}{"cwd_prefix": cwd})
+	if err != nil {
+		return 0
+	}
+	return intFromAny(status["active"], 0)
+}
+
+func (a *App) cancelDelegatedJobsForProject(projectKey string) int {
+	cwd := strings.TrimSpace(a.cwdForProjectKey(projectKey))
+	if cwd == "" {
+		return 0
+	}
+	canvasSessionID := strings.TrimSpace(a.resolveCanvasSessionID(projectKey))
+	if canvasSessionID == "" {
+		return 0
+	}
+	a.mu.Lock()
+	port, ok := a.tunnelPorts[canvasSessionID]
+	a.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	status, err := a.mcpToolsCall(port, "delegate_to_model_cancel_all", map[string]interface{}{"cwd_prefix": cwd})
+	if err != nil {
+		return 0
+	}
+	return intFromAny(status["canceled"], 0)
+}
+
 func (a *App) activeChatTurnCount(sessionID string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -600,8 +657,8 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string) {
 	persistedAssistantFormat := ""
 	persistWriteFailed := false
 
-	persistAssistantSnapshot := func(text string, renderOnCanvas bool) {
-		candidateMarkdown, candidatePlain, candidateFormat := assistantSnapshotContent(text, renderOnCanvas)
+	persistAssistantSnapshot := func(text string) {
+		candidateMarkdown, candidatePlain, candidateFormat := assistantSnapshotContent(text)
 		if candidateMarkdown == "" && candidatePlain == "" {
 			return
 		}
@@ -660,8 +717,8 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string) {
 		case "assistant_message":
 			latestMessage = ev.Message
 			latestTurnID = ev.TurnID
-			renderOnCanvas := shouldRenderAssistantOutputOnCanvas(outputMode, ev.Message)
-			persistAssistantSnapshot(ev.Message, renderOnCanvas)
+			renderOnCanvas := assistantMessageUsesCanvasBlocks(ev.Message)
+			persistAssistantSnapshot(ev.Message)
 			payload["message"] = ev.Message
 			payload["delta"] = ev.Delta
 			if renderOnCanvas {
@@ -672,8 +729,8 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string) {
 				latestMessage = ev.Message
 			}
 			latestTurnID = ev.TurnID
-			renderOnCanvas := shouldRenderAssistantOutputOnCanvas(outputMode, latestMessage)
-			persistAssistantSnapshot(latestMessage, renderOnCanvas)
+			renderOnCanvas := assistantMessageUsesCanvasBlocks(latestMessage)
+			persistAssistantSnapshot(latestMessage)
 			payload["message"] = latestMessage
 			if renderOnCanvas {
 				payload["render_on_canvas"] = true
@@ -768,8 +825,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 	persistedAssistantPlain := ""
 	persistedAssistantFormat := ""
 	persistWriteFailed := false
-	persistAssistantSnapshot := func(text string, renderOnCanvas bool) {
-		candidateMarkdown, candidatePlain, candidateFormat := assistantSnapshotContent(text, renderOnCanvas)
+	persistAssistantSnapshot := func(text string) {
+		candidateMarkdown, candidatePlain, candidateFormat := assistantSnapshotContent(text)
 		if candidateMarkdown == "" && candidatePlain == "" {
 			return
 		}
@@ -837,8 +894,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		case "assistant_message":
 			latestMessage = ev.Message
 			latestTurnID = ev.TurnID
-			renderOnCanvas := shouldRenderAssistantOutputOnCanvas(outputMode, ev.Message)
-			persistAssistantSnapshot(ev.Message, renderOnCanvas)
+			renderOnCanvas := assistantMessageUsesCanvasBlocks(ev.Message)
+			persistAssistantSnapshot(ev.Message)
 			payload["message"] = ev.Message
 			payload["delta"] = ev.Delta
 			if renderOnCanvas {
@@ -849,8 +906,8 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 				latestMessage = ev.Message
 			}
 			latestTurnID = ev.TurnID
-			renderOnCanvas := shouldRenderAssistantOutputOnCanvas(outputMode, latestMessage)
-			persistAssistantSnapshot(latestMessage, renderOnCanvas)
+			renderOnCanvas := assistantMessageUsesCanvasBlocks(latestMessage)
+			persistAssistantSnapshot(latestMessage)
 			payload["message"] = latestMessage
 			if renderOnCanvas {
 				payload["render_on_canvas"] = true
@@ -900,57 +957,27 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 }
 
 // finalizeAssistantResponse handles post-processing shared by both turn paths:
-// parse and execute canvas/file blocks, strip lang tags, route text to chat/canvas,
-// persist final text, and broadcast assistant_output.
+// parse visual blocks, normalize them to file-backed canvas artifacts, keep the
+// spoken chat companion text, persist final content, and broadcast assistant_output.
 func (a *App) finalizeAssistantResponse(
 	sessionID, projectKey, text string,
 	persistedID *int64, persistedText *string,
 	turnID, fallbackTurnID, threadID string,
 	outputMode string,
 ) string {
-	outputMode = normalizeTurnOutputMode(outputMode)
-	renderOnCanvas := false
+	_ = normalizeTurnOutputMode(outputMode)
 	canvasSessionID := a.resolveCanvasSessionID(projectKey)
-	hasCanvasBlocks := false
-	hasFileBlocks := false
-	if cBlocks, cleaned := parseCanvasBlocks(text); len(cBlocks) > 0 {
-		hasCanvasBlocks = true
-		if canvasSessionID != "" {
-			a.executeCanvasBlocks(canvasSessionID, cBlocks)
-		}
+	fileBlocks := make([]fileBlock, 0)
+	if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
+		fileBlocks = append(fileBlocks, fBlocks...)
 		text = cleaned
 	}
-	if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
-		hasFileBlocks = true
-		if canvasSessionID != "" {
-			a.executeFileBlocks(canvasSessionID, fBlocks)
-		}
-		text = cleaned
+	renderOnCanvas := len(fileBlocks) > 0
+	if renderOnCanvas && canvasSessionID != "" {
+		a.executeFileBlocks(projectKey, canvasSessionID, fileBlocks)
 	}
 	text = stripLangTags(text)
-	renderOnCanvas = hasCanvasBlocks || hasFileBlocks
-	if !renderOnCanvas && canvasSessionID != "" && shouldRenderAssistantOutputOnCanvas(outputMode, text) {
-		renderOnCanvas = true
-	}
-
-	chatMarkdown := text
-	chatPlain := text
-	renderFormat := "markdown"
-	assistantOutputTitle := ""
-	if outputMode == turnOutputModeCanvas || renderOnCanvas {
-		canvasText := strings.TrimSpace(stripCanvasFileMarkers(text))
-		if canvasSessionID != "" {
-			if canvasText != "" {
-				a.executeAssistantTextBlock(canvasSessionID, "Assistant Output", canvasText)
-				assistantOutputTitle = "Assistant Output"
-			}
-			// Keep plain text for prompt continuity, but suppress assistant markdown in chat UI.
-			chatMarkdown = ""
-			chatPlain = canvasText
-			renderFormat = "text"
-			renderOnCanvas = true
-		}
-	}
+	chatMarkdown, chatPlain, renderFormat := assistantFinalChatContent(text, renderOnCanvas)
 
 	a.refreshCanvasFromDisk(projectKey)
 
@@ -982,89 +1009,42 @@ func (a *App) finalizeAssistantResponse(
 		"message":          chatMarkdown,
 		"render_on_canvas": renderOnCanvas,
 	}
-	if assistantOutputTitle != "" {
-		payload["title"] = assistantOutputTitle
-	}
 	a.broadcastChatEvent(sessionID, payload)
 	return chatMarkdown
 }
 
-func shouldRenderAssistantOutputOnCanvas(outputMode, text string) bool {
-	if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
-		return true
+func assistantFinalChatContent(text string, renderOnCanvas bool) (string, string, string) {
+	trimmed := strings.TrimSpace(text)
+	companion := strings.TrimSpace(stripCanvasFileMarkers(trimmed))
+	if companion == "" && renderOnCanvas {
+		companion = "Canvas file updated."
 	}
-	clean := strings.TrimSpace(stripCanvasFileMarkers(stripLangTags(text)))
-	if clean == "" {
-		return false
-	}
-	return shouldRenderAssistantTextInCanvas(clean)
+	return companion, companion, "markdown"
 }
 
-func assistantSnapshotContent(text string, renderOnCanvas bool) (string, string, string) {
-	candidate := strings.TrimSpace(text)
+func assistantMessageUsesCanvasBlocks(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, ":::file{")
+}
+
+func assistantSnapshotContent(text string) (string, string, string) {
+	candidate := stripLangTags(strings.TrimSpace(text))
 	if candidate == "" {
 		return "", "", "markdown"
 	}
-	if !renderOnCanvas {
-		return candidate, candidate, "markdown"
+	chat := strings.TrimSpace(stripCanvasFileMarkers(candidate))
+	if chat == "" {
+		return "", "", "markdown"
 	}
-	plain := strings.TrimSpace(stripCanvasFileMarkers(stripLangTags(candidate)))
-	if plain == "" {
-		plain = candidate
-	}
-	return "", plain, "text"
-}
-
-func shouldRenderAssistantTextInCanvas(text string) bool {
-	clean := strings.TrimSpace(text)
-	if clean == "" {
-		return false
-	}
-	if utf8.RuneCountInString(clean) >= assistantLongResponseRuneThreshold {
-		return true
-	}
-	return looksListHeavy(stripCodeFences(clean))
-}
-
-func stripCodeFences(text string) string {
-	if text == "" {
-		return ""
-	}
-	return strings.TrimSpace(codeFenceRe.ReplaceAllString(text, "\n"))
-}
-
-func looksListHeavy(text string) bool {
-	lines := strings.Split(text, "\n")
-	if len(lines) == 0 {
-		return false
-	}
-	listLines := 0
-	totalLines := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		totalLines++
-		if assistantListLineRe.MatchString(line) {
-			listLines++
-		}
-	}
-	if totalLines == 0 {
-		return false
-	}
-	if listLines >= assistantListLineThreshold {
-		return true
-	}
-	return listLines*100/totalLines >= assistantListDensityThreshold
+	return chat, chat, "markdown"
 }
 
 func normalizeTurnOutputMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case turnOutputModeCanvas:
-		return turnOutputModeCanvas
-	default:
-		return turnOutputModeVoice
-	}
+	_ = mode
+	return turnOutputModeVoice
 }
 
 func (a *App) cwdForProjectKey(projectKey string) string {
@@ -1165,16 +1145,18 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	}
 	var b strings.Builder
 
-	b.WriteString("You are Tabura, an AI assistant. Everything you write is spoken aloud via TTS except content inside :::canvas{} and :::file{} blocks.\n\n")
-	b.WriteString("Prefer plain-language prose for spoken responses. Use markdown only when required inside non-spoken channels (canvas/file), because markdown symbols are read literally by TTS.\n\n")
-	b.WriteString("When the response is long, list-heavy, or over roughly 1.4k chars, render the full response as a canvas artifact using :::canvas{title=\"Assistant Output\"}.\n")
-	b.WriteString("Short confirmations may remain as spoken chat responses.\n\n")
+	b.WriteString("You are Tabura, an AI assistant.\n")
+	b.WriteString("Chat text is always spoken via TTS. Canvas content is never spoken and must be file-backed.\n\n")
+	b.WriteString("Use exactly one response shape:\n")
+	b.WriteString("1) Chat-only: write only spoken chat text (no blocks).\n")
+	b.WriteString("2) Chat + file-canvas: write a brief spoken chat line, then one or more :::file blocks.\n\n")
 	b.WriteString("## Response Format\n\n")
 	b.WriteString("Write naturally. Your text is read aloud, so avoid raw paths, URLs, or code in prose.\n")
 	b.WriteString("Use [lang:de] at the start of your answer when responding in German. Default is English.\n\n")
-	b.WriteString("Visual content (not spoken):\n")
-	b.WriteString("- :::canvas{title=\"Title\"}...:::  ephemeral display (analysis, reports)\n")
-	b.WriteString("- :::file{path=\"filename.go\"}...:::  file-bound artifact (code, config)\n")
+	b.WriteString("Canvas/file rules:\n")
+	b.WriteString("- Use :::file{path=\"relative/or/absolute/path\"}...::: for all canvas content.\n")
+	b.WriteString("- For temporary canvas files, create/remove paths via temp_file_create and temp_file_remove tools.\n")
+	b.WriteString("- Do not use :::canvas blocks.\n")
 	b.WriteString("- Line references: when the user mentions [Line N of \"file\"], apply at that location.\n\n")
 
 	b.WriteString("## Delegation\n")
@@ -1185,8 +1167,11 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("- Do NOT delegate simple conversational replies.\n")
 	b.WriteString("- Delegates have full filesystem access and edit files directly on disk.\n")
 	b.WriteString("- Do NOT parse or apply patches/diffs from the delegate response.\n")
-	b.WriteString("- The delegate result includes 'files_changed' (list of modified file paths) and 'message' (summary).\n")
-	b.WriteString("- Relay the delegate summary to the user (spoken or canvas as appropriate).\n\n")
+	b.WriteString("- `delegate_to_model` starts an async job and returns `job_id` immediately.\n")
+	b.WriteString("- Use `delegate_to_model_status` with `job_id` and `after_seq` to fetch incremental progress.\n")
+	b.WriteString("- Summarize progress updates for the user periodically while polling status.\n")
+	b.WriteString("- Use `delegate_to_model_cancel` if the user asks to stop.\n")
+	b.WriteString("- Final status includes `files_changed` and final `message`; relay that summary to the user.\n\n")
 
 	if canvas != nil && canvas.HasArtifact {
 		b.WriteString("## Current Artifact\n")
@@ -1239,7 +1224,10 @@ func buildTurnPrompt(messages []store.ChatMessage, canvas *canvasContext) string
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("For long list-style or >1.4k char answers, use :::canvas{title=\"Assistant Output\"}.\n\n")
+	b.WriteString("Use one response shape only:\n")
+	b.WriteString("- Chat-only (spoken text only), or\n")
+	b.WriteString("- Chat + file-canvas: short spoken chat text plus :::file blocks for canvas content.\n")
+	b.WriteString("Use temp_file_create/temp_file_remove for temporary canvas files. Do not use :::canvas blocks.\n\n")
 	if canvas != nil && canvas.HasArtifact {
 		fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
 	}

@@ -47,16 +47,46 @@ var MCPTools = []Tool{
 		Required:    []string{"session_id", "handoff_id"},
 	},
 	{
+		Name:        "temp_file_create",
+		Description: "Create a temporary file under .tabura/artifacts/tmp for file-backed canvas usage.",
+		Properties: map[string]ToolProperty{
+			"cwd": {
+				Type:        "string",
+				Description: "Project root to create the temp file under. Defaults to active project root.",
+			},
+			"prefix": {
+				Type:        "string",
+				Description: "Filename prefix for the generated temp file.",
+			},
+			"suffix": {
+				Type:        "string",
+				Description: "Filename suffix/extension (for example .md). Default is .md.",
+			},
+			"content": {
+				Type:        "string",
+				Description: "Optional initial file content.",
+			},
+		},
+	},
+	{
+		Name:        "temp_file_remove",
+		Description: "Remove a temporary file previously created under .tabura/artifacts/tmp.",
+		Required:    []string{"path"},
+		Properties: map[string]ToolProperty{
+			"path": {
+				Type:        "string",
+				Description: "Relative or absolute temp file path to remove.",
+			},
+			"cwd": {
+				Type:        "string",
+				Description: "Project root for resolving relative paths. Defaults to active project root.",
+			},
+		},
+	},
+	{
 		Name: "delegate_to_model",
-		Description: "Delegate a task to another model via the Codex app-server. " +
-			"Use this when the task benefits from a different model's strengths: " +
-			"complex multi-file coding (codex), deep analysis or architecture (codex), " +
-			"or general-purpose reasoning (gpt). " +
-			"Also use when the user explicitly asks to route to a model " +
-			"(e.g. 'let codex handle this', 'ask gpt'). " +
-			"Always provide context (conversation summary) and system_prompt (task-specific instructions) " +
-			"so the delegate model has enough information. " +
-			"Do NOT delegate simple conversational replies or short factual answers.",
+		Description: "Start a delegated task asynchronously via the Codex app-server and return immediately with a job id. " +
+			"Use delegate_to_model_status to stream progress and delegate_to_model_cancel to stop the job.",
 		Required: []string{"prompt"},
 		Properties: map[string]ToolProperty{
 			"prompt": {
@@ -82,7 +112,37 @@ var MCPTools = []Tool{
 			},
 			"timeout_seconds": {
 				Type:        "integer",
-				Description: "Maximum time in seconds for the delegate to complete. Defaults to 600 (10 minutes).",
+				Description: "Maximum time in seconds for the delegate to complete. Defaults to 3600 (1 hour).",
+			},
+		},
+	},
+	{
+		Name:        "delegate_to_model_status",
+		Description: "Read asynchronous delegated task status and incremental progress events.",
+		Required:    []string{"job_id"},
+		Properties: map[string]ToolProperty{
+			"job_id": {
+				Type:        "string",
+				Description: "Job id returned by delegate_to_model.",
+			},
+			"after_seq": {
+				Type:        "integer",
+				Description: "Only return events with seq greater than this value. Use 0 to fetch from the beginning.",
+			},
+			"max_events": {
+				Type:        "integer",
+				Description: "Maximum number of progress events to return. Defaults to 20.",
+			},
+		},
+	},
+	{
+		Name:        "delegate_to_model_cancel",
+		Description: "Cancel an asynchronous delegated task started with delegate_to_model.",
+		Required:    []string{"job_id"},
+		Properties: map[string]ToolProperty{
+			"job_id": {
+				Type:        "string",
+				Description: "Job id returned by delegate_to_model.",
 			},
 		},
 	},
@@ -121,6 +181,7 @@ var WebRouteSections = []RouteSection{
 			"POST /api/chat/sessions/{session_id}/messages",
 			"POST /api/chat/sessions/{session_id}/commands",
 			"POST /api/chat/sessions/{session_id}/cancel",
+			"POST /api/chat/sessions/{session_id}/cancel-delegates",
 		},
 	},
 	{

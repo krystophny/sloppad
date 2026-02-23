@@ -60,9 +60,6 @@ window._taburaApp = { getState, acquireMicStream, sttStart, sttSendBlob, sttStop
 const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_CHAT_MATH_SEGMENT_';
 const DEV_UI_RELOAD_POLL_MS = 1500;
 const ASSISTANT_ACTIVITY_POLL_MS = 1200;
-const ASSISTANT_CANVAS_CHAR_THRESHOLD = 1400;
-const ASSISTANT_LIST_LINE_THRESHOLD = 3;
-const ASSISTANT_LIST_DENSITY_THRESHOLD = 40;
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
 const CHAT_SEND_HOLD_MS = 300;
@@ -78,11 +75,11 @@ const LAST_VIEW_STORAGE_KEY = 'tabura.lastView';
 
 // --- Block stripping & TTS infrastructure ---
 
-const _canvasFileBlockRe = /:::(?:canvas|file)\{[^}]*\}\n?[\s\S]*?:::/g;
-const _partialBlockRe = /:::(?:canvas|file)\{[^}]*\}[\s\S]*$/g;
-const _canvasFileMarkerRefRe = /\[(?:canvas|file):[^\]]*\]/g;
-const _canvasDirectiveOpenRe = /^\\s*:::(?:canvas|file)\{[^}]*\}\\s*$/gm;
-const _canvasDirectiveCloseRe = /^\\s*:::\\s*$/gm;
+const _canvasFileBlockRe = /:::\s*file\s*\{[^}]*\}\s*[\s\S]*?:::/gi;
+const _partialBlockRe = /:::\s*file\s*\{[^}]*\}[\s\S]*$/gi;
+const _canvasFileMarkerRefRe = /\[file:[^\]]*\]/g;
+const _canvasDirectiveOpenRe = /^\s*:::\s*file\s*\{[^}]*\}\s*$/gim;
+const _canvasDirectiveCloseRe = /^\s*:::\s*$/gm;
 const _langTagRe = /\[lang:([a-z]{2})\]/gi;
 const _codeFenceRe = /```[\s\S]*?```/g;
 const _inlineCodeRe = /`([^`]+)`/g;
@@ -97,9 +94,8 @@ const _boldUnderscoreRe = /__([^_]+)__/g;
 const _italicUnderscoreRe = /_([^_\s][^_]*?)_/g;
 const _strikethroughRe = /~~([^~]+)~~/g;
 const _htmlTagRe = /<[^>]+>/g;
-const _listLineDetectRe = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/;
 
-// Strip complete and partial :::canvas{}/:::file{} blocks from text.
+// Strip complete and partial :::file{} blocks from text.
 function stripBlocks(text) {
   text = text.replace(_canvasFileBlockRe, ' ');
   text = text.replace(_partialBlockRe, ' ');
@@ -1198,29 +1194,15 @@ function closeCanvasWs() {
   state.canvasWs = null;
 }
 
-function shouldRenderAssistantTextOnCanvas(text) {
-  const clean = String(text || '').trim();
-  if (!clean) return false;
-  if (clean.length >= ASSISTANT_CANVAS_CHAR_THRESHOLD) return true;
-  const withoutCode = clean.replace(_codeFenceRe, '\n');
-  const lines = withoutCode.split('\n');
-  let totalLines = 0;
-  let listLines = 0;
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    totalLines += 1;
-    if (_listLineDetectRe.test(line)) listLines += 1;
-  }
-  if (totalLines === 0) return false;
-  if (listLines >= ASSISTANT_LIST_LINE_THRESHOLD) return true;
-  return Math.floor((listLines * 100) / totalLines) >= ASSISTANT_LIST_DENSITY_THRESHOLD;
+function assistantMessageUsesCanvasBlocks(text) {
+  const lower = String(text || '').toLowerCase();
+  return lower.includes(':::file{');
 }
 
 function shouldRenderAssistantHistoryInChat(renderFormat, markdown, plain) {
   const format = String(renderFormat || '').trim().toLowerCase();
   if (format === 'text' || format === 'canvas') return false;
-  const source = String(markdown || plain || '');
-  return !shouldRenderAssistantTextOnCanvas(source);
+  return Boolean(String(markdown || plain || '').trim());
 }
 
 function handleChatEvent(payload) {
@@ -1272,7 +1254,7 @@ function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
     const md = String(payload.message || '');
-    const renderOnCanvas = Boolean(payload.render_on_canvas) || shouldRenderAssistantTextOnCanvas(md);
+    const renderOnCanvas = Boolean(payload.render_on_canvas) || assistantMessageUsesCanvasBlocks(md);
     if (isVoiceTurn()) {
       const row = ensurePendingForTurn(turnID);
       if (renderOnCanvas) {
@@ -1302,7 +1284,7 @@ function handleChatEvent(payload) {
         }
       }
     }
-    if (!isVoiceTurn() && !renderOnCanvas) {
+    if (!isVoiceTurn()) {
       const cleaned = cleanForOverlay(md);
       if (cleaned) updateOverlay(cleaned);
     }
@@ -1314,16 +1296,17 @@ function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     const md = String(payload.message || '');
     const inferredText = md || ttsLastSpeakText;
-    const renderOnCanvas = Boolean(payload.render_on_canvas) || shouldRenderAssistantTextOnCanvas(inferredText);
+    const renderOnCanvas = Boolean(payload.render_on_canvas) || assistantMessageUsesCanvasBlocks(inferredText);
     // Persisted text may be empty for voice-only responses; fall back to TTS text.
     const displayMd = md || (ttsLastSpeakText ? `_${ttsLastSpeakText}_` : '');
+    const hasDisplayMd = Boolean(String(displayMd || '').trim());
     if (isVoiceTurn()) {
       const row = takePendingRow(turnID);
-      if (renderOnCanvas) {
+      if (renderOnCanvas && !hasDisplayMd) {
         row?.remove();
       } else if (row) {
         updateAssistantRow(row, displayMd, false);
-      } else {
+      } else if (hasDisplayMd) {
         appendRenderedAssistant(displayMd);
       }
     }
@@ -1333,21 +1316,42 @@ function handleChatEvent(payload) {
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
 
+    if (ttsEnabled && md.trim()) {
+      const { ttsText, ttsLang } = extractTTSText(md);
+      if (ttsLang) ttsSpeakLang = ttsLang;
+      if (ttsText && ttsText !== ttsLastSpeakText) {
+        const newText = ttsText.startsWith(ttsLastSpeakText)
+          ? ttsText.slice(ttsLastSpeakText.length)
+          : ttsText;
+        ttsLastSpeakText = ttsText;
+        if (newText.trim()) {
+          if (!ttsSentenceChunker) {
+            ttsPlayer = new TTSPlayer();
+            ttsSentenceChunker = new SentenceChunker((sentence) => {
+              const ws = state.chatWs;
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
+              }
+            });
+          }
+          ttsSentenceChunker.add(newText);
+        }
+      }
+    }
+
     if (ttsSentenceChunker) {
       ttsSentenceChunker.flush();
     }
     if (isVoiceTurn()) {
       hideIndicator();
     } else {
-      if (state.zenCanvasActionThisTurn) {
+      const cleaned = cleanForOverlay(md);
+      if (state.zenCanvasActionThisTurn && !cleaned) {
         hideOverlay();
+      } else if (cleaned) {
+        updateOverlay(cleaned);
       } else {
-        if (!renderOnCanvas) {
-          const cleaned = cleanForOverlay(md);
-          if (cleaned) { updateOverlay(cleaned); } else { hideOverlay(); }
-        } else {
-          hideOverlay();
-        }
+        hideOverlay();
       }
     }
     state.zenCanvasActionThisTurn = false;
@@ -1491,7 +1495,7 @@ async function zenSubmitMessage(text) {
 
   const body = {
     text: finalText,
-    output_mode: isVoiceTurn() ? 'voice' : 'canvas',
+    output_mode: 'voice',
   };
   try {
     const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/messages`, {

@@ -91,6 +91,9 @@ func TestHandleChatSessionActivityReportsActiveTurns(t *testing.T) {
 	if got := intFromAny(payload["queued_turns"], -1); got != 3 {
 		t.Fatalf("expected queued_turns=3, got %v", payload["queued_turns"])
 	}
+	if got := intFromAny(payload["delegate_active"], -1); got != 0 {
+		t.Fatalf("expected delegate_active=0, got %v", payload["delegate_active"])
+	}
 }
 
 func TestHandleChatSessionCancelClearsQueuedTurns(t *testing.T) {
@@ -124,5 +127,35 @@ func TestHandleChatSessionCancelClearsQueuedTurns(t *testing.T) {
 	}
 	if got := intFromAny(payload["queued_canceled"], -1); got != 2 {
 		t.Fatalf("expected queued_canceled=2, got %v", payload["queued_canceled"])
+	}
+}
+
+func TestHandleChatSessionCancelDelegatesEndpoint(t *testing.T) {
+	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+	if err := app.store.AddAuthSession("token-test"); err != nil {
+		t.Fatalf("add auth session: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Shutdown(context.Background())
+	})
+
+	session, err := app.store.GetOrCreateChatSession("cancel-delegates-project")
+	if err != nil {
+		t.Fatalf("create chat session: %v", err)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/chat/sessions/"+session.ID+"/cancel-delegates", map[string]any{})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got := intFromAny(payload["canceled"], -1); got != 0 {
+		t.Fatalf("expected canceled=0, got %v", payload["canceled"])
 	}
 }
