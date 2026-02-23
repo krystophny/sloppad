@@ -281,6 +281,51 @@ function stopTTSPlayback() {
   ttsSpeakLang = 'en';
 }
 
+function ensureTTSChunker() {
+  if (ttsSentenceChunker) return;
+  ttsPlayer = new TTSPlayer();
+  ttsSentenceChunker = new SentenceChunker((sentence) => {
+    const ws = state.chatWs;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
+    }
+  });
+}
+
+function queueTTSDiff(diffText) {
+  const fragment = String(diffText || '').trim();
+  if (!fragment) return;
+  ensureTTSChunker();
+  ttsSentenceChunker.add(fragment);
+}
+
+function computeTTSDiff(nextFullText, hintedDeltaText = '') {
+  const next = String(nextFullText || '');
+  const hinted = String(hintedDeltaText || '');
+
+  if (hinted.trim()) {
+    ttsLastSpeakText = next;
+    return hinted;
+  }
+  if (!next || next === ttsLastSpeakText) {
+    ttsLastSpeakText = next;
+    return '';
+  }
+  if (next.startsWith(ttsLastSpeakText)) {
+    const suffix = next.slice(ttsLastSpeakText.length);
+    ttsLastSpeakText = next;
+    return suffix;
+  }
+  if (ttsLastSpeakText.startsWith(next)) {
+    // Model backtracked to a shorter snapshot; wait for next stream update.
+    ttsLastSpeakText = next;
+    return '';
+  }
+  // Non-prefix rewrite: queue full updated snapshot so speech does not drop.
+  ttsLastSpeakText = next;
+  return next;
+}
+
 const renderer = new marked.Renderer();
 renderer.code = ({ text, lang }) => {
   const safeLang = escapeHtml((lang || 'plaintext').toLowerCase());
@@ -1274,6 +1319,7 @@ function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
     const md = String(payload.message || '');
+    const streamDelta = String(payload.delta || '');
     const autoCanvas = Boolean(payload.auto_canvas);
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
     if (isVoiceTurn()) {
@@ -1295,23 +1341,10 @@ function handleChatEvent(payload) {
 
     if (ttsEnabled) {
       const { ttsText, ttsLang } = extractTTSText(md);
+      const { ttsText: deltaText } = extractTTSText(streamDelta);
       if (ttsLang) ttsSpeakLang = ttsLang;
-      if (ttsText && ttsText !== ttsLastSpeakText) {
-        const newText = ttsText.slice(ttsLastSpeakText.length);
-        ttsLastSpeakText = ttsText;
-        if (newText.trim()) {
-          if (!ttsSentenceChunker) {
-            ttsPlayer = new TTSPlayer();
-            ttsSentenceChunker = new SentenceChunker((sentence) => {
-              const ws = state.chatWs;
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
-              }
-            });
-          }
-          ttsSentenceChunker.add(newText);
-        }
-      }
+      const diff = computeTTSDiff(ttsText, deltaText);
+      queueTTSDiff(diff);
     }
     if (!isVoiceTurn() && !state.hasArtifact) {
       const cleaned = cleanForOverlay(md);
@@ -1352,25 +1385,10 @@ function handleChatEvent(payload) {
       stopTTSPlayback();
     } else if (ttsEnabled && md.trim()) {
       const { ttsText, ttsLang } = extractTTSText(md);
+      const { ttsText: deltaText } = extractTTSText(String(payload.delta || ''));
       if (ttsLang) ttsSpeakLang = ttsLang;
-      if (ttsText && ttsText !== ttsLastSpeakText) {
-        const newText = ttsText.startsWith(ttsLastSpeakText)
-          ? ttsText.slice(ttsLastSpeakText.length)
-          : ttsText;
-        ttsLastSpeakText = ttsText;
-        if (newText.trim()) {
-          if (!ttsSentenceChunker) {
-            ttsPlayer = new TTSPlayer();
-            ttsSentenceChunker = new SentenceChunker((sentence) => {
-              const ws = state.chatWs;
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
-              }
-            });
-          }
-          ttsSentenceChunker.add(newText);
-        }
-      }
+      const diff = computeTTSDiff(ttsText, deltaText);
+      queueTTSDiff(diff);
     }
 
     if (!autoCanvas && ttsSentenceChunker) {

@@ -433,6 +433,45 @@ test.describe('zen canvas - TTS voice output', () => {
     await expect(overlay).toBeHidden();
   });
 
+  test('voice TTS queues rewritten streaming snapshots', async ({ page }) => {
+    await clearLog(page);
+    await setVoiceOrigin(page);
+
+    await injectChatEvent(page, { type: 'turn_started', turn_id: 'tts-rewrite' });
+    await page.waitForTimeout(100);
+
+    await injectChatEvent(page, {
+      type: 'assistant_message',
+      turn_id: 'tts-rewrite',
+      message: 'I have a cleaned tree snapshot and will share it as canvas content.',
+      delta: 'I have a cleaned tree snapshot and will share it as canvas content.',
+    });
+    await page.waitForTimeout(250);
+
+    await injectChatEvent(page, {
+      type: 'assistant_message',
+      turn_id: 'tts-rewrite',
+      message: 'Here is the current repository snapshot so the structure stays readable.',
+      delta: 'Here is the current repository snapshot so the structure stays readable.',
+    });
+    await page.waitForTimeout(250);
+
+    await injectChatEvent(page, {
+      type: 'message_persisted',
+      role: 'assistant',
+      turn_id: 'tts-rewrite',
+      message: 'Here is the current repository snapshot so the structure stays readable.',
+    });
+    await page.waitForTimeout(500);
+
+    const log = await getLog(page);
+    const spoken = log
+      .filter((e) => e.type === 'tts')
+      .map((e) => String(e.text || ''));
+    expect(spoken.some((t) => t.includes('cleaned tree snapshot'))).toBe(true);
+    expect(spoken.some((t) => t.includes('current repository snapshot'))).toBe(true);
+  });
+
   test('text turn also triggers TTS and shows overlay', async ({ page }) => {
     await clearLog(page);
     // Text origin (default)
