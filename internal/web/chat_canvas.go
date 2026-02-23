@@ -101,6 +101,30 @@ func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) 
 	}
 }
 
+func (a *App) executeAssistantTextBlock(canvasSessionID, title, text string) {
+	canvasSessionID = strings.TrimSpace(canvasSessionID)
+	text = strings.TrimSpace(text)
+	if canvasSessionID == "" || text == "" {
+		return
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Assistant Output"
+	}
+	a.mu.Lock()
+	port, ok := a.tunnelPorts[canvasSessionID]
+	a.mu.Unlock()
+	if !ok {
+		return
+	}
+	_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+		"session_id":       canvasSessionID,
+		"kind":             "text",
+		"title":            title,
+		"markdown_or_text": text,
+	})
+}
+
 func (a *App) executeFileBlocks(canvasSessionID string, blocks []fileBlock) {
 	a.mu.Lock()
 	port, ok := a.tunnelPorts[canvasSessionID]

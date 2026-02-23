@@ -18,6 +18,7 @@ import (
 )
 
 const assistantTurnTimeout = 20 * time.Minute
+const assistantLongResponseCanvasChars = 1400
 
 type chatMessageRequest struct {
 	Text string `json:"text"`
@@ -622,6 +623,9 @@ func (a *App) runAssistantTurn(sessionID string) {
 			persistAssistantSnapshot(ev.Message)
 			payload["message"] = ev.Message
 			payload["delta"] = ev.Delta
+			if shouldRenderOnCanvas(ev.Message) {
+				payload["render_on_canvas"] = true
+			}
 		case "turn_completed":
 			if strings.TrimSpace(ev.Message) != "" {
 				latestMessage = ev.Message
@@ -629,6 +633,9 @@ func (a *App) runAssistantTurn(sessionID string) {
 			latestTurnID = ev.TurnID
 			persistAssistantSnapshot(latestMessage)
 			payload["message"] = latestMessage
+			if shouldRenderOnCanvas(latestMessage) {
+				payload["render_on_canvas"] = true
+			}
 		case "context_usage":
 			payload["context_used"] = ev.ContextUsed
 			payload["context_max"] = ev.ContextMax
@@ -783,6 +790,9 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 			persistAssistantSnapshot(ev.Message)
 			payload["message"] = ev.Message
 			payload["delta"] = ev.Delta
+			if shouldRenderOnCanvas(ev.Message) {
+				payload["render_on_canvas"] = true
+			}
 		case "turn_completed":
 			if strings.TrimSpace(ev.Message) != "" {
 				latestMessage = ev.Message
@@ -790,6 +800,9 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 			latestTurnID = ev.TurnID
 			persistAssistantSnapshot(latestMessage)
 			payload["message"] = latestMessage
+			if shouldRenderOnCanvas(latestMessage) {
+				payload["render_on_canvas"] = true
+			}
 		case "error":
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
@@ -835,28 +848,39 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 }
 
 // finalizeAssistantResponse handles post-processing shared by both turn paths:
-// parse and execute canvas/file blocks, strip lang tags, persist final text,
-// and broadcast message_persisted. Only explicit :::canvas{}/:::file{} blocks
-// go to canvas; plain text stays in chat (overlay + TTS).
+// parse and execute canvas/file blocks, strip lang tags, optionally promote long
+// plain text to canvas, persist final text, and broadcast message_persisted.
 func (a *App) finalizeAssistantResponse(
 	sessionID, projectKey, text string,
 	persistedID *int64, persistedText *string,
 	turnID, fallbackTurnID, threadID string,
 ) string {
+	renderOnCanvas := false
 	canvasSessionID := a.resolveCanvasSessionID(projectKey)
+	hasCanvasBlocks := false
+	hasFileBlocks := false
 	if cBlocks, cleaned := parseCanvasBlocks(text); len(cBlocks) > 0 {
+		hasCanvasBlocks = true
 		if canvasSessionID != "" {
 			a.executeCanvasBlocks(canvasSessionID, cBlocks)
 		}
 		text = cleaned
 	}
 	if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
+		hasFileBlocks = true
 		if canvasSessionID != "" {
 			a.executeFileBlocks(canvasSessionID, fBlocks)
 		}
 		text = cleaned
 	}
 	text = stripLangTags(text)
+	renderOnCanvas = hasCanvasBlocks || hasFileBlocks
+	if !renderOnCanvas && shouldRenderOnCanvas(text) {
+		if canvasSessionID != "" {
+			a.executeAssistantTextBlock(canvasSessionID, "Assistant Output", text)
+			renderOnCanvas = true
+		}
+	}
 
 	a.refreshCanvasFromDisk(projectKey)
 
@@ -879,14 +903,19 @@ func (a *App) finalizeAssistantResponse(
 		tid = fallbackTurnID
 	}
 	a.broadcastChatEvent(sessionID, map[string]interface{}{
-		"type":      "message_persisted",
-		"role":      "assistant",
-		"id":        *persistedID,
-		"turn_id":   tid,
-		"thread_id": threadID,
-		"message":   text,
+		"type":             "message_persisted",
+		"role":             "assistant",
+		"id":               *persistedID,
+		"turn_id":          tid,
+		"thread_id":        threadID,
+		"message":          text,
+		"render_on_canvas": renderOnCanvas,
 	})
 	return text
+}
+
+func shouldRenderOnCanvas(text string) bool {
+	return len(strings.TrimSpace(text)) >= assistantLongResponseCanvasChars
 }
 
 func (a *App) cwdForProjectKey(projectKey string) string {
@@ -989,6 +1018,8 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 
 	b.WriteString("You are Tabura, an AI assistant. Everything you write is spoken aloud via TTS except content inside :::canvas{} and :::file{} blocks.\n\n")
 	b.WriteString("Prefer plain-language prose for spoken responses. Use markdown only when required inside non-spoken channels (canvas/file), because markdown symbols are read literally by TTS.\n\n")
+	b.WriteString("When the response is long, list-heavy, or over roughly 1.4k chars, render the full response as a canvas artifact using :::canvas{title=\"Assistant Output\"}.\n")
+	b.WriteString("Short confirmations may remain as spoken chat responses.\n\n")
 	b.WriteString("## Response Format\n\n")
 	b.WriteString("Write naturally. Your text is read aloud, so avoid raw paths, URLs, or code in prose.\n")
 	b.WriteString("Use [lang:de] at the start of your answer when responding in German. Default is English.\n\n")
@@ -1055,6 +1086,7 @@ func buildTurnPrompt(messages []store.ChatMessage, canvas *canvasContext) string
 		return ""
 	}
 	var b strings.Builder
+	b.WriteString("For long list-style or >1.4k char answers, use :::canvas{title=\"Assistant Output\"}.\n\n")
 	if canvas != nil && canvas.HasArtifact {
 		fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
 	}

@@ -1250,6 +1250,7 @@ function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
     const md = String(payload.message || '');
+    const renderOnCanvas = Boolean(payload.render_on_canvas);
     if (isVoiceTurn()) {
       const row = ensurePendingForTurn(turnID);
       updateAssistantRow(row, md, true);
@@ -1275,7 +1276,7 @@ function handleChatEvent(payload) {
         }
       }
     }
-    if (!isVoiceTurn()) {
+    if (!isVoiceTurn() && !renderOnCanvas) {
       const cleaned = cleanForOverlay(md);
       if (cleaned) updateOverlay(cleaned);
     }
@@ -1286,6 +1287,7 @@ function handleChatEvent(payload) {
     if (String(payload.role || '') !== 'assistant') return;
     const turnID = String(payload.turn_id || '').trim();
     const md = String(payload.message || '');
+    const renderOnCanvas = Boolean(payload.render_on_canvas);
     // Persisted text may be empty for voice-only responses; fall back to TTS text.
     const displayMd = md || (ttsLastSpeakText ? `_${ttsLastSpeakText}_` : '');
     if (isVoiceTurn()) {
@@ -1311,8 +1313,12 @@ function handleChatEvent(payload) {
       if (state.zenCanvasActionThisTurn) {
         hideOverlay();
       } else {
-        const cleaned = cleanForOverlay(md);
-        if (cleaned) { updateOverlay(cleaned); } else { hideOverlay(); }
+        if (!renderOnCanvas) {
+          const cleaned = cleanForOverlay(md);
+          if (cleaned) { updateOverlay(cleaned); } else { hideOverlay(); }
+        } else {
+          hideOverlay();
+        }
       }
     }
     state.zenCanvasActionThisTurn = false;
