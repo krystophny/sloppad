@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,15 @@ const (
 	turnOutputModeVoice  = "voice"
 	turnOutputModeCanvas = "canvas"
 )
+
+const (
+	assistantLongResponseRuneThreshold   = 1400
+	assistantListLineThreshold          = 3
+	assistantListDensityThreshold       = 40
+)
+
+var assistantListLineRe = regexp.MustCompile(`(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)`)
+var codeFenceRe = regexp.MustCompile(`(?s)```[\s\S]*?```|~~~[\s\S]*?~~~`)
 
 type chatMessageRequest struct {
 	Text       string `json:"text"`
@@ -878,10 +888,12 @@ func (a *App) finalizeAssistantResponse(
 	turnID, fallbackTurnID, threadID string,
 	outputMode string,
 ) string {
+	outputMode = normalizeTurnOutputMode(outputMode)
 	renderOnCanvas := false
 	canvasSessionID := a.resolveCanvasSessionID(projectKey)
 	hasCanvasBlocks := false
 	hasFileBlocks := false
+	isVoiceMode := outputMode == turnOutputModeVoice
 	if cBlocks, cleaned := parseCanvasBlocks(text); len(cBlocks) > 0 {
 		hasCanvasBlocks = true
 		if canvasSessionID != "" {
@@ -898,11 +910,14 @@ func (a *App) finalizeAssistantResponse(
 	}
 	text = stripLangTags(text)
 	renderOnCanvas = hasCanvasBlocks || hasFileBlocks
+	if !isVoiceMode && !renderOnCanvas && canvasSessionID != "" && shouldRenderAssistantTextInCanvas(text) {
+		renderOnCanvas = true
+	}
 
 	chatMarkdown := text
 	chatPlain := text
 	renderFormat := "markdown"
-	if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
+	if outputMode == turnOutputModeCanvas || renderOnCanvas {
 		canvasText := strings.TrimSpace(stripCanvasFileMarkers(text))
 		if canvasSessionID != "" {
 			if canvasText != "" {
@@ -947,6 +962,49 @@ func (a *App) finalizeAssistantResponse(
 		"render_on_canvas": renderOnCanvas,
 	})
 	return chatMarkdown
+}
+
+func shouldRenderAssistantTextInCanvas(text string) bool {
+	clean := strings.TrimSpace(text)
+	if clean == "" {
+		return false
+	}
+	if utf8.RuneCountInString(clean) >= assistantLongResponseRuneThreshold {
+		return true
+	}
+	return looksListHeavy(stripCodeFences(clean))
+}
+
+func stripCodeFences(text string) string {
+	if text == "" {
+		return ""
+	}
+	return strings.TrimSpace(codeFenceRe.ReplaceAllString(text, "\n"))
+}
+
+func looksListHeavy(text string) bool {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+	listLines := 0
+	totalLines := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		totalLines++
+		if assistantListLineRe.MatchString(line) {
+			listLines++
+		}
+	}
+	if totalLines == 0 {
+		return false
+	}
+	if listLines >= assistantListLineThreshold {
+		return true
+	}
+	return listLines*100/totalLines >= assistantListDensityThreshold
 }
 
 func normalizeTurnOutputMode(mode string) string {
