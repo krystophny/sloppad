@@ -988,6 +988,7 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	var b strings.Builder
 
 	b.WriteString("You are Tabura, an AI assistant. Everything you write is spoken aloud via TTS except content inside :::canvas{} and :::file{} blocks.\n\n")
+	b.WriteString("Prefer plain-language prose for spoken responses. Use markdown only when required inside non-spoken channels (canvas/file), because markdown symbols are read literally by TTS.\n\n")
 	b.WriteString("## Response Format\n\n")
 	b.WriteString("Write naturally. Your text is read aloud, so avoid raw paths, URLs, or code in prose.\n")
 	b.WriteString("Use [lang:de] at the start of your answer when responding in German. Default is English.\n\n")

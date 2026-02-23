@@ -75,12 +75,46 @@ const LAST_VIEW_STORAGE_KEY = 'tabura.lastView';
 const _canvasFileBlockRe = /:::(?:canvas|file)\{[^}]*\}\n?[\s\S]*?:::/g;
 const _partialBlockRe = /:::(?:canvas|file)\{[^}]*\}[\s\S]*$/g;
 const _langTagRe = /\[lang:([a-z]{2})\]/gi;
+const _codeFenceRe = /```[\s\S]*?```/g;
+const _inlineCodeRe = /`([^`]+)`/g;
+const _inlineLinkRe = /\[([^\]]+)\]\([^)]*\)/g;
+const _inlineImageRe = /!\[([^\]]*)\]\([^)]*\)/g;
+const _headingRe = /^\s{0,3}#{1,6}\s+/gm;
+const _blockquoteRe = /^\s*>\s?/gm;
+const _listMarkerRe = /^\s*(?:[-*+]\s+|\d+\.\s+)/gm;
+const _boldAsteriskRe = /\*\*([^*]+)\*\*/g;
+const _italicAsteriskRe = /\*([^*\s][^*]*?)\*/g;
+const _boldUnderscoreRe = /__([^_]+)__/g;
+const _italicUnderscoreRe = /_([^_\s][^_]*?)_/g;
+const _strikethroughRe = /~~([^~]+)~~/g;
+const _htmlTagRe = /<[^>]+>/g;
 
 // Strip complete and partial :::canvas{}/:::file{} blocks from text.
 function stripBlocks(text) {
   text = text.replace(_canvasFileBlockRe, ' ');
   text = text.replace(_partialBlockRe, ' ');
   return text;
+}
+
+function stripMarkdownForSpeech(text) {
+  text = text.replace(_codeFenceRe, (m) => m.replace(/```/g, ''));
+  text = text.replace(_inlineCodeRe, '$1');
+  text = text.replace(_inlineImageRe, '$1');
+  text = text.replace(_inlineLinkRe, '$1');
+  text = text.replace(_headingRe, '');
+  text = text.replace(_blockquoteRe, '');
+  text = text.replace(_listMarkerRe, '');
+  text = text.replace(_strikethroughRe, '$1');
+  text = text.replace(_boldAsteriskRe, '$1');
+  text = text.replace(_italicAsteriskRe, '$1');
+  text = text.replace(_boldUnderscoreRe, '$1');
+  text = text.replace(_italicUnderscoreRe, '$1');
+  text = text.replace(_htmlTagRe, '');
+  text = text.replace(/\|/g, ' ');
+  text = text.replace(/[ \t]+\n/g, '\n');
+  text = text.replace(/\n+/g, ' ');
+  text = text.replace(/\s{2,}/g, ' ');
+  return text.trim();
 }
 
 // Clean markdown for overlay display: strip blocks and lang tags.
@@ -93,6 +127,7 @@ function extractTTSText(markdown) {
   let text = stripBlocks(markdown);
   let lang = '';
   text = text.replace(_langTagRe, (_, l) => { if (!lang) lang = l.toLowerCase(); return ''; });
+  text = stripMarkdownForSpeech(text);
   text = text.trim();
   return { ttsText: text, ttsLang: lang };
 }
