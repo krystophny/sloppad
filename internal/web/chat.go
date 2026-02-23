@@ -1073,7 +1073,11 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("- 'let codex do this' / 'ask codex' -> model='codex'. 'ask gpt' / 'use the big model' -> model='gpt'.\n")
 	b.WriteString("- Auto-delegate complex multi-file coding or deep analysis to 'codex'.\n")
 	b.WriteString("- Provide 'context' and 'system_prompt' when delegating.\n")
-	b.WriteString("- Do NOT delegate simple conversational replies.\n\n")
+	b.WriteString("- Do NOT delegate simple conversational replies.\n")
+	b.WriteString("- Delegates have full filesystem access and edit files directly on disk.\n")
+	b.WriteString("- Do NOT parse or apply patches/diffs from the delegate response.\n")
+	b.WriteString("- The delegate result includes 'files_changed' (list of modified file paths) and 'message' (summary).\n")
+	b.WriteString("- Relay the delegate summary to the user (spoken or canvas as appropriate).\n\n")
 
 	if canvas != nil && canvas.HasArtifact {
 		b.WriteString("## Current Artifact\n")

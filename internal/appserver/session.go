@@ -207,29 +207,31 @@ func (s *Session) SendTurnWithParams(ctx context.Context, prompt, turnModel stri
 		onEvent(StreamEvent{Type: "thread_started", ThreadID: s.threadID})
 	}
 
-	turnID, message, err := s.readTurnUntilComplete(ctx, turnRPCID, onEvent)
+	turnID, message, fileChanges, err := s.readTurnUntilComplete(ctx, turnRPCID, onEvent)
 	if err != nil {
 		s.markClosed()
 		return nil, contextErr(ctx, err)
 	}
 	return &PromptResponse{
-		ThreadID: s.threadID,
-		TurnID:   turnID,
-		Message:  message,
+		ThreadID:    s.threadID,
+		TurnID:      turnID,
+		Message:     message,
+		FileChanges: fileChanges,
 	}, nil
 }
 
-func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEvent func(StreamEvent)) (string, string, error) {
+func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEvent func(StreamEvent)) (string, string, []string, error) {
 	turnResponseSeen := false
 	turnID := ""
 	message := ""
 	previousMessage := ""
 	turnCompleted := false
+	var fileChanges []string
 
 	for {
 		msg, err := readJSON(ctx, s.conn)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 
 		if msgID, hasID := jsonRPCID(msg); hasID && msgID == turnRPCID {
@@ -238,7 +240,7 @@ func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEv
 				if onEvent != nil {
 					onEvent(StreamEvent{Type: "error", ThreadID: s.threadID, TurnID: turnID, Error: errText})
 				}
-				return "", "", fmt.Errorf("turn/start rpc error: %s", errText)
+				return "", "", nil, fmt.Errorf("turn/start rpc error: %s", errText)
 			}
 			turnResponseSeen = true
 			if result, _ := msg["result"].(map[string]interface{}); result != nil {
@@ -263,6 +265,13 @@ func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEv
 				if typ == "agentMessage" {
 					if text, _ := item["text"].(string); strings.TrimSpace(text) != "" {
 						message = text
+					}
+				} else if typ == "fileChange" {
+					if p := extractFileChangePath(item); p != "" {
+						fileChanges = append(fileChanges, p)
+					}
+					if onEvent != nil {
+						onEvent(StreamEvent{Type: "item_completed", ThreadID: s.threadID, TurnID: turnID, Message: typ})
 					}
 				} else if typ != "" && onEvent != nil {
 					onEvent(StreamEvent{Type: "item_completed", ThreadID: s.threadID, TurnID: turnID, Message: typ})
@@ -302,7 +311,7 @@ func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEv
 					if onEvent != nil {
 						onEvent(StreamEvent{Type: "error", ThreadID: s.threadID, TurnID: turnID, Error: errText})
 					}
-					return "", "", errors.New(errText)
+					return "", "", nil, errors.New(errText)
 				}
 			}
 		}
@@ -325,9 +334,9 @@ func (s *Session) readTurnUntilComplete(ctx context.Context, turnRPCID int, onEv
 				if onEvent != nil {
 					onEvent(StreamEvent{Type: "error", ThreadID: s.threadID, TurnID: turnID, Error: "app-server returned an empty assistant message"})
 				}
-				return turnID, "", errors.New("app-server returned an empty assistant message")
+				return turnID, "", nil, errors.New("app-server returned an empty assistant message")
 			}
-			return turnID, final, nil
+			return turnID, final, fileChanges, nil
 		}
 	}
 }

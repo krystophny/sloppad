@@ -31,7 +31,7 @@ const (
 	defaultProducerMCPURL = "http://127.0.0.1:8090/mcp"
 	handoffKindFile       = "file"
 	handoffKindMailHeader = "mail_headers"
-	delegateDefaultTimeout = 120 * time.Second
+	delegateDefaultTimeout = 600 * time.Second
 )
 
 var supportedProtocolVersions = map[string]struct{}{
@@ -223,13 +223,20 @@ func delegateReasoningParams(model string) map[string]interface{} {
 	return map[string]interface{}{"model_reasoning_effort": "high"}
 }
 
+const defaultDelegateSystemPrompt = "You have full filesystem access in the working directory. " +
+	"Edit files directly using your tools. " +
+	"Do NOT output patches or diffs for the caller to apply — make all changes yourself. " +
+	"After completing the task, summarize what you did and which files you changed."
+
 func assembleDelegatePrompt(systemPrompt, taskContext, prompt string) string {
 	var b strings.Builder
-	if systemPrompt = strings.TrimSpace(systemPrompt); systemPrompt != "" {
-		b.WriteString("## Instructions\n\n")
-		b.WriteString(systemPrompt)
-		b.WriteString("\n\n")
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		systemPrompt = defaultDelegateSystemPrompt
 	}
+	b.WriteString("## Instructions\n\n")
+	b.WriteString(systemPrompt)
+	b.WriteString("\n\n")
 	if taskContext = strings.TrimSpace(taskContext); taskContext != "" {
 		b.WriteString("## Context\n\n")
 		b.WriteString(taskContext)
@@ -279,11 +286,12 @@ func (s *Server) delegateToModel(args map[string]interface{}) (map[string]interf
 		return nil, fmt.Errorf("app-server inference failed: %w", err)
 	}
 	return map[string]interface{}{
-		"ok":        true,
-		"model":     model,
-		"thread_id": resp.ThreadID,
-		"turn_id":   resp.TurnID,
-		"message":   resp.Message,
+		"ok":            true,
+		"model":         model,
+		"thread_id":     resp.ThreadID,
+		"turn_id":       resp.TurnID,
+		"message":       resp.Message,
+		"files_changed": resp.FileChanges,
 	}, nil
 }
 

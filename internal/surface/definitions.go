@@ -76,6 +76,14 @@ var MCPTools = []Tool{
 				Type:        "string",
 				Description: "Task-specific instructions for the delegate model (e.g. 'You are a code reviewer. Be thorough.').",
 			},
+			"cwd": {
+				Type:        "string",
+				Description: "Working directory for the delegate model. Defaults to the active project directory.",
+			},
+			"timeout_seconds": {
+				Type:        "integer",
+				Description: "Maximum time in seconds for the delegate to complete. Defaults to 600 (10 minutes).",
+			},
 		},
 	},
 }

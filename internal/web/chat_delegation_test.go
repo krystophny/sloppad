@@ -66,6 +66,15 @@ func TestBuildPromptFromHistoryContainsDelegationSection(t *testing.T) {
 	if !strings.Contains(prompt, "delegate_to_model") {
 		t.Error("prompt should mention delegate_to_model tool")
 	}
+	if !strings.Contains(prompt, "edit files directly on disk") {
+		t.Error("prompt should explain delegates edit files directly")
+	}
+	if !strings.Contains(prompt, "Do NOT parse or apply patches") {
+		t.Error("prompt should tell Spark not to apply patches")
+	}
+	if !strings.Contains(prompt, "files_changed") {
+		t.Error("prompt should mention files_changed in delegate result")
+	}
 }
 
 func TestBuildPromptFromHistoryAppliesHints(t *testing.T) {

@@ -272,10 +272,16 @@ func TestAssembleDelegatePrompt(t *testing.T) {
 		}
 	})
 
-	t.Run("prompt only", func(t *testing.T) {
+	t.Run("prompt only uses default system prompt", func(t *testing.T) {
 		got := assembleDelegatePrompt("", "", "Do something.")
-		if strings.Contains(got, "## Instructions") {
-			t.Error("should not have Instructions section when empty")
+		if !strings.Contains(got, "## Instructions") {
+			t.Error("should have Instructions section with default preamble")
+		}
+		if !strings.Contains(got, "Edit files directly") {
+			t.Error("default preamble should tell delegate to edit files directly")
+		}
+		if !strings.Contains(got, "Do NOT output patches") {
+			t.Error("default preamble should tell delegate not to output patches")
 		}
 		if strings.Contains(got, "## Context") {
 			t.Error("should not have Context section when empty")
@@ -285,6 +291,16 @@ func TestAssembleDelegatePrompt(t *testing.T) {
 		}
 		if !strings.Contains(got, "Do something.") {
 			t.Error("missing prompt content")
+		}
+	})
+
+	t.Run("explicit system_prompt overrides default", func(t *testing.T) {
+		got := assembleDelegatePrompt("Custom instructions.", "", "Do something.")
+		if !strings.Contains(got, "Custom instructions.") {
+			t.Error("explicit system_prompt should be used")
+		}
+		if strings.Contains(got, "Edit files directly") {
+			t.Error("default preamble should not appear when explicit system_prompt provided")
 		}
 	})
 }
@@ -309,7 +325,7 @@ func TestToolDefinitionsEmitsProperties(t *testing.T) {
 	if props == nil {
 		t.Fatal("missing properties in inputSchema")
 	}
-	for _, key := range []string{"prompt", "model", "context", "system_prompt"} {
+	for _, key := range []string{"prompt", "model", "context", "system_prompt", "cwd", "timeout_seconds"} {
 		if props[key] == nil {
 			t.Errorf("missing property %q", key)
 		}
