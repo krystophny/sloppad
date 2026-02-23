@@ -1476,6 +1476,10 @@ func (a *App) ensurePromptContractFresh() error {
 	if err != nil {
 		return err
 	}
+	storedDigest = strings.TrimSpace(storedDigest)
+	if storedDigest == "" {
+		return a.store.SetAppState(promptContractStateKey, currentDigest)
+	}
 	if storedDigest == currentDigest {
 		return nil
 	}
