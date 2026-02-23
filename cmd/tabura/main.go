@@ -71,6 +71,21 @@ func cmdSchema() int {
 	return 0
 }
 
+type serverConfig struct {
+	dataDir             string
+	projectDir          string
+	webHost             string
+	webPort             int
+	mcpHost             string
+	mcpPort             int
+	unsafePublicMCP     bool
+	appServerURL        string
+	model               string
+	sparkReasoningEffort string
+	ttsURL              string
+	devRuntime          bool
+}
+
 func cmdBootstrap(args []string) int {
 	fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 	projectDir := fs.String("project-dir", ".", "project dir")
@@ -111,53 +126,69 @@ func cmdMCPServer(args []string) int {
 }
 
 func cmdServer(args []string) int {
+	cfg, status := parseServerConfig(args)
+	if status != 0 {
+		return status
+	}
+	return runServer(cfg)
+}
+
+func parseServerConfig(args []string) (*serverConfig, int) {
 	fs := flag.NewFlagSet("server", flag.ContinueOnError)
-	dataDir := fs.String("data-dir", filepath.Join(os.Getenv("HOME"), ".tabura-web"), "data dir")
+	cfg := &serverConfig{
+		dataDir: filepath.Join(os.Getenv("HOME"), ".tabura-web"),
+	}
 	projectDir := fs.String("project-dir", ".", "project dir")
-	webHost := fs.String("web-host", "0.0.0.0", "web listener host")
-	webPort := fs.Int("web-port", web.DefaultPort, "web listener port")
-	mcpHost := fs.String("mcp-host", "127.0.0.1", "mcp listener host")
-	mcpPort := fs.Int("mcp-port", serve.DefaultPort, "mcp listener port")
-	unsafePublicMCP := fs.Bool("unsafe-public-mcp", false, "allow non-loopback MCP bind (unsafe)")
-	appServerURL := fs.String("app-server-url", web.DefaultAppServerURL, "Codex app-server websocket URL")
-	model := fs.String("model", "", "LLM model for chat (default: env TABURA_APP_SERVER_MODEL or "+web.DefaultModel+")")
-	sparkReasoningEffort := fs.String("spark-reasoning-effort", "", "Spark thinking budget, e.g. low|medium|high (default: env TABURA_APP_SERVER_SPARK_REASONING_EFFORT or low)")
-	ttsURL := fs.String("tts-url", "", "TTS server URL (default: env TABURA_TTS_URL or "+web.DefaultTTSURL+")")
-	devRuntime := fs.Bool("dev-runtime", false, "dev runtime endpoint")
+	fs.StringVar(&cfg.dataDir, "data-dir", cfg.dataDir, "data dir")
+	fs.StringVar(&cfg.webHost, "web-host", "0.0.0.0", "web listener host")
+	fs.IntVar(&cfg.webPort, "web-port", web.DefaultPort, "web listener port")
+	fs.StringVar(&cfg.mcpHost, "mcp-host", "127.0.0.1", "mcp listener host")
+	fs.IntVar(&cfg.mcpPort, "mcp-port", serve.DefaultPort, "mcp listener port")
+	fs.BoolVar(&cfg.unsafePublicMCP, "unsafe-public-mcp", false, "allow non-loopback MCP bind (unsafe)")
+	fs.StringVar(&cfg.appServerURL, "app-server-url", web.DefaultAppServerURL, "Codex app-server websocket URL")
+	fs.StringVar(&cfg.model, "model", "", "LLM model for chat (default: env TABURA_APP_SERVER_MODEL or "+web.DefaultModel+")")
+	fs.StringVar(&cfg.sparkReasoningEffort, "spark-reasoning-effort", "", "Spark thinking budget, e.g. low|medium|high (default: env TABURA_APP_SERVER_SPARK_REASONING_EFFORT or low)")
+	fs.StringVar(&cfg.ttsURL, "tts-url", "", "TTS server URL (default: env TABURA_TTS_URL or "+web.DefaultTTSURL+")")
+	fs.BoolVar(&cfg.devRuntime, "dev-runtime", false, "dev runtime endpoint")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return nil, 2
 	}
-	if !*unsafePublicMCP && !isLoopbackOnlyHost(*mcpHost) {
+	cfg.projectDir = *projectDir
+	if !cfg.unsafePublicMCP && !isLoopbackOnlyHost(cfg.mcpHost) {
 		fmt.Fprintln(os.Stderr, "refusing non-loopback MCP bind; use --unsafe-public-mcp to override")
-		return 2
+		return nil, 2
 	}
-	res, err := protocol.BootstrapProject(*projectDir)
+	return cfg, 0
+}
+
+func runServer(cfg *serverConfig) int {
+	res, err := protocol.BootstrapProject(cfg.projectDir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	mcpApp := serve.NewApp(res.Paths.ProjectDir)
-	mcpErrCh := make(chan error, 1)
-	go func() {
-		mcpErrCh <- mcpApp.Start(*mcpHost, *mcpPort)
-	}()
-	mcpURL := (&url.URL{
-		Scheme: "http",
-		Host:   net.JoinHostPort(*mcpHost, fmt.Sprintf("%d", *mcpPort)),
-		Path:   "/mcp",
-	}).String()
-	if err := waitForMCPReady(*mcpHost, *mcpPort, 10*time.Second, mcpErrCh); err != nil {
+	mcpApp, mcpErrCh, mcpURL := startMCPListener(cfg, res.Paths.ProjectDir)
+	if err := waitForMCPReady(cfg.mcpHost, cfg.mcpPort, 10*time.Second, mcpErrCh); err != nil {
 		_ = mcpApp.Stop(context.Background())
 		fmt.Fprintf(os.Stderr, "failed to start local MCP listener: %v\n", err)
 		return 1
 	}
-	app, err := web.New(*dataDir, res.Paths.ProjectDir, mcpURL, *appServerURL, *model, *ttsURL, *sparkReasoningEffort, *devRuntime)
+	app, err := web.New(
+		cfg.dataDir,
+		res.Paths.ProjectDir,
+		mcpURL,
+		cfg.appServerURL,
+		cfg.model,
+		cfg.ttsURL,
+		cfg.sparkReasoningEffort,
+		cfg.devRuntime,
+	)
 	if err != nil {
 		_ = mcpApp.Stop(context.Background())
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := app.Start(*webHost, *webPort); err != nil {
+	if err := app.Start(cfg.webHost, cfg.webPort); err != nil {
 		_ = mcpApp.Stop(context.Background())
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -171,6 +202,20 @@ func cmdServer(args []string) int {
 	default:
 	}
 	return 0
+}
+
+func startMCPListener(cfg *serverConfig, projectDir string) (*serve.App, chan error, string) {
+	mcpApp := serve.NewApp(projectDir)
+	mcpErrCh := make(chan error, 1)
+	go func() {
+		mcpErrCh <- mcpApp.Start(cfg.mcpHost, cfg.mcpPort)
+	}()
+	mcpURL := (&url.URL{
+		Scheme: "http",
+		Host:   net.JoinHostPort(cfg.mcpHost, fmt.Sprintf("%d", cfg.mcpPort)),
+		Path:   "/mcp",
+	}).String()
+	return mcpApp, mcpErrCh, mcpURL
 }
 
 func isLoopbackOnlyHost(host string) bool {
