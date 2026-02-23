@@ -1535,7 +1535,7 @@ function assistantMessageUsesCanvasBlocks(text) {
 
 function shouldRenderAssistantHistoryInChat(renderFormat, markdown, plain) {
   const format = String(renderFormat || '').trim().toLowerCase();
-  if (format === 'text' || format === 'canvas') return false;
+  if (format === 'canvas') return false;
   return Boolean(String(markdown || plain || '').trim());
 }
 
@@ -1596,10 +1596,10 @@ function handleChatEvent(payload) {
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
     if (isVoiceTurn()) {
       const row = ensurePendingForTurn(turnID);
-      if (renderOnCanvas) {
-        updateAssistantRow(row, '_Thinking..._', true);
-      } else {
+      if (String(md || '').trim()) {
         updateAssistantRow(row, md, true);
+      } else if (!renderOnCanvas) {
+        updateAssistantRow(row, '_Thinking..._', true);
       }
     }
 
@@ -1633,10 +1633,10 @@ function handleChatEvent(payload) {
     const hasDisplayMd = Boolean(String(displayMd || '').trim());
     if (isVoiceTurn()) {
       const row = takePendingRow(turnID);
-      if (autoCanvas || (renderOnCanvas && !hasDisplayMd)) {
-        row?.remove();
-      } else if (row) {
+      if (row && hasDisplayMd) {
         updateAssistantRow(row, displayMd, false);
+      } else if (row) {
+        row.classList.remove('is-pending');
       } else if (hasDisplayMd) {
         appendRenderedAssistant(displayMd);
       }
