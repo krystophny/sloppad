@@ -1643,13 +1643,13 @@ function handleChatEvent(payload) {
         appendRenderedAssistant(displayMd);
       }
     }
+    const shouldSpeakTurn = turnID ? state.voiceTurns.has(turnID) : false;
     trackAssistantTurnFinished(turnID);
     state.assistantLastError = '';
     showStatus('ready');
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
 
-    const shouldSpeakTurn = turnID ? state.voiceTurns.has(turnID) : false;
     if (shouldSpeakTurn && !autoCanvas && ttsEnabled && md.trim()) {
       const { ttsText, ttsLang } = extractTTSText(md);
       if (ttsLang) ttsSpeakLang = ttsLang;
