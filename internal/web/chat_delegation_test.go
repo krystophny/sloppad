@@ -111,6 +111,9 @@ func TestBuildTurnPromptNoHintPassthrough(t *testing.T) {
 	if !strings.Contains(prompt, "respond with :::file block(s) only (no chat prose)") {
 		t.Error("turn prompt should enforce file-only mode for long responses")
 	}
+	if !strings.Contains(prompt, "show/open an existing file") {
+		t.Error("turn prompt should define existing-file canvas behavior")
+	}
 	if !strings.Contains(prompt, "explain this function") {
 		t.Error("original message should be present")
 	}

@@ -166,6 +166,12 @@ func TestBuildPromptFromHistory_IncludesSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "respond with :::file block content (no chat prose)") {
 		t.Error("prompt should enforce file-only mode for long responses")
 	}
+	if !strings.Contains(prompt, "show/open an existing file") {
+		t.Error("prompt should define existing-file canvas behavior")
+	}
+	if !strings.Contains(prompt, "do NOT paste that file body") {
+		t.Error("prompt should forbid inlining existing file bodies")
+	}
 	if !strings.Contains(prompt, "[lang:") {
 		t.Error("prompt should mention [lang:] markers")
 	}

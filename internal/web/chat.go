@@ -1379,6 +1379,8 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("- Canvas content must appear only inside :::file blocks; do not duplicate it in chat prose.\n")
 	b.WriteString("- Use :::file{path=\"relative/or/absolute/path\"}...::: for all canvas content.\n")
 	b.WriteString("- For temporary canvas files, create/remove paths via temp_file_create and temp_file_remove tools.\n")
+	b.WriteString("- When user asks to show/open an existing file, do NOT paste that file body into chat markdown or :::file blocks.\n")
+	b.WriteString("- For existing files, use canvas_artifact_show (title=path, markdown_or_text=file content) and keep chat text brief.\n")
 	b.WriteString("- Do not use :::canvas blocks.\n")
 	b.WriteString("- Line references: when the user mentions [Line N of \"file\"], apply at that location.\n\n")
 
@@ -1453,6 +1455,7 @@ func buildTurnPrompt(messages []store.ChatMessage, canvas *canvasContext) string
 	b.WriteString("Spoken chat must be one paragraph max.\n")
 	b.WriteString("If output needs more than one paragraph, put it in a temp file with temp_file_create and respond with :::file block(s) only (no chat prose).\n")
 	b.WriteString("Canvas content must be in :::file blocks only. Use temp_file_create/temp_file_remove for temporary files. Do not use :::canvas blocks.\n\n")
+	b.WriteString("When user asks to show/open an existing file, do NOT paste file body into chat markdown or :::file blocks; use canvas_artifact_show and keep chat text brief.\n\n")
 	if canvas != nil && canvas.HasArtifact {
 		fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
 	}
