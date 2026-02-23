@@ -143,7 +143,7 @@ func cmdWeb(args []string) int {
 	localMCPURL := fs.String("local-mcp-url", "", "external local MCP URL")
 	appServerURL := fs.String("app-server-url", web.DefaultAppServerURL, "Codex app-server websocket URL")
 	model := fs.String("model", "", "LLM model for chat (default: env TABURA_APP_SERVER_MODEL or "+web.DefaultModel+")")
-	ttsURL := fs.String("tts-url", "", "Chatterbox TTS server URL (default: env TABURA_TTS_URL or "+web.DefaultTTSURL+")")
+	ttsURL := fs.String("tts-url", "", "TTS server URL (default: env TABURA_TTS_URL or "+web.DefaultTTSURL+")")
 	devRuntime := fs.Bool("dev-runtime", false, "dev runtime endpoint")
 	if err := fs.Parse(args); err != nil {
 		return 2

@@ -23,7 +23,7 @@ Removed selectors (no longer exist): `#prompt-bar`, `#prompt-input`, `#prompt-se
 - **Escape** dismisses overlay/input. If nothing open and artifact showing, clears to tabula rasa.
 - On artifact: tap/right-click sets line context (`[Line N of "title"]`) prepended to message.
 
-Response routing: LLM responses use three channels — `<speak>` tags are spoken via TTS (Chatterbox), `:::canvas{title="..."}` shows ephemeral visual content, `:::file{path="..."}` shows file-bound artifacts. Overlay is shown only when visual content exists; speak-only responses produce audio without overlay. `turn_started` shows overlay, `assistant_message` streams into overlay and feeds TTS chunker, canvas/file actions update in place with diff highlight, errors auto-dismiss after 2s. User tap/message interrupts TTS playback.
+Response routing: LLM responses use three channels — `<speak>` tags are spoken via TTS (Piper default, F5-TTS/Chatterbox optional), `:::canvas{title="..."}` shows ephemeral visual content, `:::file{path="..."}` shows file-bound artifacts. Overlay is shown only when visual content exists; speak-only responses produce audio without overlay. `turn_started` shows overlay, `assistant_message` streams into overlay and feeds TTS chunker, canvas/file actions update in place with diff highlight, errors auto-dismiss after 2s. User tap/message interrupts TTS playback.
 
 ## Edge Panels
 
@@ -45,19 +45,21 @@ Main units:
 - `tabura-mcp.service`
 - `tabura-codex-app-server.service`
 - `tabura-voxtype-mcp.service`
-- `tabura-tts.service` (Chatterbox Multilingual on `127.0.0.1:8423`)
+- `tabura-piper-tts.service` (Piper TTS, fast EN+DE on `127.0.0.1:8424`)
+- `tabura-f5-tts.service` (F5-TTS Fast mode, EN+DE, GPU on `127.0.0.1:8424`, optional)
+- `tabura-tts.service` (Chatterbox Multilingual on `127.0.0.1:8423`, optional voice-clone)
 - `helpy-mcp.service`
 
 Status:
 
 ```bash
-systemctl --user status tabura-web.service tabura-mcp.service tabura-codex-app-server.service tabura-voxtype-mcp.service tabura-tts.service helpy-mcp.service --no-pager -n 40
+systemctl --user status tabura-web.service tabura-mcp.service tabura-codex-app-server.service tabura-voxtype-mcp.service tabura-piper-tts.service tabura-tts.service helpy-mcp.service --no-pager -n 40
 ```
 
 Restart all integration services:
 
 ```bash
-systemctl --user restart helpy-mcp.service tabura-codex-app-server.service tabura-mcp.service tabura-voxtype-mcp.service tabura-tts.service tabura-web.service
+systemctl --user restart helpy-mcp.service tabura-codex-app-server.service tabura-mcp.service tabura-voxtype-mcp.service tabura-piper-tts.service tabura-web.service
 ```
 
 ## Handoff-First UI Testing Rule
@@ -74,15 +76,20 @@ Default local session and URLs:
 - Tabura MCP: `http://127.0.0.1:9420/mcp`
 - Helpy MCP: `http://127.0.0.1:8090/mcp`
 - Codex App Server: `ws://127.0.0.1:8787`
-- Chatterbox TTS: `http://127.0.0.1:8423`
+- Piper TTS (default): `http://127.0.0.1:8424`
+- Chatterbox TTS (optional): `http://127.0.0.1:8423`
 - Tabura session id: `local`
 
 ## TTS API
 
-`POST /api/tts` — proxied to Chatterbox TTS Server (`/v1/audio/speech`).
+WebSocket message `tts_speak` — proxied to TTS server (`/v1/audio/speech`). Default backend: Piper TTS (port 8424), alternative: F5-TTS (port 8424, swap service), Chatterbox (port 8423).
 
-Request: `{"text": "...", "lang": "en"}` (lang: "en" or "de")
-Response: `audio/wav` binary.
+Request (WS JSON): `{"type": "tts_speak", "text": "...", "lang": "en"}` (lang: "en" or "de")
+Response: binary WAV frame on same WS connection.
+
+Piper voices: `en_GB-alan-medium` (English), `de_DE-karlsson-low` (German). Instant (~100x realtime on CPU).
+F5-TTS: voice-cloned synthesis with 7 NFE steps (EPSS Fast mode). English uses base F5-TTS model, German uses aihpi/F5-TTS-German. ~150ms/sentence on GPU. Reference WAV at `~/.local/share/tabura-tts/reference.wav`. Setup: `scripts/setup-tabura-f5-tts.sh`, then swap `tabura-piper-tts` for `tabura-f5-tts` in service deps.
+Chatterbox: voice-cloned TTS with reference audio. High quality but ~5s/sentence latency.
 
 Frontend detects language from German word heuristic. Sentences are chunked via `SentenceChunker` and played sequentially via `TTSPlayer`.
 

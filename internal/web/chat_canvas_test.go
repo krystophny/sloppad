@@ -146,6 +146,58 @@ package main
 	}
 }
 
+func TestParseCanvasBlocks_IgnoresMarkersInsideCodeFence(t *testing.T) {
+	for _, fence := range []string{"~~~text", "```text"} {
+		close := fence[:3]
+		input := ":::canvas{title=\"Start\"}\nStart block.\n:::\n\n" +
+			fence + "\n:::canvas{title=\"Ignored\"}\nDo not parse this.\n:::\n" + close + "\n\n" +
+			":::canvas{title=\"After\"}\nAfter block.\n:::\n"
+
+		blocks, cleaned := parseCanvasBlocks(input)
+		if len(blocks) != 2 {
+			t.Fatalf("fence %q: expected 2 canvas blocks, got %d", fence, len(blocks))
+		}
+		if blocks[0].Title != "Start" {
+			t.Errorf("fence %q: blocks[0].Title = %q, want %q", fence, blocks[0].Title, "Start")
+		}
+		if blocks[1].Title != "After" {
+			t.Errorf("fence %q: blocks[1].Title = %q, want %q", fence, blocks[1].Title, "After")
+		}
+		if strings.Contains(cleaned, "[canvas: Ignored]") {
+			t.Errorf("fence %q: marker inside code fence should not be parsed, got cleaned %q", fence, cleaned)
+		}
+		if !strings.Contains(cleaned, "[canvas: Start]") || !strings.Contains(cleaned, "[canvas: After]") {
+			t.Errorf("fence %q: cleaned should contain both canvas references, got %q", fence, cleaned)
+		}
+	}
+}
+
+func TestParseFileBlocks_IgnoresMarkersInsideCodeFence(t *testing.T) {
+	for _, fence := range []string{"~~~text", "```text"} {
+		close := fence[:3]
+		input := ":::file{path=\"before.go\"}\npackage main\n:::\n\n" +
+			fence + "\n:::file{path=\"ignored.go\"}\npackage ignored\n:::\n" + close + "\n\n" +
+			":::file{path=\"after.go\"}\npackage after\n:::\n"
+
+		blocks, cleaned := parseFileBlocks(input)
+		if len(blocks) != 2 {
+			t.Fatalf("fence %q: expected 2 file blocks, got %d", fence, len(blocks))
+		}
+		if blocks[0].Path != "before.go" {
+			t.Errorf("fence %q: blocks[0].Path = %q, want %q", fence, blocks[0].Path, "before.go")
+		}
+		if blocks[1].Path != "after.go" {
+			t.Errorf("fence %q: blocks[1].Path = %q, want %q", fence, blocks[1].Path, "after.go")
+		}
+		if strings.Contains(cleaned, "[file: ignored.go]") {
+			t.Errorf("fence %q: marker inside code fence should not be parsed, got cleaned %q", fence, cleaned)
+		}
+		if !strings.Contains(cleaned, "[file: before.go]") || !strings.Contains(cleaned, "[file: after.go]") {
+			t.Errorf("fence %q: cleaned should contain both file references, got %q", fence, cleaned)
+		}
+	}
+}
+
 func TestStripSpeakTags_WithTags(t *testing.T) {
 	input := `<speak>Hello, I have updated the file.</speak>
 
@@ -218,6 +270,19 @@ package main
 	}
 }
 
+func TestStripSpeakTags_WithLangAttribute(t *testing.T) {
+	input := `<speak lang="de">Hallo, ich habe die Datei aktualisiert.</speak>
+
+[file: server.go]`
+	got := stripSpeakTags(input)
+	if strings.Contains(got, "<speak") {
+		t.Errorf("speak tags with lang attr should be stripped, got %q", got)
+	}
+	if !strings.Contains(got, "[file: server.go]") {
+		t.Errorf("non-speak content should be preserved, got %q", got)
+	}
+}
+
 func TestBuildPromptFromHistory_IncludesSystemPrompt(t *testing.T) {
 	prompt := buildPromptFromHistory("chat", nil, nil)
 	if prompt == "" {
@@ -232,8 +297,8 @@ func TestBuildPromptFromHistory_IncludesSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, ":::file{") {
 		t.Error("prompt should mention :::file{ markers")
 	}
-	if !strings.Contains(prompt, "<speak>") {
-		t.Error("prompt should mention <speak> tags")
+	if !strings.Contains(prompt, "<speak") {
+		t.Error("prompt should mention <speak tags")
 	}
 	if !strings.Contains(prompt, "Reply as ASSISTANT.") {
 		t.Error("prompt should end with Reply as ASSISTANT")

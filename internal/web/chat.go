@@ -688,19 +688,25 @@ func (a *App) runAssistantTurn(sessionID string) {
 	}
 
 	canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
+	hasCanvasOutput := false
 	if cBlocks, cleaned := parseCanvasBlocks(assistantText); len(cBlocks) > 0 {
+		hasCanvasOutput = true
 		if canvasSessionID != "" {
 			a.executeCanvasBlocks(canvasSessionID, cBlocks)
 		}
 		assistantText = cleaned
 	}
 	if fBlocks, cleaned := parseFileBlocks(assistantText); len(fBlocks) > 0 {
+		hasCanvasOutput = true
 		if canvasSessionID != "" {
 			a.executeFileBlocks(canvasSessionID, fBlocks)
 		}
 		assistantText = cleaned
 	}
 	assistantText = stripSpeakTags(assistantText)
+	if !hasCanvasOutput {
+		a.executeAssistantTextBlock(canvasSessionID, assistantText)
+	}
 
 	a.refreshCanvasFromDisk(session.ProjectKey)
 
@@ -874,19 +880,25 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 	}
 
 	canvasSessionID := a.resolveCanvasSessionID(session.ProjectKey)
+	hasCanvasOutput := false
 	if cBlocks, cleaned := parseCanvasBlocks(assistantText); len(cBlocks) > 0 {
+		hasCanvasOutput = true
 		if canvasSessionID != "" {
 			a.executeCanvasBlocks(canvasSessionID, cBlocks)
 		}
 		assistantText = cleaned
 	}
 	if fBlocks, cleaned := parseFileBlocks(assistantText); len(fBlocks) > 0 {
+		hasCanvasOutput = true
 		if canvasSessionID != "" {
 			a.executeFileBlocks(canvasSessionID, fBlocks)
 		}
 		assistantText = cleaned
 	}
 	assistantText = stripSpeakTags(assistantText)
+	if !hasCanvasOutput {
+		a.executeAssistantTextBlock(canvasSessionID, assistantText)
+	}
 
 	a.refreshCanvasFromDisk(session.ProjectKey)
 
@@ -1017,7 +1029,9 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 
 	b.WriteString("You are Tabura, an AI assistant. Your responses are spoken aloud via text-to-speech.\n\n")
 	b.WriteString("## Response Format\n\n")
-	b.WriteString("1. Wrap ALL text intended to be spoken in <speak>...</speak> tags.\n")
+	b.WriteString("1. Wrap ALL text intended to be spoken in <speak lang=\"xx\">...</speak> tags.\n")
+	b.WriteString("   - ALWAYS include the lang attribute: lang=\"en\" for English, lang=\"de\" for German.\n")
+	b.WriteString("   - Match the user's language. If they write in German, respond with lang=\"de\". If English, lang=\"en\".\n")
 	b.WriteString("2. Inside <speak>, write naturally as if talking to someone:\n")
 	b.WriteString("   - NO file paths, URLs, code, or markdown formatting\n")
 	b.WriteString("   - Convert technical references to natural speech: \"the main function in the server file\" not \"func main() in server.go\"\n")
@@ -1027,13 +1041,13 @@ func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *c
 	b.WriteString("   - :::canvas{title=\"Title\"}...:::  for ephemeral display (analysis, formatted output, explanations)\n")
 	b.WriteString("   - :::file{path=\"filename.go\"}...:::  for file-bound artifacts (code, config, anything on disk)\n")
 	b.WriteString("4. You may combine speech and visual content. Example:\n")
-	b.WriteString("   <speak>I have updated the function to handle the error case. Take a look at the changes.</speak>\n")
+	b.WriteString("   <speak lang=\"en\">I have updated the function to handle the error case. Take a look at the changes.</speak>\n")
 	b.WriteString("   :::file{path=\"server.go\"}\n")
 	b.WriteString("   func handleError(w http.ResponseWriter, err error) { ... }\n")
 	b.WriteString("   :::\n")
 	b.WriteString("5. For simple conversational answers, use <speak> only, no artifact needed.\n")
 	b.WriteString("6. NEVER put <speak> content inside :::canvas{} or :::file{}, or vice versa.\n")
-	b.WriteString("7. Detect the user's language and respond in the same language (English or German).\n\n")
+	b.WriteString("7. CRITICAL: The lang attribute on <speak> controls which TTS voice is used. Wrong lang = wrong voice.\n\n")
 	b.WriteString("## Available Actions\n")
 	b.WriteString("When appropriate, include these action markers in your response:\n\n")
 	b.WriteString("- :::canvas{title=\"Title\"}...:::  ephemeral visual display (analysis, reports, explanations)\n")

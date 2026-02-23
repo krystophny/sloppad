@@ -74,22 +74,18 @@ const LAST_VIEW_STORAGE_KEY = 'tabura.lastView';
 
 function parseSpeakTags(markdown) {
   const speakParts = [];
+  let speakLang = '';
   let visualMarkdown = markdown;
-  const speakRegex = /<speak>([\s\S]*?)<\/speak>/g;
+  const speakRegex = /<speak(?:\s+lang="([^"]*)")?\s*>([\s\S]*?)<\/speak>/g;
   let match;
   while ((match = speakRegex.exec(markdown)) !== null) {
-    speakParts.push(match[1].trim());
+    if (match[1] && !speakLang) speakLang = match[1].trim().toLowerCase();
+    speakParts.push(match[2].trim());
   }
   visualMarkdown = markdown.replace(speakRegex, '').trim();
-  return { speakText: speakParts.join(' '), visualMarkdown };
+  return { speakText: speakParts.join(' '), speakLang, visualMarkdown };
 }
 
-function detectLanguage(text) {
-  const lower = text.toLowerCase();
-  const dePatterns = /\b(der|die|das|ein|eine|ist|und|aber|nicht|haben|werden|ich|mich|mir|wir|ihr|auf|mit|von|nach|bei|zum|zur|kann|habe|wird)\b/g;
-  const matches = lower.match(dePatterns);
-  return matches && matches.length >= 2 ? 'de' : 'en';
-}
 
 class SentenceChunker {
   constructor(onSentence) {
@@ -183,11 +179,12 @@ class TTSPlayer {
       if (this._stopped) return;
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
+      source.playbackRate.value = 1.1;
       source.connect(ctx.destination);
       this._currentSource = source;
       const now = ctx.currentTime;
       const startAt = this._nextStartTime > now ? this._nextStartTime : now;
-      this._nextStartTime = startAt + audioBuffer.duration;
+      this._nextStartTime = startAt + audioBuffer.duration / 1.1;
       source.start(startAt);
       source.onended = () => {
         this._currentSource = null;
@@ -206,6 +203,7 @@ let ttsSentenceChunker = null;
 let ttsEnabled = false;
 let ttsSpeakAccumulator = '';
 let ttsLastSpeakText = '';
+let ttsSpeakLang = 'en';
 
 const renderer = new marked.Renderer();
 renderer.code = ({ text, lang }) => {
@@ -1120,12 +1118,15 @@ function handleChatEvent(payload) {
 
   if (type === 'turn_started') {
     trackAssistantTurnStarted(payload.turn_id);
-    ensurePendingForTurn(payload.turn_id);
+    if (isVoiceTurn()) {
+      ensurePendingForTurn(payload.turn_id);
+    }
     state.zenCanvasActionThisTurn = false;
     // Reset TTS state for new turn
     if (ttsPlayer) { ttsPlayer.stop(); ttsPlayer = null; }
     ttsSpeakAccumulator = '';
     ttsLastSpeakText = '';
+    ttsSpeakLang = 'en';
     if (ttsSentenceChunker) { ttsSentenceChunker.reset(); ttsSentenceChunker = null; }
     const pos = getLastInputPosition();
     if (isVoiceTurn()) {
@@ -1141,12 +1142,15 @@ function handleChatEvent(payload) {
   if (type === 'assistant_message') {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
-    const row = ensurePendingForTurn(turnID);
     const md = String(payload.message || '');
-    updateAssistantRow(row, md, true);
+    if (isVoiceTurn()) {
+      const row = ensurePendingForTurn(turnID);
+      updateAssistantRow(row, md, true);
+    }
 
     if (isVoiceTurn() && ttsEnabled) {
-      const { speakText } = parseSpeakTags(md);
+      const { speakText, speakLang } = parseSpeakTags(md);
+      if (speakLang) ttsSpeakLang = speakLang;
       if (speakText && speakText !== ttsLastSpeakText) {
         const newText = speakText.slice(ttsLastSpeakText.length);
         ttsLastSpeakText = speakText;
@@ -1154,10 +1158,9 @@ function handleChatEvent(payload) {
           if (!ttsSentenceChunker) {
             ttsPlayer = new TTSPlayer();
             ttsSentenceChunker = new SentenceChunker((sentence) => {
-              const lang = detectLanguage(sentence);
               const ws = state.chatWs;
               if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang }));
+                ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
               }
             });
           }
@@ -1177,11 +1180,13 @@ function handleChatEvent(payload) {
     // Backend strips <speak> tags before persisting, so voice-only responses
     // arrive with empty md. Use the accumulated speak text for the chat log.
     const displayMd = md || (ttsLastSpeakText ? `_${ttsLastSpeakText}_` : '');
-    const row = takePendingRow(turnID);
-    if (row) {
-      updateAssistantRow(row, displayMd, false);
-    } else {
-      appendRenderedAssistant(displayMd);
+    if (isVoiceTurn()) {
+      const row = takePendingRow(turnID);
+      if (row) {
+        updateAssistantRow(row, displayMd, false);
+      } else {
+        appendRenderedAssistant(displayMd);
+      }
     }
     trackAssistantTurnFinished(turnID);
     state.assistantLastError = '';

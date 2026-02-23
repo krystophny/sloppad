@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	DefaultTTSURL   = "http://127.0.0.1:8423"
-	ttsRequestTimeout = 60 * time.Second
+	DefaultTTSURL     = "http://127.0.0.1:8424"
+	ttsRequestTimeout = 30 * time.Second
 )
 
 func (a *App) handleTTSSpeak(conn *chatWSConn, text, lang string) {
@@ -33,11 +33,9 @@ func (a *App) handleTTSSpeak(conn *chatWSConn, text, lang string) {
 		return
 	}
 
-	voice := "tabura-default.wav"
 	body, _ := json.Marshal(map[string]interface{}{
-		"model":           "chatterbox",
 		"input":           text,
-		"voice":           voice,
+		"voice":           lang,
 		"response_format": "wav",
 	})
 

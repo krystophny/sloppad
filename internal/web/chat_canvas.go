@@ -23,20 +23,93 @@ type fileBlock struct {
 
 var canvasBlockRe = regexp.MustCompile(`(?s):::canvas\{([^}]*)\}\n?(.*?):::`)
 var fileBlockRe = regexp.MustCompile(`(?s):::file\{([^}]*)\}\n?(.*?):::`)
-var speakTagRe = regexp.MustCompile(`(?s)<speak>.*?</speak>`)
+var speakTagRe = regexp.MustCompile(`(?s)<speak(?:\s[^>]*)?>.*?</speak>`)
 
 var attrRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
-func extractAttr(attrs, name string) string {
-	for _, m := range attrRe.FindAllStringSubmatch(attrs, -1) {
-		if m[1] == name {
-			return m[2]
-		}
-	}
-	return ""
+type textSegment struct {
+	text   string
+	inCode bool
 }
 
-func parseCanvasBlocks(text string) ([]canvasBlock, string) {
+func parseCodeFencePrefix(line string) string {
+	trimmed := strings.TrimSpace(strings.TrimRight(line, "\r\n"));
+	if len(trimmed) < 3 {
+		return ""
+	}
+	lead := trimmed[0]
+	if lead != '`' && lead != '~' {
+		return ""
+	}
+	i := 0
+	for i < len(trimmed) && trimmed[i] == lead {
+		i++
+	}
+	if i < 3 {
+		return ""
+	}
+	return trimmed[:i]
+}
+
+func isCodeFenceClose(line, openMarker string) bool {
+	marker := parseCodeFencePrefix(line)
+	if marker == "" || openMarker == "" {
+		return false
+	}
+	if marker[0] != openMarker[0] {
+		return false
+	}
+	if len(marker) < len(openMarker) {
+		return false
+	}
+	trimmed := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+	trimmed = strings.TrimLeft(trimmed, " \t");
+	if !strings.HasPrefix(trimmed, openMarker) {
+		return false
+	}
+	suffix := strings.TrimLeft(trimmed[len(openMarker):], string(openMarker[0]))
+	return strings.TrimSpace(suffix) == ""
+}
+
+func splitCodeSegments(text string) []textSegment {
+	lines := strings.SplitAfter(text, "\n")
+	segments := make([]textSegment, 0, len(lines))
+	inCode := false
+	openMarker := ""
+	var current textSegment
+	current.inCode = false
+	for _, line := range lines {
+		if inCode {
+			current.text += line
+			if isCodeFenceClose(line, openMarker) {
+				segments = append(segments, current)
+				current = textSegment{}
+				inCode = false
+				openMarker = ""
+			}
+			continue
+		}
+		if marker := parseCodeFencePrefix(line); marker != "" {
+			if current.text != "" {
+				segments = append(segments, current)
+			}
+			current = textSegment{inCode: true, text: line}
+			inCode = true
+			openMarker = marker
+			continue
+		}
+		current.text += line
+	}
+	if current.text != "" {
+		segments = append(segments, current)
+	}
+	if len(segments) == 0 {
+		return []textSegment{{text: text, inCode: false}}
+	}
+	return segments
+}
+
+func parseCanvasBlocksInText(text string) ([]canvasBlock, string) {
 	matches := canvasBlockRe.FindAllStringSubmatchIndex(text, -1)
 	if len(matches) == 0 {
 		return nil, text
@@ -64,36 +137,89 @@ func parseCanvasBlocks(text string) ([]canvasBlock, string) {
 	return blocks, strings.TrimSpace(cleaned)
 }
 
+func extractAttr(attrs, name string) string {
+	for _, m := range attrRe.FindAllStringSubmatch(attrs, -1) {
+		if m[1] == name {
+			return m[2]
+		}
+	}
+	return ""
+}
+
+func parseCanvasBlocks(text string) ([]canvasBlock, string) {
+	segments := splitCodeSegments(text)
+	var blocks []canvasBlock
+	var cleaned []string
+	for _, seg := range segments {
+		if seg.inCode {
+			cleaned = append(cleaned, seg.text)
+			continue
+		}
+		segBlocks, segCleaned := parseCanvasBlocksInText(seg.text)
+		blocks = append(blocks, segBlocks...)
+		cleaned = append(cleaned, segCleaned)
+	}
+	return blocks, strings.TrimSpace(strings.Join(cleaned, ""))
+}
+
 func parseFileBlocks(text string) ([]fileBlock, string) {
-	matches := fileBlockRe.FindAllStringSubmatchIndex(text, -1)
-	if len(matches) == 0 {
-		return nil, text
-	}
+	segments := splitCodeSegments(text)
 	var blocks []fileBlock
-	cleaned := text
-	for i := len(matches) - 1; i >= 0; i-- {
-		m := matches[i]
-		fullStart, fullEnd := m[0], m[1]
-		attrsStart, attrsEnd := m[2], m[3]
-		contentStart, contentEnd := m[4], m[5]
-
-		attrs := text[attrsStart:attrsEnd]
-		content := strings.TrimSpace(text[contentStart:contentEnd])
-		path := extractAttr(attrs, "path")
-
-		blocks = append([]fileBlock{{
-			Path:    path,
-			Content: content,
-		}}, blocks...)
-
-		ref := fmt.Sprintf("[file: %s]", path)
-		cleaned = cleaned[:fullStart] + ref + cleaned[fullEnd:]
+	var cleaned []string
+	for _, seg := range segments {
+		if seg.inCode {
+			cleaned = append(cleaned, seg.text)
+			continue
+		}
+		matches := fileBlockRe.FindAllStringSubmatchIndex(seg.text, -1)
+		if len(matches) == 0 {
+			cleaned = append(cleaned, seg.text)
+			continue
+		}
+		cleanedText := seg.text
+		segBlocks := make([]fileBlock, 0)
+		for i := len(matches) - 1; i >= 0; i-- {
+			m := matches[i]
+			fullStart, fullEnd := m[0], m[1]
+			attrsStart, attrsEnd := m[2], m[3]
+			contentStart, contentEnd := m[4], m[5]
+			attrs := seg.text[attrsStart:attrsEnd]
+			content := strings.TrimSpace(seg.text[contentStart:contentEnd])
+			path := extractAttr(attrs, "path")
+			segBlocks = append([]fileBlock{{
+				Path:    path,
+				Content: content,
+			}}, segBlocks...)
+			ref := fmt.Sprintf("[file: %s]", path)
+			cleanedText = cleanedText[:fullStart] + ref + cleanedText[fullEnd:]
+		}
+		blocks = append(blocks, segBlocks...)
+		cleaned = append(cleaned, cleanedText)
 	}
-	return blocks, strings.TrimSpace(cleaned)
+	return blocks, strings.TrimSpace(strings.Join(cleaned, ""))
 }
 
 func stripSpeakTags(text string) string {
 	return strings.TrimSpace(speakTagRe.ReplaceAllString(text, ""))
+}
+
+func (a *App) executeAssistantTextBlock(canvasSessionID, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	a.mu.Lock()
+	port, ok := a.tunnelPorts[canvasSessionID]
+	a.mu.Unlock()
+	if !ok {
+		return
+	}
+	_, _ = a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+		"session_id":       canvasSessionID,
+		"kind":             "text",
+		"title":            "Assistant Response",
+		"markdown_or_text": text,
+	})
 }
 
 func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) {
