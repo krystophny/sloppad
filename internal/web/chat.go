@@ -22,11 +22,7 @@ const assistantTurnTimeout = 20 * time.Minute
 const (
 	turnOutputModeVoice  = "voice"
 	turnOutputModeCanvas = "canvas"
-	assistantCanvasTextLengthThreshold = 1400
-	assistantCanvasListItemThreshold   = 4
 )
-
-var assistantListPattern = regexp.MustCompile(`(?m)^\s*(?:[-*+]\s+|\d+[.)]\s+)\S`)
 
 type chatMessageRequest struct {
 	Text       string `json:"text"`
@@ -643,25 +639,25 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string) {
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
 			}
-			case "assistant_message":
-				latestMessage = ev.Message
-				latestTurnID = ev.TurnID
-				persistAssistantSnapshot(ev.Message)
-				payload["message"] = ev.Message
-				payload["delta"] = ev.Delta
-				if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
-					payload["render_on_canvas"] = true
-				}
+		case "assistant_message":
+			latestMessage = ev.Message
+			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(ev.Message)
+			payload["message"] = ev.Message
+			payload["delta"] = ev.Delta
+			if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
+				payload["render_on_canvas"] = true
+			}
 		case "turn_completed":
 			if strings.TrimSpace(ev.Message) != "" {
 				latestMessage = ev.Message
 			}
-				latestTurnID = ev.TurnID
-				persistAssistantSnapshot(latestMessage)
-				payload["message"] = latestMessage
-				if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
-					payload["render_on_canvas"] = true
-				}
+			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(latestMessage)
+			payload["message"] = latestMessage
+			if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
+				payload["render_on_canvas"] = true
+			}
 		case "context_usage":
 			payload["context_used"] = ev.ContextUsed
 			payload["context_max"] = ev.ContextMax
@@ -810,25 +806,25 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
 			}
-			case "assistant_message":
-				latestMessage = ev.Message
-				latestTurnID = ev.TurnID
-				persistAssistantSnapshot(ev.Message)
-				payload["message"] = ev.Message
-				payload["delta"] = ev.Delta
-				if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
-					payload["render_on_canvas"] = true
-				}
+		case "assistant_message":
+			latestMessage = ev.Message
+			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(ev.Message)
+			payload["message"] = ev.Message
+			payload["delta"] = ev.Delta
+			if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
+				payload["render_on_canvas"] = true
+			}
 		case "turn_completed":
 			if strings.TrimSpace(ev.Message) != "" {
 				latestMessage = ev.Message
 			}
-				latestTurnID = ev.TurnID
-				persistAssistantSnapshot(latestMessage)
-				payload["message"] = latestMessage
-				if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
-					payload["render_on_canvas"] = true
-				}
+			latestTurnID = ev.TurnID
+			persistAssistantSnapshot(latestMessage)
+			payload["message"] = latestMessage
+			if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
+				payload["render_on_canvas"] = true
+			}
 		case "error":
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
@@ -908,21 +904,16 @@ func (a *App) finalizeAssistantResponse(
 	renderFormat := "markdown"
 	if normalizeTurnOutputMode(outputMode) == turnOutputModeCanvas {
 		canvasText := strings.TrimSpace(stripCanvasFileMarkers(text))
-		if canvasText != "" && canvasSessionID != "" {
-			a.executeAssistantTextBlock(canvasSessionID, "Assistant Output", canvasText)
+		if canvasSessionID != "" {
+			if canvasText != "" {
+				a.executeAssistantTextBlock(canvasSessionID, "Assistant Output", canvasText)
+			}
+			// Keep plain text for prompt continuity, but suppress assistant markdown in chat UI.
+			chatMarkdown = ""
+			chatPlain = canvasText
+			renderFormat = "text"
+			renderOnCanvas = true
 		}
-		renderOnCanvas = true
-	} else if shouldAutoRenderOnCanvas(text) && canvasSessionID != "" && !hasCanvasBlocks && !hasFileBlocks {
-		canvasText := strings.TrimSpace(stripCanvasFileMarkers(text))
-		if canvasText != "" {
-			a.executeAssistantTextBlock(canvasSessionID, "Assistant Output", canvasText)
-		}
-		renderOnCanvas = true
-	}
-	if renderOnCanvas {
-		// Keep plain text for prompt continuity, but suppress assistant markdown in chat UI.
-		chatMarkdown = ""
-		renderFormat = "canvas"
 	}
 
 	a.refreshCanvasFromDisk(projectKey)
@@ -965,23 +956,6 @@ func normalizeTurnOutputMode(mode string) string {
 	default:
 		return turnOutputModeVoice
 	}
-}
-
-func shouldAutoRenderOnCanvas(text string) bool {
-	cleaned := strings.TrimSpace(text)
-	if cleaned == "" {
-		return false
-	}
-	if len(cleaned) > assistantCanvasTextLengthThreshold {
-		return true
-	}
-	listItems := 0
-	for _, line := range strings.Split(cleaned, "\n") {
-		if assistantListPattern.MatchString(line) {
-			listItems++
-		}
-	}
-	return listItems >= assistantCanvasListItemThreshold
 }
 
 func (a *App) cwdForProjectKey(projectKey string) string {

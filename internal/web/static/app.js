@@ -744,52 +744,6 @@ function showCanvasColumn(paneId) {
   persistLastView({ mode: 'artifact' });
 }
 
-function isVerticallyScrollable(el) {
-  if (!(el instanceof HTMLElement)) return false;
-  const style = window.getComputedStyle(el);
-  const overflowY = style.overflowY;
-  const overflow = style.overflow;
-  const canScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay'
-    || overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay';
-  if (!canScroll) return false;
-  return el.scrollHeight > el.clientHeight + 1;
-}
-
-function findCanvasScroller(startEl) {
-  const viewport = document.getElementById('canvas-viewport');
-  let node = startEl instanceof Element ? startEl : null;
-  while (node) {
-    if (isVerticallyScrollable(node)) {
-      return node;
-    }
-    if (!viewport || node === viewport) {
-      break;
-    }
-    node = node.parentElement;
-  }
-  if (viewport && isVerticallyScrollable(viewport)) {
-    return viewport;
-  }
-  return null;
-}
-
-function bindCanvasWheel(viewport) {
-  if (!(viewport instanceof HTMLElement)) return;
-  viewport.addEventListener('wheel', (ev) => {
-    if (!state.hasArtifact) return;
-    const scroller = findCanvasScroller(ev.target instanceof Element ? ev.target : null);
-    if (!scroller) return;
-    if (ev.deltaX === 0 && ev.deltaY === 0) return;
-    ev.preventDefault();
-    if (ev.deltaY !== 0) {
-      scroller.scrollTop += ev.deltaY;
-    }
-    if (ev.deltaX !== 0) {
-      scroller.scrollLeft += ev.deltaX;
-    }
-  }, { passive: false });
-}
-
 function hideCanvasColumn() {
   state.hasArtifact = false;
   setZenMode('rasa');
@@ -1085,7 +1039,7 @@ async function loadChatHistory() {
     const markdown = String(msg.content_markdown || '');
     const plain = String(msg.content_plain || markdown);
     if (role === 'assistant') {
-      if (renderFormat === 'canvas') continue;
+      if (renderFormat === 'text') continue;
       appendRenderedAssistant(markdown || plain);
     } else {
       appendPlainMessage(role, plain);
@@ -1707,7 +1661,6 @@ function closeEdgePanels() {
 function bindUi() {
   const canvasText = document.getElementById('canvas-text');
   const canvasViewport = document.getElementById('canvas-viewport');
-  bindCanvasWheel(canvasViewport);
 
   // Zen: Left-click/tap on canvas -> toggle voice recording
   const zenClickTarget = canvasViewport || document.getElementById('workspace');

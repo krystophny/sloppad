@@ -24,6 +24,7 @@ type fileBlock struct {
 var canvasBlockRe = regexp.MustCompile(`(?s):::canvas\{([^}]*)\}\n?(.*?):::`)
 var fileBlockRe = regexp.MustCompile(`(?s):::file\{([^}]*)\}\n?(.*?):::`)
 var langTagRe = regexp.MustCompile(`\[lang:[a-z]{2}\]`)
+var canvasFileMarkerRe = regexp.MustCompile(`\[(?:canvas|file):[^\]]*\]`)
 
 var attrRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
 
@@ -82,6 +83,10 @@ func parseFileBlocks(text string) ([]fileBlock, string) {
 
 func stripLangTags(text string) string {
 	return strings.TrimSpace(langTagRe.ReplaceAllString(text, ""))
+}
+
+func stripCanvasFileMarkers(text string) string {
+	return strings.TrimSpace(canvasFileMarkerRe.ReplaceAllString(text, ""))
 }
 
 func (a *App) executeCanvasBlocks(canvasSessionID string, blocks []canvasBlock) {

@@ -24,36 +24,36 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/krystophny/tabura/internal/appserver"
 	"github.com/krystophny/tabura/internal/serve"
-	"github.com/krystophny/tabura/internal/stt"
 	"github.com/krystophny/tabura/internal/store"
+	"github.com/krystophny/tabura/internal/stt"
 )
 
 const (
-	DefaultHost           = "127.0.0.1"
-	DefaultPort           = 8420
-	DefaultAppServerURL   = "ws://127.0.0.1:8787"
-	SessionCookie         = "tabura_session"
-	cookieMaxAgeSec       = 60 * 60 * 24 * 365
-	DaemonPort            = 9420
-	LocalSessionID        = "local"
-	defaultProducerMCPURL = "http://127.0.0.1:8090/mcp"
-		DefaultSparkReasoningEffort = "low"
-	SparkModel               = "gpt-5.3-codex-spark"
-	mcpToolsCallTimeout   = 45 * time.Second
+	DefaultHost                 = "127.0.0.1"
+	DefaultPort                 = 8420
+	DefaultAppServerURL         = "ws://127.0.0.1:8787"
+	SessionCookie               = "tabura_session"
+	cookieMaxAgeSec             = 60 * 60 * 24 * 365
+	DaemonPort                  = 9420
+	LocalSessionID              = "local"
+	defaultProducerMCPURL       = "http://127.0.0.1:8090/mcp"
+	DefaultSparkReasoningEffort = "low"
+	SparkModel                  = "gpt-5.3-codex-spark"
+	mcpToolsCallTimeout         = 45 * time.Second
 )
 
 //go:embed static/* static/vendor/*
 var staticFiles embed.FS
 
 type App struct {
-	dataDir         string
-	localProjectDir string
-	localMCPURL     string
-	appServerURL    string
-	appServerModel  string
+	dataDir                       string
+	localProjectDir               string
+	localMCPURL                   string
+	appServerURL                  string
+	appServerModel                string
 	appServerSparkReasoningEffort string
-	ttsURL          string
-	devRuntime      bool
+	ttsURL                        string
+	devRuntime                    bool
 
 	store *store.Store
 
@@ -61,20 +61,21 @@ type App struct {
 
 	upgrader websocket.Upgrader
 
-	mu               sync.Mutex
-	canvasWS         map[string]map[*websocket.Conn]struct{}
-	chatWS           map[string]map[*chatWSConn]struct{}
-	chatTurnCancel  map[string]map[string]context.CancelFunc
-	chatTurnQueue   map[string]int
-	chatTurnWorker  map[string]bool
+	mu                 sync.Mutex
+	canvasWS           map[string]map[*websocket.Conn]struct{}
+	chatWS             map[string]map[*chatWSConn]struct{}
+	chatTurnCancel     map[string]map[string]context.CancelFunc
+	chatTurnQueue      map[string]int
+	chatTurnOutputMode map[string][]string
+	chatTurnWorker     map[string]bool
 	chatAppSessions    map[string]*appserver.Session
-	remoteCanvasWS   map[string]*websocket.Conn
-	tunnelPorts      map[string]int
-	relayCancel      map[string]context.CancelFunc
-	localServe       *serve.App
-	localServeCancel context.CancelFunc
-	projectServes    map[string]*serve.App
-	projectServeStop map[string]context.CancelFunc
+	remoteCanvasWS     map[string]*websocket.Conn
+	tunnelPorts        map[string]int
+	relayCancel        map[string]context.CancelFunc
+	localServe         *serve.App
+	localServeCancel   context.CancelFunc
+	projectServes      map[string]*serve.App
+	projectServeStop   map[string]context.CancelFunc
 
 	bootID    string
 	startedAt string
@@ -112,30 +113,31 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		resolvedTTSURL = strings.TrimSpace(os.Getenv("TABURA_TTS_URL"))
 	}
 	app := &App{
-		dataDir:          dataDir,
-		localProjectDir:  localProjectDir,
-		localMCPURL:      localMCPURL,
-		appServerURL:     appServerURL,
-		appServerModel:   resolvedModel,
+		dataDir:                       dataDir,
+		localProjectDir:               localProjectDir,
+		localMCPURL:                   localMCPURL,
+		appServerURL:                  appServerURL,
+		appServerModel:                resolvedModel,
 		appServerSparkReasoningEffort: resolvedSparkReasoningEffort,
-		ttsURL:           resolvedTTSURL,
-		devRuntime:       devRuntime,
-		store:            s,
-		appServerClient:  appServerClient,
-		upgrader:         websocket.Upgrader{CheckOrigin: checkWSOrigin},
-		canvasWS:         map[string]map[*websocket.Conn]struct{}{},
-		chatWS:           map[string]map[*chatWSConn]struct{}{},
-		chatTurnCancel:  map[string]map[string]context.CancelFunc{},
-		chatTurnQueue:   map[string]int{},
-		chatTurnWorker:  map[string]bool{},
-		chatAppSessions:    map[string]*appserver.Session{},
-		remoteCanvasWS:   map[string]*websocket.Conn{},
-		tunnelPorts:      map[string]int{},
-		relayCancel:      map[string]context.CancelFunc{},
-		projectServes:    map[string]*serve.App{},
-		projectServeStop: map[string]context.CancelFunc{},
-		bootID:           strconv.FormatInt(time.Now().UnixNano(), 16),
-		startedAt:        time.Now().UTC().Format(time.RFC3339Nano),
+		ttsURL:                        resolvedTTSURL,
+		devRuntime:                    devRuntime,
+		store:                         s,
+		appServerClient:               appServerClient,
+		upgrader:                      websocket.Upgrader{CheckOrigin: checkWSOrigin},
+		canvasWS:                      map[string]map[*websocket.Conn]struct{}{},
+		chatWS:                        map[string]map[*chatWSConn]struct{}{},
+		chatTurnCancel:                map[string]map[string]context.CancelFunc{},
+		chatTurnQueue:                 map[string]int{},
+		chatTurnOutputMode:            map[string][]string{},
+		chatTurnWorker:                map[string]bool{},
+		chatAppSessions:               map[string]*appserver.Session{},
+		remoteCanvasWS:                map[string]*websocket.Conn{},
+		tunnelPorts:                   map[string]int{},
+		relayCancel:                   map[string]context.CancelFunc{},
+		projectServes:                 map[string]*serve.App{},
+		projectServeStop:              map[string]context.CancelFunc{},
+		bootID:                        strconv.FormatInt(time.Now().UnixNano(), 16),
+		startedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if _, err := app.ensureDefaultProjectRecord(); err != nil {
 		_ = s.Close()
@@ -338,8 +340,6 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
-
-
 func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -349,16 +349,16 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		sparkReasoningEffort = a.appServerSparkReasoningEffort
 	}
 	writeJSON(w, map[string]interface{}{
-		"boot_id":                       a.bootID,
-		"started_at":                    a.startedAt,
-		"version":                       "0.0.9-dev",
-		"dev_mode":                      a.devRuntime,
-		"local_mcp_url":                 a.localMCPURL,
-		"app_server_url":                a.appServerURL,
-		"app_server_model":              a.appServerModel,
-		"app_server_reasoning_effort":    sparkReasoningEffort,
-		"available_models": []string{"gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.2"},
-		"tts_enabled":      a.ttsURL != "",
+		"boot_id":                     a.bootID,
+		"started_at":                  a.startedAt,
+		"version":                     "0.0.9-dev",
+		"dev_mode":                    a.devRuntime,
+		"local_mcp_url":               a.localMCPURL,
+		"app_server_url":              a.appServerURL,
+		"app_server_model":            a.appServerModel,
+		"app_server_reasoning_effort": sparkReasoningEffort,
+		"available_models":            []string{"gpt-5.3-codex-spark", "gpt-5.3-codex", "gpt-5.2"},
+		"tts_enabled":                 a.ttsURL != "",
 	})
 }
 
@@ -456,7 +456,6 @@ func (a *App) handleCanvasSnapshot(w http.ResponseWriter, r *http.Request) {
 	event, _ := status["active_artifact"].(map[string]interface{})
 	writeJSON(w, map[string]interface{}{"status": status, "event": event})
 }
-
 
 func (a *App) handleMailActionCapabilities(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
