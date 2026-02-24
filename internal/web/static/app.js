@@ -1400,6 +1400,34 @@ function paneIdForCanvasKind(kind) {
   return '';
 }
 
+function isTemporaryCanvasArtifactTitle(title) {
+  const normalized = String(title || '')
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .toLowerCase();
+  return normalized.startsWith('.tabura/artifacts/tmp/')
+    || normalized.startsWith('tabura/artifacts/tmp/');
+}
+
+function isRealCanvasArtifactEvent(payload) {
+  const kind = String(payload?.kind || '').trim().toLowerCase();
+  if (!kind || kind === 'clear_canvas') return false;
+  if (kind === 'image_artifact' || kind === 'image' || kind === 'pdf_artifact' || kind === 'pdf') {
+    return true;
+  }
+  if (kind !== 'text_artifact' && kind !== 'text') return false;
+
+  const meta = payload?.meta;
+  if (meta && typeof meta === 'object' && typeof meta.real_artifact === 'boolean') {
+    return meta.real_artifact;
+  }
+
+  const title = String(payload?.title || '').trim();
+  if (!title) return false;
+  return !isTemporaryCanvasArtifactTitle(title);
+}
+
 function trackAssistantTurnStarted(turnID) {
   state.assistantLastError = '';
   const key = String(turnID || '').trim();
@@ -2494,9 +2522,10 @@ function openCanvasWs() {
       }
       const paneId = paneIdForCanvasKind(payload.kind);
       if (paneId) {
+        const realCanvasArtifact = isRealCanvasArtifactEvent(payload);
         showCanvasColumn(paneId);
-        state.zenCanvasActionThisTurn = true;
-        if (isMobileSilent()) {
+        state.zenCanvasActionThisTurn = state.zenCanvasActionThisTurn || realCanvasArtifact;
+        if (isMobileSilent() && realCanvasArtifact) {
           const edgeRight = document.getElementById('edge-right');
           if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
         }

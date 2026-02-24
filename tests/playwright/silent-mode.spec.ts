@@ -66,7 +66,7 @@ test.describe('silent mode mobile', () => {
     expect(hasSilent).toBe(true);
   });
 
-  test('chat pane opens full-width, streams response, autoCanvas closes pane', async ({ page }) => {
+  test('chat pane stays focused for autoCanvas temp response artifacts', async ({ page }) => {
     const edgeRight = page.locator('#edge-right');
 
     // Chat pane should be pinned open
@@ -105,15 +105,15 @@ test.describe('silent mode mobile', () => {
     await expect(chatBubble.first()).toContainText('Streaming response');
     await expect(edgeRight).toHaveClass(/edge-pinned/);
 
-    // Inject canvas event (simulating autoCanvas file write)
+    // Inject canvas event from autoCanvas temp artifact write.
     await injectCanvasEvent(page, {
       event_id: 'ac-1',
       kind: 'text_artifact',
-      title: 'response.md',
+      title: '.tabura/artifacts/tmp/response.md',
       text: 'Full final response on canvas.',
     });
     await page.waitForTimeout(100);
-    await expect(edgeRight).not.toHaveClass(/edge-pinned/);
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
 
     // Inject final assistant_output with auto_canvas
     await injectChatEvent(page, {
@@ -125,7 +125,22 @@ test.describe('silent mode mobile', () => {
     });
     await page.waitForTimeout(200);
 
-    // Chat pane should be closed (unpinned) after autoCanvas
+    // Chat pane should remain open for non-real (temp) canvas response artifacts.
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+  });
+
+  test('real artifact canvas update closes the mobile silent chat pane', async ({ page }) => {
+    const edgeRight = page.locator('#edge-right');
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+
+    await injectCanvasEvent(page, {
+      event_id: 'real-1',
+      kind: 'text_artifact',
+      title: 'docs/plan.md',
+      text: 'Project plan.',
+    });
+    await page.waitForTimeout(100);
+
     await expect(edgeRight).not.toHaveClass(/edge-pinned/);
   });
 
