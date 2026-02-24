@@ -4,7 +4,7 @@ Core paradigm:
 - Full-viewport zen canvas: blank screen (tabula rasa) or artifact fills the view.
 - Tap to talk, right-click to type, keyboard auto-activates. No visible chrome.
 - Responses stream as ephemeral overlays; document edits update in place with diff highlighting.
-- Edge panels (hover/swipe to reveal) for project switching and diagnostics.
+- Edge panels (hover/swipe to reveal) for project switching and chat panel access.
 
 License: MIT (`LICENSE`)
 Risk notice: see [`DISCLAIMER.md`](DISCLAIMER.md)
@@ -38,11 +38,12 @@ tabura server --project-dir . --data-dir ~/.tabura-web --web-host 0.0.0.0 --web-
 
 ## Runtime Stack (Canonical)
 
-Tabura runs as one Go runtime plus two local sidecars:
+Tabura runs as one Go runtime plus three local sidecars:
 
 1. `tabura-web.service` (`tabura server`)
 2. `tabura-codex-app-server.service` (`codex app-server`)
 3. `tabura-piper-tts.service` (Piper `/v1/audio/speech`)
+4. Voice commit uses built-in VAD auto-stop (no extra voice sidecar)
 
 Why Piper remains an HTTP sidecar:
 - Piper `libpiper` linking is GPL-governed; direct linking would change distribution obligations.
@@ -56,7 +57,7 @@ Why Piper remains an HTTP sidecar:
 - Codex app-server websocket: `ws://127.0.0.1:8787`
 - Piper TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
 - Local canvas session id: `local`
-- Spark thinking budget for Spark model (fast path): `TABURA_APP_SERVER_SPARK_REASONING_EFFORT=low` (low|medium|high)
+- Spark thinking budget for Spark model (fast path): `TABURA_APP_SERVER_SPARK_REASONING_EFFORT=low` (`low`/`medium`/`high`/`extra_high`)
 
 Security model:
 - MCP routes are intentionally not exposed on the web listener.
@@ -65,13 +66,14 @@ Security model:
 Zen canvas behavior:
 - Browser opens to tabula rasa (blank white screen) or last artifact.
 - Tap anywhere to start/stop voice recording. Right-click to type. Keyboard auto-activates.
+- Built-in VAD auto-stop detects utterance end and commits speech.
 - Assistant output follows one path only:
   - chat-only (spoken), or
   - file-backed canvas (`:::file`) with canvas content rendered only on canvas.
 - Multi-paragraph assistant output is auto-promoted to a temp canvas file and not shown/spoken in chat.
 - Responses stream as ephemeral overlays. Click outside to dismiss.
 - Edge panels: hover near top edge for projects, right edge for chat log.
-- Slash commands: `/plan`, `/plan on`, `/plan off`, `/clear`, `/compact`.
+- Slash commands: `/plan`, `/plan on`, `/plan off`, `/pr [selector]`, `/status`, `/stop`, `/clear`, `/compact`.
 - Artifacts render Markdown + LaTeX.
 
 ## Markdown LaTeX Rendering
