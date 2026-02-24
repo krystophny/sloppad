@@ -276,6 +276,14 @@ body.pr-review-mode #pr-file-pane {
   margin: 0 -0.2rem;
   padding: 0 0.2rem;
 }
+#canvas-text pre code .hl-diff-line[data-file-line]::before {
+  content: attr(data-file-line);
+  display: inline-block;
+  min-width: 4ch;
+  margin-right: 0.6rem;
+  color: #6b6b6b;
+  user-select: none;
+}
 #canvas-text pre code .hl-diff-meta { color: #000080; }
 #canvas-text pre code .hl-diff-hunk { color: #0451A5; }
 #canvas-text pre code .hl-diff-add { color: inherit; background: #9bb95533; }

@@ -135,17 +135,107 @@ function classifyDiffLine(line) {
   return 'ctx';
 }
 
+function parseDiffHunkHeader(line) {
+  const match = /^@@\s*-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/.exec(line);
+  if (!match) return null;
+  return {
+    oldStart: Number.parseInt(match[1], 10),
+    newStart: Number.parseInt(match[2], 10),
+  };
+}
+
+function parseDiffPathFromHeader(line) {
+  const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+  if (!match) return '';
+  const right = String(match[2] || '').trim();
+  const left = String(match[1] || '').trim();
+  if (right && right !== '/dev/null') return right;
+  return left;
+}
+
+function parseDiffPathFromMarker(line, marker) {
+  if (!line.startsWith(marker)) return '';
+  const raw = String(line.slice(marker.length)).trim();
+  if (!raw || raw === '/dev/null') return '';
+  if (raw.startsWith('a/') || raw.startsWith('b/')) {
+    return raw.slice(2);
+  }
+  return raw;
+}
+
 function highlightDiff(code) {
   const lines = code.split('\n');
-  return lines.map((line) => {
+  let oldLine = null;
+  let newLine = null;
+  let filePath = '';
+  return lines.map((line, index) => {
     const kind = classifyDiffLine(line);
-    if (kind === 'meta' || kind === 'hunk') {
-      return `<span class="hl-diff-line hl-diff-${kind}">${escapeHtml(line)}</span>`;
+    const hunk = parseDiffHunkHeader(line);
+    if (hunk) {
+      oldLine = Number.isFinite(hunk.oldStart) ? hunk.oldStart : null;
+      newLine = Number.isFinite(hunk.newStart) ? hunk.newStart : null;
+    }
+
+    if (line.startsWith('diff --git ')) {
+      const nextPath = parseDiffPathFromHeader(line);
+      if (nextPath) filePath = nextPath;
+      oldLine = null;
+      newLine = null;
+    } else if (line.startsWith('+++ ')) {
+      const plusPath = parseDiffPathFromMarker(line, '+++ ');
+      if (plusPath) filePath = plusPath;
+    } else if (line.startsWith('--- ') && !filePath) {
+      const minusPath = parseDiffPathFromMarker(line, '--- ');
+      if (minusPath) filePath = minusPath;
+    }
+
+    let oldAtLine = null;
+    let newAtLine = null;
+    if (hunk) {
+      // hunk header sets counters; no source line number at the header itself.
+    } else if (Number.isFinite(oldLine) || Number.isFinite(newLine)) {
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        if (Number.isFinite(newLine)) {
+          newAtLine = newLine;
+          newLine += 1;
+        }
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        if (Number.isFinite(oldLine)) {
+          oldAtLine = oldLine;
+          oldLine += 1;
+        }
+      } else if (line.startsWith(' ')) {
+        if (Number.isFinite(oldLine)) {
+          oldAtLine = oldLine;
+          oldLine += 1;
+        }
+        if (Number.isFinite(newLine)) {
+          newAtLine = newLine;
+          newLine += 1;
+        }
+      }
+    }
+
+    const fileLine = Number.isFinite(newAtLine)
+      ? newAtLine
+      : (Number.isFinite(oldAtLine) ? oldAtLine : null);
+    const attrs = [`class="hl-diff-line hl-diff-${kind}"`, `data-diff-line="${index + 1}"`];
+    if (filePath) {
+      attrs.push(`data-file-path="${escapeHtml(filePath)}"`);
+    }
+    if (Number.isFinite(fileLine)) {
+      attrs.push(`data-file-line="${fileLine}"`);
+    }
+    if (Number.isFinite(oldAtLine)) {
+      attrs.push(`data-old-line="${oldAtLine}"`);
+    }
+    if (Number.isFinite(newAtLine)) {
+      attrs.push(`data-new-line="${newAtLine}"`);
     }
     if (!line) {
-      return '<span class="hl-diff-line hl-diff-ctx"></span>';
+      return `<span ${attrs.join(' ')}></span>`;
     }
-    return `<span class="hl-diff-line hl-diff-${kind}">${escapeHtml(line)}</span>`;
+    return `<span ${attrs.join(' ')}>${escapeHtml(line)}</span>`;
   }).join('');
 }
 
@@ -360,11 +450,33 @@ export function getActiveTextEventId() {
   return activeTextEventId;
 }
 
+function getDiffAnchorContext(node) {
+  const start = node instanceof Element ? node : node?.parentElement;
+  if (!(start instanceof Element)) return null;
+  const lineEl = start.closest('.hl-diff-line');
+  if (!(lineEl instanceof HTMLElement)) return null;
+  const fileLineRaw = String(lineEl.dataset.fileLine || '').trim();
+  const fileLine = Number.parseInt(fileLineRaw, 10);
+  const diffLineRaw = String(lineEl.dataset.diffLine || '').trim();
+  const diffLine = Number.parseInt(diffLineRaw, 10);
+  const resolvedLine = Number.isFinite(fileLine) && fileLine > 0
+    ? fileLine
+    : (Number.isFinite(diffLine) && diffLine > 0 ? diffLine : null);
+  if (!resolvedLine) return null;
+  const path = String(lineEl.dataset.filePath || '').trim();
+  return {
+    line: resolvedLine,
+    title: path || getActiveArtifactTitle(),
+  };
+}
+
 export function getLocationFromPoint(clientX, clientY) {
   const e = getEls();
   if (!e.text || !activeTextEventId) return null;
   const range = textRangeFromClientPoint(clientX, clientY);
   if (!range || !e.text.contains(range.startContainer)) return null;
+  const diffAnchor = getDiffAnchorContext(range.startContainer);
+  if (diffAnchor) return diffAnchor;
   try {
     const startProbe = range.cloneRange();
     startProbe.selectNodeContents(e.text);
@@ -387,6 +499,10 @@ export function getLocationFromSelection() {
   const selectedText = selection.toString().trim();
   if (!selectedText) return null;
   const range = selection.getRangeAt(0);
+  const diffAnchor = getDiffAnchorContext(range.startContainer);
+  if (diffAnchor) {
+    return { ...diffAnchor, selectedText };
+  }
   const { startOffset } = getSelectionOffsets(e.text, range);
   const lines = (e.text.textContent || '').split('\n');
   const line = lineFromOffset(lines, startOffset);
