@@ -37,6 +37,7 @@ const state = {
   assistantLastError: '',
   ttsPlaying: false,
   voiceAwaitingTurn: false,
+  voiceTurns: new Set(),
   indicatorSuppressedByCanvasUpdate: false,
   chatCtrlHoldTimer: null,
   chatVoiceCapture: null,
@@ -63,6 +64,28 @@ const ASSISTANT_ACTIVITY_POLL_MS = 1200;
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
 const CHAT_SEND_HOLD_MS = 300;
+// Frontend end-of-utterance policy:
+// - start/end speech from local mic energy
+// - auto-stop after sustained silence (~700ms)
+// - no-speech timeout + hard max to avoid hanging capture
+const VOICE_EOU_AUTO_SEND_DEFAULT = true;
+const VOICE_EOU_AUTO_SEND_STORAGE_KEY = 'tabura.voiceEouAutoSend';
+const VOICE_EOU_AUTO_SEND_QUERY_PARAM = 'voice_eou_auto_send';
+const VOICE_EOU_MIN_UTTERANCE_MS = 300;
+const VOICE_EOU_EOS_SILENCE_MS = 700;
+const VOICE_EOU_NO_SPEECH_MS = 4000;
+const VOICE_EOU_MAX_RECORDING_MS = 20000;
+const VOICE_EOU_FRAME_MS = 40;
+const VOICE_EOU_NOISE_FLOOR_SAMPLES = 8;
+const VOICE_EOU_NOISE_FLOOR_PERCENTILE = 0.35;
+const VOICE_EOU_NOISE_FLOOR_ADAPT_ALPHA = 0.12;
+const VOICE_EOU_SPEECH_START_OFFSET_DB = 3;
+const VOICE_EOU_SPEECH_END_OFFSET_DB = 1.5;
+const VOICE_EOU_SPEECH_START_THRESHOLD_MIN_DB = -42;
+const VOICE_EOU_SPEECH_END_THRESHOLD_MIN_DB = -45;
+const VOICE_EOU_SPEECH_START_FRAMES = 4;
+const VOICE_EOU_NOISE_FLOOR_MIN_DB = -60;
+const VOICE_EOU_NOISE_FLOOR_MAX_DB = -18;
 let devReloadBootID = '';
 let devReloadTimer = null;
 let devReloadInFlight = false;
@@ -559,6 +582,28 @@ function releaseMicStream() {
   _cachedMicStream = null;
 }
 
+function parseOptionalBoolean(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') return false;
+  return null;
+}
+
+function isVoiceEOUAutoSendEnabled() {
+  try {
+    const queryValue = new URL(window.location.href).searchParams.get(VOICE_EOU_AUTO_SEND_QUERY_PARAM);
+    const queryFlag = parseOptionalBoolean(queryValue);
+    if (queryFlag !== null) return queryFlag;
+  } catch (_) {}
+  try {
+    const storedValue = window.localStorage.getItem(VOICE_EOU_AUTO_SEND_STORAGE_KEY);
+    const storedFlag = parseOptionalBoolean(storedValue);
+    if (storedFlag !== null) return storedFlag;
+  } catch (_) {}
+  return VOICE_EOU_AUTO_SEND_DEFAULT;
+}
+
 let _sttResolve = null;
 let _sttReject = null;
 let _sttActive = false;
@@ -640,6 +685,9 @@ function handleSTTWSMessage(payload) {
 
 function stopChatVoiceMedia(capture) {
   if (!capture) return;
+  if (capture.vadState?.isRunning) {
+    stopVADMonitor(capture);
+  }
   if (capture.mediaRecorder) {
     try {
       if (capture.mediaRecorder.state !== 'inactive') {
@@ -650,6 +698,207 @@ function stopChatVoiceMedia(capture) {
   capture.mediaRecorder = null;
   capture.mediaStream = null;
   releaseMicStream();
+}
+
+function computeDecibelFromTimeDomain(data) {
+  let sumSquares = 0;
+  for (let i = 0; i < data.length; i++) {
+    const sample = (data[i] - 128) / 128;
+    sumSquares += sample * sample;
+  }
+  const rms = Math.sqrt(sumSquares / Math.max(1, data.length));
+  if (rms <= 0 || Number.isNaN(rms)) return -100;
+  return 20 * Math.log10(rms);
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function percentileValue(values, percentile) {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  const sorted = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const rank = clampNumber(percentile, 0, 1) * (sorted.length - 1);
+  const lower = Math.floor(rank);
+  const upper = Math.ceil(rank);
+  if (lower === upper) return sorted[lower];
+  const weight = rank - lower;
+  return (sorted[lower] * (1 - weight)) + (sorted[upper] * weight);
+}
+
+function startVADMonitor(capture) {
+  if (!isVoiceEOUAutoSendEnabled()) return;
+  if (!capture || capture.vadState) return;
+  if (!capture.mediaStream) return;
+  if (!ttsAudioCtx || typeof ttsAudioCtx.createAnalyser !== 'function' || typeof ttsAudioCtx.createMediaStreamSource !== 'function') return;
+
+  if (ttsAudioCtx.state === 'suspended') {
+    ttsAudioCtx.resume().catch(() => {});
+  }
+
+  const handleNoSpeechTimeout = () => {
+    stopVADMonitor(capture);
+    state.indicatorSuppressedByCanvasUpdate = false;
+    showStatus('no speech detected');
+    setRecording(false);
+    sttCancel();
+    stopChatVoiceMedia(capture);
+    if (state.chatVoiceCapture === capture) {
+      state.chatVoiceCapture = null;
+    }
+    updateAssistantActivityIndicator();
+    window.setTimeout(() => {
+      if (!state.chatVoiceCapture && !isAssistantWorking() && !isTTSSpeaking()) {
+        showStatus('ready');
+      }
+    }, 800);
+  };
+
+  const options = {
+    startAtMs: performance.now(),
+    speechMs: 0,
+    silenceMs: 0,
+    hasSpeech: false,
+    speechFrames: 0,
+    noiseSamples: [],
+    noiseFloorDb: null,
+    isRunning: true,
+  };
+
+  let source;
+  let analyser;
+  try {
+    source = ttsAudioCtx.createMediaStreamSource(capture.mediaStream);
+    analyser = ttsAudioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.25;
+    const bins = new Uint8Array(analyser.frequencyBinCount);
+    source.connect(analyser);
+
+    const update = () => {
+      if (!options.isRunning || !capture || capture.stopping || state.chatVoiceCapture !== capture) {
+        stopVADMonitor(capture);
+        return;
+      }
+
+      analyser.getByteTimeDomainData(bins);
+      const db = computeDecibelFromTimeDomain(bins);
+      const now = performance.now();
+      const elapsed = now - options.startAtMs;
+
+      if (options.noiseFloorDb == null && options.noiseSamples.length < VOICE_EOU_NOISE_FLOOR_SAMPLES) {
+        options.noiseSamples.push(db);
+        if (options.noiseSamples.length >= VOICE_EOU_NOISE_FLOOR_SAMPLES) {
+          const seededFloor = percentileValue(options.noiseSamples, VOICE_EOU_NOISE_FLOOR_PERCENTILE);
+          if (seededFloor != null) {
+            options.noiseFloorDb = clampNumber(
+              seededFloor,
+              VOICE_EOU_NOISE_FLOOR_MIN_DB,
+              VOICE_EOU_NOISE_FLOOR_MAX_DB,
+            );
+          }
+        }
+      }
+
+      if (options.noiseFloorDb == null) {
+        if (elapsed >= VOICE_EOU_NO_SPEECH_MS) {
+          handleNoSpeechTimeout();
+          return;
+        }
+        return;
+      }
+
+      const startThresholdBefore = Math.max(
+        VOICE_EOU_SPEECH_START_THRESHOLD_MIN_DB,
+        options.noiseFloorDb + VOICE_EOU_SPEECH_START_OFFSET_DB,
+      );
+      const endThresholdBefore = Math.max(
+        VOICE_EOU_SPEECH_END_THRESHOLD_MIN_DB,
+        options.noiseFloorDb + VOICE_EOU_SPEECH_END_OFFSET_DB,
+      );
+      const floorUpdateCeilDb = options.hasSpeech ? endThresholdBefore + 2 : startThresholdBefore;
+      // Keep tracking ambient floor but avoid pulling it up while speech is active.
+      if (db <= floorUpdateCeilDb) {
+        options.noiseFloorDb = clampNumber(
+          ((1 - VOICE_EOU_NOISE_FLOOR_ADAPT_ALPHA) * options.noiseFloorDb) + (VOICE_EOU_NOISE_FLOOR_ADAPT_ALPHA * db),
+          VOICE_EOU_NOISE_FLOOR_MIN_DB,
+          VOICE_EOU_NOISE_FLOOR_MAX_DB,
+        );
+      }
+
+      const startThresholdDb = Math.max(
+        VOICE_EOU_SPEECH_START_THRESHOLD_MIN_DB,
+        options.noiseFloorDb + VOICE_EOU_SPEECH_START_OFFSET_DB,
+      );
+      const endThresholdDb = Math.max(
+        VOICE_EOU_SPEECH_END_THRESHOLD_MIN_DB,
+        options.noiseFloorDb + VOICE_EOU_SPEECH_END_OFFSET_DB,
+      );
+
+      if (!options.hasSpeech) {
+        if (db >= startThresholdDb) {
+          options.speechFrames += 1;
+        } else {
+          options.speechFrames = 0;
+        }
+        if (options.speechFrames >= VOICE_EOU_SPEECH_START_FRAMES) {
+          options.hasSpeech = true;
+          options.speechStartAt = now;
+          options.silenceMs = 0;
+          options.speechFrames = 0;
+        }
+      }
+
+      if (!options.hasSpeech) {
+        if (elapsed >= VOICE_EOU_NO_SPEECH_MS) {
+          handleNoSpeechTimeout();
+          return;
+        }
+        return;
+      }
+
+      if (db >= endThresholdDb) {
+        options.silenceMs = 0;
+      } else {
+        options.silenceMs += VOICE_EOU_FRAME_MS;
+      }
+
+      options.speechMs = Math.max(0, now - options.speechStartAt);
+      if (options.speechMs < VOICE_EOU_MIN_UTTERANCE_MS) return;
+      if (options.silenceMs >= VOICE_EOU_EOS_SILENCE_MS || elapsed >= VOICE_EOU_MAX_RECORDING_MS) {
+        stopVADMonitor(capture);
+        void stopZenVoiceCaptureAndSend();
+        return;
+      }
+    };
+
+    const timer = window.setInterval(update, VOICE_EOU_FRAME_MS);
+    capture.vadState = { source, analyser, timer, options, bins, isRunning: true };
+  } catch (_) {
+    if (source) {
+      try { source.disconnect(); } catch (_) {}
+    }
+    capture.vadState = null;
+  }
+}
+
+function stopVADMonitor(capture) {
+  if (!capture || !capture.vadState) return;
+  const state = capture.vadState;
+  capture.vadState = null;
+  if (state.options) state.options.isRunning = false;
+  state.isRunning = false;
+  if (state.timer) window.clearInterval(state.timer);
+  if (state.source) {
+    try { state.source.disconnect(); } catch (_) {}
+  }
+  if (state.analyser) {
+    try { state.analyser.disconnect(); } catch (_) {}
+  }
 }
 
 function stopChatVoiceMediaAndFlush(capture) {
@@ -686,15 +935,17 @@ function stopChatVoiceMediaAndFlush(capture) {
   });
 }
 
-async function beginZenVoiceCapture(x, y, anchor) {
+async function beginZenVoiceCapture(x, y, anchor, options = null) {
   if (state.chatVoiceCapture) return;
   if (!canUseMicrophoneCapture()) return;
+  const manualStopOnly = Boolean(options && options.manualStopOnly);
   // Interrupt TTS playback when starting recording
   stopTTSPlayback();
   const capture = {
     active: false,
     stopping: false,
     stopRequested: false,
+    manualStopOnly,
     autoSend: true,
     mediaStream: null,
     mediaRecorder: null,
@@ -723,6 +974,9 @@ async function beginZenVoiceCapture(x, y, anchor) {
       capture.chunks.push(ev.data);
     });
     recorder.start();
+    if (!capture.stopRequested && !capture.manualStopOnly) {
+      startVADMonitor(capture);
+    }
     if (capture.stopRequested) {
       void stopZenVoiceCaptureAndSend();
     }
@@ -894,6 +1148,10 @@ function currentIndicatorMode() {
   return '';
 }
 
+function shouldStopInUiClick() {
+  return state.voiceAwaitingTurn || isAssistantWorking() || isTTSSpeaking();
+}
+
 function updateAssistantActivityIndicator() {
   if (!hasLocalAssistantWork() && state.assistantRemoteActiveCount <= 0 && state.assistantRemoteQueuedCount <= 0) {
     state.assistantUnknownTurns = 0;
@@ -932,6 +1190,7 @@ function trackAssistantTurnStarted(turnID) {
 function trackAssistantTurnFinished(turnID) {
   const key = String(turnID || '').trim();
   if (key) {
+    state.voiceTurns.delete(key);
     if (!state.assistantActiveTurns.delete(key) && state.assistantUnknownTurns > 0) {
       state.assistantUnknownTurns -= 1;
     }
@@ -1045,6 +1304,7 @@ function ensurePendingForTurn(turnID) {
 function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.pendingByTurn.clear();
   state.pendingQueue = [];
+  state.voiceTurns.clear();
   state.assistantActiveTurns.clear();
   state.assistantUnknownTurns = 0;
   state.assistantRemoteActiveCount = 0;
@@ -1277,7 +1537,7 @@ function assistantMessageUsesCanvasBlocks(text) {
 
 function shouldRenderAssistantHistoryInChat(renderFormat, markdown, plain) {
   const format = String(renderFormat || '').trim().toLowerCase();
-  if (format === 'text' || format === 'canvas') return false;
+  if (format === 'canvas') return false;
   return Boolean(String(markdown || plain || '').trim());
 }
 
@@ -1304,11 +1564,17 @@ function handleChatEvent(payload) {
   }
 
   if (type === 'turn_started') {
-    trackAssistantTurnStarted(payload.turn_id);
+    const turnID = String(payload.turn_id || '').trim();
+    const turnIsVoice = state.voiceAwaitingTurn || isVoiceTurn();
+    if (turnID) {
+      if (turnIsVoice) state.voiceTurns.add(turnID);
+      else state.voiceTurns.delete(turnID);
+    }
+    trackAssistantTurnStarted(turnID);
     state.voiceAwaitingTurn = false;
     state.indicatorSuppressedByCanvasUpdate = false;
-    if (isVoiceTurn()) {
-      ensurePendingForTurn(payload.turn_id);
+    if (turnIsVoice) {
+      ensurePendingForTurn(turnID);
     }
     state.zenCanvasActionThisTurn = false;
     // Reset TTS state for new turn
@@ -1328,15 +1594,14 @@ function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
     const md = String(payload.message || '');
-    const streamDelta = String(payload.delta || '');
     const autoCanvas = Boolean(payload.auto_canvas);
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
     if (isVoiceTurn()) {
       const row = ensurePendingForTurn(turnID);
-      if (renderOnCanvas) {
-        updateAssistantRow(row, '_Thinking..._', true);
-      } else {
+      if (String(md || '').trim()) {
         updateAssistantRow(row, md, true);
+      } else if (!renderOnCanvas) {
+        updateAssistantRow(row, '_Thinking..._', true);
       }
     }
 
@@ -1349,13 +1614,6 @@ function handleChatEvent(payload) {
       return;
     }
 
-    if (ttsEnabled) {
-      const { ttsText, ttsLang } = extractTTSText(md);
-      const { ttsText: deltaText } = extractTTSText(streamDelta);
-      if (ttsLang) ttsSpeakLang = ttsLang;
-      const diff = computeTTSDiff(ttsText, deltaText);
-      queueTTSDiff(diff);
-    }
     if (!isVoiceTurn() && !state.hasArtifact) {
       const cleaned = cleanForOverlay(md);
       if (cleaned) updateOverlay(cleaned);
@@ -1377,25 +1635,25 @@ function handleChatEvent(payload) {
     const hasDisplayMd = Boolean(String(displayMd || '').trim());
     if (isVoiceTurn()) {
       const row = takePendingRow(turnID);
-      if (autoCanvas || (renderOnCanvas && !hasDisplayMd)) {
-        row?.remove();
-      } else if (row) {
+      if (row && hasDisplayMd) {
         updateAssistantRow(row, displayMd, false);
+      } else if (row) {
+        row.classList.remove('is-pending');
       } else if (hasDisplayMd) {
         appendRenderedAssistant(displayMd);
       }
     }
+    const shouldSpeakTurn = turnID ? state.voiceTurns.has(turnID) : false;
     trackAssistantTurnFinished(turnID);
     state.assistantLastError = '';
     showStatus('ready');
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
 
-    if (!autoCanvas && ttsEnabled && md.trim()) {
+    if (shouldSpeakTurn && !autoCanvas && ttsEnabled && md.trim()) {
       const { ttsText, ttsLang } = extractTTSText(md);
-      const { ttsText: deltaText } = extractTTSText(String(payload.delta || ''));
       if (ttsLang) ttsSpeakLang = ttsLang;
-      const diff = computeTTSDiff(ttsText, deltaText);
+      const diff = computeTTSDiff(ttsText);
       queueTTSDiff(diff);
     } else if (autoCanvas) {
       state.indicatorSuppressedByCanvasUpdate = true;
@@ -1832,6 +2090,10 @@ function bindUi() {
   const canvasText = document.getElementById('canvas-text');
   const canvasViewport = document.getElementById('canvas-viewport');
   const zenIndicator = document.getElementById('zen-indicator');
+  const isVoiceInteractionTarget = (target) => (
+    target instanceof Element
+    && target.closest('button,a,input,textarea,select,[contenteditable="true"],.zen-overlay,.zen-input,.edge-panel')
+  );
 
   if (zenIndicator) {
     zenIndicator.addEventListener('pointerdown', (ev) => {
@@ -1855,9 +2117,103 @@ function bindUi() {
   window.addEventListener('resize', syncIndicatorOnViewportChange);
 
   if (zenClickTarget) {
+    let mouseHoldTimer = null;
+    let mouseHoldActive = false;
+    let mouseHoldSuppressClick = false;
+    let mouseHoldPointerId = null;
+    let mouseHoldX = 0;
+    let mouseHoldY = 0;
+    const MOUSE_HOLD_MOVE_THRESHOLD = 5;
+    const clearMouseHoldTimer = () => {
+      if (!mouseHoldTimer) return;
+      clearTimeout(mouseHoldTimer);
+      mouseHoldTimer = null;
+    };
+    const clearMouseHoldState = () => {
+      clearMouseHoldTimer();
+      mouseHoldActive = false;
+      mouseHoldPointerId = null;
+    };
+
+    // Mouse hold behaves as push-to-talk: press to start, release to stop.
+    // A short click still uses tap-to-talk via the click handler below.
+    zenClickTarget.addEventListener('pointerdown', (ev) => {
+      if (ev.pointerType !== 'mouse' || !ev.isPrimary || ev.button !== 0) return;
+      if (isVoiceInteractionTarget(ev.target)) return;
+      if (isRecording() || shouldStopInUiClick()) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      clearMouseHoldTimer();
+      mouseHoldActive = false;
+      mouseHoldPointerId = ev.pointerId;
+      mouseHoldX = ev.clientX;
+      mouseHoldY = ev.clientY;
+      if (typeof zenClickTarget.setPointerCapture === 'function') {
+        try { zenClickTarget.setPointerCapture(ev.pointerId); } catch (_) {}
+      }
+      mouseHoldTimer = window.setTimeout(() => {
+        mouseHoldTimer = null;
+        if (mouseHoldPointerId !== ev.pointerId || state.chatVoiceCapture) return;
+        mouseHoldActive = true;
+        // Releasing a successful hold emits a click; ignore that click so we
+        // do not immediately toggle/cancel after manual stop.
+        mouseHoldSuppressClick = true;
+        let anchor = null;
+        if (state.hasArtifact && canvasText) {
+          anchor = getAnchorFromPoint(mouseHoldX, mouseHoldY);
+        }
+        void beginZenVoiceCapture(mouseHoldX, mouseHoldY, anchor, { manualStopOnly: true });
+      }, CHAT_SEND_HOLD_MS);
+    }, true);
+
+    zenClickTarget.addEventListener('pointermove', (ev) => {
+      if (!mouseHoldTimer || mouseHoldPointerId !== ev.pointerId) return;
+      const dx = ev.clientX - mouseHoldX;
+      const dy = ev.clientY - mouseHoldY;
+      if (Math.sqrt(dx * dx + dy * dy) > MOUSE_HOLD_MOVE_THRESHOLD) {
+        clearMouseHoldTimer();
+        mouseHoldPointerId = null;
+      }
+    }, true);
+
+    const stopMousePushToTalk = () => {
+      if (!mouseHoldActive) return;
+      mouseHoldActive = false;
+      if (isRecording()) {
+        void stopZenVoiceCaptureAndSend();
+      }
+    };
+    const handleMousePointerRelease = (ev) => {
+      if (mouseHoldPointerId !== null && mouseHoldPointerId !== ev.pointerId) return;
+      if (typeof zenClickTarget.releasePointerCapture === 'function') {
+        try { zenClickTarget.releasePointerCapture(ev.pointerId); } catch (_) {}
+      }
+      if (mouseHoldTimer) {
+        clearMouseHoldTimer();
+        mouseHoldPointerId = null;
+        return;
+      }
+      stopMousePushToTalk();
+      mouseHoldPointerId = null;
+    };
+    window.addEventListener('pointerup', handleMousePointerRelease, true);
+    window.addEventListener('pointercancel', handleMousePointerRelease, true);
+    window.addEventListener('blur', clearMouseHoldState);
+
     zenClickTarget.addEventListener('click', (ev) => {
+      if (mouseHoldSuppressClick) {
+        mouseHoldSuppressClick = false;
+        ev.preventDefault();
+        return;
+      }
+      if (shouldStopInUiClick()) {
+        ev.preventDefault();
+        void handleZenStopAction();
+        return;
+      }
+
       // Ignore clicks on interactive elements
-      if (ev.target instanceof Element && ev.target.closest('button,a,input,textarea,select,[contenteditable="true"],.zen-overlay,.zen-input,.edge-panel')) return;
+      if (isVoiceInteractionTarget(ev.target)) return;
       // Ignore if right-click
       if (ev.button !== 0) return;
       // Ignore text selection

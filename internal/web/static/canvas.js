@@ -1,14 +1,59 @@
 import { marked } from './vendor/marked.esm.js';
 
-const FORTRAN_KEYWORDS = [
-  'program', 'module', 'contains', 'implicit', 'none',
-  'integer', 'real', 'double', 'precision', 'complex', 'logical', 'character', 'type',
-  'subroutine', 'function', 'call',
-  'if', 'then', 'else', 'elseif', 'select', 'case', 'where',
-  'do', 'enddo', 'end', 'stop', 'return', 'cycle', 'exit',
-  'allocate', 'deallocate', 'parameter', 'intent', 'in', 'out', 'inout',
-  'use', 'only', 'private', 'public', 'interface', 'elemental', 'pure', 'recursive',
-];
+const SOURCE_LANGUAGE_BY_EXT = {
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cxx: 'cpp',
+  cpp: 'cpp',
+  hpp: 'cpp',
+  hh: 'cpp',
+  go: 'go',
+  rs: 'rust',
+  py: 'python',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  jsx: 'jsx',
+  tsx: 'tsx',
+  java: 'java',
+  kt: 'kotlin',
+  scala: 'scala',
+  rb: 'ruby',
+  php: 'php',
+  swift: 'swift',
+  cs: 'csharp',
+  lua: 'lua',
+  r: 'r',
+  sql: 'sql',
+  sh: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  ps1: 'powershell',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  ini: 'ini',
+  xml: 'xml',
+  html: 'xml',
+  css: 'css',
+  scss: 'scss',
+  f: 'fortran',
+  for: 'fortran',
+  f77: 'fortran',
+  f90: 'fortran',
+  f95: 'fortran',
+  f03: 'fortran',
+  f08: 'fortran',
+};
+
+const SOURCE_LANGUAGE_BY_BASENAME = {
+  makefile: 'makefile',
+  dockerfile: 'dockerfile',
+  cmakelists: 'cmake',
+};
 
 export function escapeHtml(text) {
   return String(text)
@@ -19,35 +64,59 @@ export function escapeHtml(text) {
     .replaceAll("'", '&#39;');
 }
 
-function withStashedParts(input, stasher) {
-  const stash = [];
-  const out = stasher(input, (html) => {
-    const key = `@@HL${stash.length}@@`;
-    stash.push({ key, html });
-    return key;
-  });
-  let restored = out;
-  for (const part of stash) {
-    restored = restored.replaceAll(part.key, part.html);
+function normalizeLanguage(langRaw) {
+  const lang = String(langRaw || '').trim().toLowerCase();
+  if (!lang) return '';
+  const aliases = {
+    js: 'javascript',
+    ts: 'typescript',
+    py: 'python',
+    rs: 'rust',
+    golang: 'go',
+    shell: 'bash',
+    sh: 'bash',
+    zsh: 'bash',
+    ps: 'powershell',
+    f90: 'fortran',
+    f95: 'fortran',
+    f03: 'fortran',
+    f08: 'fortran',
+    for: 'fortran',
+  };
+  return aliases[lang] || lang;
+}
+
+function languageFromArtifactTitle(titleRaw) {
+  const title = String(titleRaw || '').trim();
+  if (!title) return '';
+  const base = title.split(/[\\/]/).pop() || '';
+  const lowerBase = base.toLowerCase();
+  if (lowerBase === 'cmakelists.txt') return 'cmake';
+  if (SOURCE_LANGUAGE_BY_BASENAME[lowerBase]) return SOURCE_LANGUAGE_BY_BASENAME[lowerBase];
+  const dot = lowerBase.lastIndexOf('.');
+  if (dot < 0 || dot === lowerBase.length - 1) return '';
+  const ext = lowerBase.slice(dot + 1);
+  return SOURCE_LANGUAGE_BY_EXT[ext] || '';
+}
+
+function highlightCode(code, langRaw) {
+  const input = String(code || '');
+  const lang = normalizeLanguage(langRaw);
+  const hljs = window.hljs;
+  if (!hljs || typeof hljs.highlight !== 'function') {
+    return escapeHtml(input);
   }
-  return restored;
-}
-
-function highlightFortranInline(lineEscaped) {
-  const kwPattern = new RegExp(`\\b(?:${FORTRAN_KEYWORDS.join('|')})\\b`, 'gi');
-  return withStashedParts(lineEscaped, (source, put) => {
-    let out = source;
-    out = out.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, (m) => put(`<span class="hl-str">${m}</span>`));
-    out = out.replace(/!.*/g, (m) => put(`<span class="hl-cmt">${m}</span>`));
-    out = out.replace(/\b\d+(?:\.\d+)?(?:[edED][+\-]?\d+)?\b/g, '<span class="hl-num">$&</span>');
-    out = out.replace(/\.(?:eq|ne|lt|le|gt|ge|and|or|not|true|false)\./gi, '<span class="hl-kw">$&</span>');
-    out = out.replace(kwPattern, '<span class="hl-kw">$&</span>');
-    return out;
-  });
-}
-
-function highlightFortran(code) {
-  return code.split('\n').map((line) => highlightFortranInline(escapeHtml(line))).join('\n');
+  if (lang && typeof hljs.getLanguage === 'function' && hljs.getLanguage(lang)) {
+    try {
+      return hljs.highlight(input, { language: lang, ignoreIllegals: true }).value;
+    } catch (_) {}
+  }
+  if (typeof hljs.highlightAuto === 'function') {
+    try {
+      return hljs.highlightAuto(input).value;
+    } catch (_) {}
+  }
+  return escapeHtml(input);
 }
 
 function classifyDiffLine(line) {
@@ -76,22 +145,25 @@ function highlightDiff(code) {
     if (!line) {
       return '<span class="hl-diff-line hl-diff-ctx"></span>';
     }
-    const prefix = line.charAt(0);
-    const rest = line.slice(1);
-    const highlightedRest = highlightFortranInline(escapeHtml(rest));
-    return `<span class="hl-diff-line hl-diff-${kind}">${escapeHtml(prefix)}${highlightedRest}</span>`;
+    return `<span class="hl-diff-line hl-diff-${kind}">${escapeHtml(line)}</span>`;
   }).join('');
 }
 
+function renderHighlightedCodeBlock(code, langRaw) {
+  const normalized = normalizeLanguage(langRaw) || 'plaintext';
+  const highlighted = highlightCode(code, normalized);
+  return `<pre><code class="hljs language-${escapeHtml(normalized)}">${highlighted}</code></pre>\n`;
+}
+
 function renderCodeBlock(code, langRaw) {
-  const lang = (langRaw || '').toLowerCase();
-  if (lang === 'fortran' || lang === 'f90' || lang === 'f95' || lang === 'f03' || lang === 'f08') {
-    return `<pre><code class="language-${escapeHtml(lang || 'fortran')}">${highlightFortran(code)}</code></pre>\n`;
+  const lang = normalizeLanguage(langRaw);
+  if (lang === 'fortran') {
+    return renderHighlightedCodeBlock(code, 'fortran');
   }
   if (lang === 'diff' || lang === 'patch' || lang === 'git') {
-    return `<pre><code class="language-${escapeHtml(lang)}">${highlightDiff(code)}</code></pre>\n`;
+    return `<pre><code class="hljs language-${escapeHtml(lang)}">${highlightDiff(code)}</code></pre>\n`;
   }
-  return `<pre><code class="language-${escapeHtml(lang || 'plaintext')}">${escapeHtml(code)}</code></pre>\n`;
+  return renderHighlightedCodeBlock(code, lang || 'plaintext');
 }
 
 const renderer = new marked.Renderer();
@@ -387,10 +459,16 @@ export function renderCanvas(event) {
     activeArtifactTitle = event.title || '';
     activePdfEvent = null;
     const oldBlockTexts = previousBlockTexts.slice();
-    const { text: markdownText, stash: mathSegments } = extractMathSegments(event.text || '');
-    const renderedMarkdownHtml = marked.parse(markdownText);
-    e.text.innerHTML = restoreMathSegments(sanitizeHtml(renderedMarkdownHtml), mathSegments);
-    typesetMarkdownMath(e.text);
+    const textBody = String(event.text || '');
+    const sourceLang = languageFromArtifactTitle(activeArtifactTitle);
+    if (sourceLang) {
+      e.text.innerHTML = sanitizeHtml(renderHighlightedCodeBlock(textBody, sourceLang));
+    } else {
+      const { text: markdownText, stash: mathSegments } = extractMathSegments(textBody);
+      const renderedMarkdownHtml = marked.parse(markdownText);
+      e.text.innerHTML = restoreMathSegments(sanitizeHtml(renderedMarkdownHtml), mathSegments);
+      typesetMarkdownMath(e.text);
+    }
     previousArtifactText = event.text || '';
     previousBlockTexts = captureBlockTexts(e.text);
     applyDiffHighlight(e.text, oldBlockTexts);
