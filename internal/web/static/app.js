@@ -354,11 +354,12 @@ function isIPhone() {
 
 const IPHONE_CORNER_RADIUS_PROFILES = [
   { shortSide: 375, longSide: 812, dpr: 2, radius: 41.5 },
+  { shortSide: 375, longSide: 812, dpr: 3, radius: 44 },
   { shortSide: 390, longSide: 844, dpr: 3, radius: 47 },
   { shortSide: 393, longSide: 852, dpr: 3, radius: 55 },
   { shortSide: 414, longSide: 896, dpr: 2, radius: 41 },
   { shortSide: 428, longSide: 926, dpr: 3, radius: 53 },
-  { shortSide: 430, longSide: 932, dpr: 3, radius: 59 },
+  { shortSide: 430, longSide: 932, dpr: 3, radius: 55 },
   { shortSide: 440, longSide: 956, dpr: 3, radius: 62 },
 ];
 
@@ -410,16 +411,18 @@ function applyIPhoneStandaloneCueHints() {
   const roundedRadius = iPhoneRoundedCornerRadiusPx();
   const radius = Number.isFinite(roundedRadius) && roundedRadius > 0 ? roundedRadius : 44;
   const cueBorderWidth = Number.parseFloat(getComputedStyle(root).getPropertyValue('--cue-frame-border')) || 5;
-  const modeRadius = isStandaloneLike
-    ? Math.max(24, Math.round(radius - Math.max(1, cueBorderWidth)))
-    : radius;
+  const cueHalfBorder = Math.max(0, cueBorderWidth / 2);
+  const modeRadius = Math.max(0, Math.round(radius - cueHalfBorder));
+  const cueInset = `${cueHalfBorder}px`;
   body.classList.toggle('ios-cue-fullscreen', isStandaloneLike);
   if (isIPhoneDevice) {
+    root.style.setProperty('--zen-cue-frame-inset', cueInset);
     const cornerRadius = `0 0 ${modeRadius}px ${modeRadius}px`;
     root.style.setProperty('--zen-cue-corner-radius', cornerRadius);
     return;
   }
   root.style.removeProperty('--zen-cue-corner-radius');
+  root.style.removeProperty('--zen-cue-frame-inset');
 }
 
 window.addEventListener('resize', applyIPhoneStandaloneCueHints);
