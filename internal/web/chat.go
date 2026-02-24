@@ -57,7 +57,8 @@ Canvas/file rules:
 - Line references: when the user mentions [Line N of "file"], apply at that location.
 
 PR review fast path:
-- If user intent is to open/show/reload PR review, act immediately with no clarification.
+- Trigger on explicit intents like "open PR view", "open PR review", "open PR canvas", "show PR view", or "reload PR review".
+- If triggered, act immediately with no clarification and no metadata-only chat reply.
 - Resolve PR number via gh pr view --json number (or use the number user gave).
 - Fetch patch via gh pr diff <number> --patch.
 - Publish exactly one file block at path .tabura/artifacts/pr/pr-<number>.diff with the patch content.
@@ -73,7 +74,7 @@ Canvas content must be in :::file blocks only. Use temp_file_create/temp_file_re
 
 When user asks to show/open an existing file, do NOT paste file body into chat markdown or :::file blocks; use canvas_artifact_show and keep chat text brief.
 
-PR review fast path: for open/show/reload PR review intent, immediately run gh PR view/diff and return one .tabura/artifacts/pr/pr-<number>.diff :::file block plus a short confirmation line.
+PR review fast path: for explicit intents like "open PR view/review/canvas", "show PR view", or "reload PR review", immediately run gh PR view/diff and return one .tabura/artifacts/pr/pr-<number>.diff :::file block plus a short confirmation line. Do not return metadata-only chat.
 
 `
 
