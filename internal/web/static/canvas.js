@@ -1,5 +1,5 @@
 import { marked } from './vendor/marked.esm.js';
-import { GlobalWorkerOptions, getDocument } from './vendor/pdf.mjs';
+import { AnnotationLayer, GlobalWorkerOptions, TextLayer, getDocument } from './vendor/pdf.mjs';
 
 const SOURCE_LANGUAGE_BY_EXT = {
   c: 'c',
@@ -57,9 +57,8 @@ const SOURCE_LANGUAGE_BY_BASENAME = {
 };
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdown', 'mkdn', 'mkd', 'mdx']);
-const PDFJS_MODULE_URL = new URL('./vendor/pdfjs/pdf.min.mjs', import.meta.url).toString();
-const PDFJS_WORKER_URL = new URL('./vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).toString();
-const PDFJS_STANDARD_FONTS_URL = new URL('./vendor/pdfjs/standard_fonts/', import.meta.url).toString();
+const PDFJS_WORKER_URL = new URL('./vendor/pdf.worker.mjs', import.meta.url).toString();
+const PDFJS_STANDARD_FONTS_URL = new URL('./vendor/standard_fonts/', import.meta.url).toString();
 
 export function escapeHtml(text) {
   return String(text)
@@ -660,7 +659,7 @@ const PDF_MIN_RENDER_WIDTH_PX = 240;
 const PDF_MAX_RENDER_SCALE = 3;
 const PDF_RESIZE_DEBOUNCE_MS = 120;
 
-GlobalWorkerOptions.workerSrc = '/static/vendor/pdf.worker.mjs';
+GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
 
 const pdfRenderState = {
   generation: 0,
@@ -670,6 +669,8 @@ const pdfRenderState = {
   resizeObserver: null,
   resizeTimer: null,
   lastWidth: 0,
+  renderTasks: new Set(),
+  textLayers: new Set(),
 };
 
 export function getEls() {
@@ -690,9 +691,25 @@ function clearPdfResizeTimer() {
   }
 }
 
+function clearPdfRenderArtifacts() {
+  for (const task of pdfRenderState.renderTasks) {
+    if (task && typeof task.cancel === 'function') {
+      try { task.cancel(); } catch (_) {}
+    }
+  }
+  pdfRenderState.renderTasks.clear();
+  for (const layer of pdfRenderState.textLayers) {
+    if (layer && typeof layer.cancel === 'function') {
+      try { layer.cancel(); } catch (_) {}
+    }
+  }
+  pdfRenderState.textLayers.clear();
+}
+
 function cancelPdfRender({ destroyDocument = false } = {}) {
   pdfRenderState.generation += 1;
   clearPdfResizeTimer();
+  clearPdfRenderArtifacts();
   if (pdfRenderState.loadingTask && typeof pdfRenderState.loadingTask.destroy === 'function') {
     try {
       void pdfRenderState.loadingTask.destroy();
@@ -1045,6 +1062,37 @@ function renderPdfFallback(host, pdfURL, message) {
   host.appendChild(fallback);
 }
 
+function isPdfCancellationError(err) {
+  if (!err) return false;
+  const name = String(err.name || '');
+  if (name === 'AbortException' || name === 'RenderingCancelledException') return true;
+  const message = String(err.message || '').toLowerCase();
+  return message.includes('cancel');
+}
+
+function createPdfLinkService() {
+  return {
+    externalLinkEnabled: true,
+    addLinkAttributes(link, url, newWindow = false) {
+      if (!(link instanceof HTMLAnchorElement)) return;
+      link.href = String(url || '');
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    },
+    getDestinationHash(dest) {
+      if (typeof dest === 'string') return `#${dest}`;
+      return '#';
+    },
+    getAnchorUrl(anchor) {
+      return String(anchor || '#');
+    },
+    goToDestination() {},
+    goToPage() {},
+    setHash() {},
+    executeNamedAction() {},
+  };
+}
+
 async function loadPdfDocument(pdfKey, pdfURL, token, reuseDocument) {
   if (reuseDocument && pdfRenderState.doc && pdfRenderState.key === pdfKey) {
     return pdfRenderState.doc;
@@ -1063,7 +1111,13 @@ async function loadPdfDocument(pdfKey, pdfURL, token, reuseDocument) {
   }
 
   pdfRenderState.key = pdfKey;
-  const loadingTask = getDocument({ url: pdfURL, withCredentials: true });
+  const loadingTask = getDocument({
+    url: pdfURL,
+    withCredentials: true,
+    standardFontDataUrl: PDFJS_STANDARD_FONTS_URL,
+    useSystemFonts: true,
+    isEvalSupported: false,
+  });
   pdfRenderState.loadingTask = loadingTask;
 
   const doc = await loadingTask.promise;
@@ -1087,6 +1141,8 @@ async function renderPdfPages(pdfDoc, pagesHost, statusNode, token) {
   const pageCount = Number(pdfDoc.numPages || 0);
   if (pageCount < 1) return;
 
+  clearPdfRenderArtifacts();
+  pagesHost.innerHTML = '';
   statusNode.textContent = 'Preparing PDF...';
   const firstPage = await pdfDoc.getPage(1);
   if (token !== pdfRenderState.generation) return;
@@ -1096,36 +1152,110 @@ async function renderPdfPages(pdfDoc, pagesHost, statusNode, token) {
   const scale = Math.max(0.2, Math.min(PDF_MAX_RENDER_SCALE, targetWidth / Math.max(1, baseViewport.width)));
 
   const outputScale = Math.min(2, window.devicePixelRatio || 1);
+  const linkService = createPdfLinkService();
   for (let pageIndex = 1; pageIndex <= pageCount; pageIndex += 1) {
     if (token !== pdfRenderState.generation) return;
     statusNode.textContent = `Rendering page ${pageIndex} / ${pageCount}...`;
     const page = pageIndex === 1 ? firstPage : await pdfDoc.getPage(pageIndex);
     const viewport = page.getViewport({ scale });
+    const renderViewport = page.getViewport({ scale: scale * outputScale });
     const pageNode = document.createElement('section');
     pageNode.className = 'canvas-pdf-page';
     pageNode.dataset.page = String(pageIndex);
+
+    const pageInner = document.createElement('div');
+    pageInner.className = 'canvas-pdf-page-inner';
+    pageInner.style.width = `${Math.floor(viewport.width)}px`;
+    pageInner.style.height = `${Math.floor(viewport.height)}px`;
+
     const canvas = document.createElement('canvas');
     canvas.className = 'canvas-pdf-canvas';
-    canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
-    canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+    canvas.width = Math.max(1, Math.floor(renderViewport.width));
+    canvas.height = Math.max(1, Math.floor(renderViewport.height));
     canvas.style.width = `${Math.floor(viewport.width)}px`;
     canvas.style.height = `${Math.floor(viewport.height)}px`;
-    pageNode.appendChild(canvas);
+    pageInner.appendChild(canvas);
+
+    const textLayerNode = document.createElement('div');
+    textLayerNode.className = 'textLayer canvas-pdf-text-layer';
+    textLayerNode.style.setProperty('--scale-factor', `${viewport.scale}`);
+    pageInner.appendChild(textLayerNode);
+
+    const annotationLayerNode = document.createElement('div');
+    annotationLayerNode.className = 'annotationLayer canvas-pdf-annotation-layer';
+    annotationLayerNode.style.setProperty('--scale-factor', `${viewport.scale}`);
+    pageInner.appendChild(annotationLayerNode);
+
+    pageNode.appendChild(pageInner);
     pagesHost.appendChild(pageNode);
 
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) continue;
     const renderTask = page.render({
       canvasContext: context,
-      viewport,
-      transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
+      viewport: renderViewport,
+      annotationMode: 0,
     });
-    await renderTask.promise;
+    pdfRenderState.renderTasks.add(renderTask);
+    try {
+      await renderTask.promise;
+    } catch (err) {
+      if (!isPdfCancellationError(err)) throw err;
+      return;
+    } finally {
+      pdfRenderState.renderTasks.delete(renderTask);
+    }
+    if (token !== pdfRenderState.generation) return;
+
+    const textContent = await page.getTextContent({ includeMarkedContent: true });
+    if (token !== pdfRenderState.generation) return;
+    const textLayer = new TextLayer({
+      textContentSource: textContent,
+      container: textLayerNode,
+      viewport,
+    });
+    pdfRenderState.textLayers.add(textLayer);
+    try {
+      await textLayer.render();
+    } catch (err) {
+      if (!isPdfCancellationError(err)) throw err;
+      return;
+    } finally {
+      pdfRenderState.textLayers.delete(textLayer);
+    }
+    if (token !== pdfRenderState.generation) return;
+
+    const annotations = await page.getAnnotations({ intent: 'display' });
+    if (Array.isArray(annotations) && annotations.length > 0) {
+      const annotationLayer = new AnnotationLayer({
+        div: annotationLayerNode,
+        accessibilityManager: null,
+        annotationCanvasMap: null,
+        annotationEditorUIManager: null,
+        page,
+        viewport: viewport.clone({ dontFlip: true }),
+        structTreeLayer: null,
+      });
+      await annotationLayer.render({
+        annotations,
+        div: annotationLayerNode,
+        page,
+        viewport: viewport.clone({ dontFlip: true }),
+        linkService,
+        annotationStorage: pdfDoc.annotationStorage,
+        renderForms: true,
+        enableScripting: false,
+      });
+    } else {
+      annotationLayerNode.hidden = true;
+    }
+    if (token !== pdfRenderState.generation) return;
+
     if (typeof page.cleanup === 'function') {
       page.cleanup();
     }
   }
-  statusNode.remove();
+  statusNode.classList.add('is-hidden');
 }
 
 async function renderPdfSurface(event, options = {}) {
@@ -1140,6 +1270,7 @@ async function renderPdfSurface(event, options = {}) {
   const token = pdfRenderState.generation + 1;
   pdfRenderState.generation = token;
   clearPdfResizeTimer();
+  clearPdfRenderArtifacts();
   e.pdf.innerHTML = '';
 
   const surface = document.createElement('div');
@@ -1161,6 +1292,7 @@ async function renderPdfSurface(event, options = {}) {
     await renderPdfPages(pdfDoc, pagesHost, status, token);
   } catch (err) {
     if (token !== pdfRenderState.generation) return;
+    if (isPdfCancellationError(err)) return;
     console.warn('PDF render failed:', err);
     renderPdfFallback(e.pdf, url, 'PDF preview unavailable.');
   }

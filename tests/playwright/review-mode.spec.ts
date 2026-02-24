@@ -69,19 +69,14 @@ test('switching artifacts clears text pane content and classes', async ({ page }
   expect(textClasses).not.toContain('is-active');
 });
 
-test('pdf artifacts render without iframe using object surface', async ({ page }) => {
+test('pdf artifacts render in custom canvas viewer without native embed/object chrome', async ({ page }) => {
   await renderArtifact(page, pdfEvent('evt-pdf-render', 'docs/reports/missing.pdf'));
 
   await expect(page.locator('#canvas-pdf iframe')).toHaveCount(0);
-  await expect(page.locator('#canvas-pdf .canvas-pdf-object')).toHaveCount(1);
-  await expect(page.locator('#canvas-pdf .canvas-pdf-hit-layer')).toHaveCount(1);
+  await expect(page.locator('#canvas-pdf object')).toHaveCount(0);
+  await expect(page.locator('#canvas-pdf embed')).toHaveCount(0);
+  await expect(page.locator('#canvas-pdf .canvas-pdf-pages')).toHaveCount(1);
   await expect(page.locator('#canvas-pdf .canvas-pdf-fallback a')).toHaveCount(1);
-
-  const dataAttr = await page.locator('#canvas-pdf .canvas-pdf-object').evaluate((el) => {
-    return (el as HTMLObjectElement).data || '';
-  });
-  expect(dataAttr).toContain('/api/files/');
-  expect(dataAttr).toContain('docs%2Freports%2Fmissing.pdf');
 
   const fallbackHref = await page.locator('#canvas-pdf .canvas-pdf-fallback a').evaluate((el) => {
     return (el as HTMLAnchorElement).href || '';
