@@ -372,13 +372,16 @@ function applyIPhoneStandaloneCueHints() {
   const body = document.body;
   const root = document.documentElement;
   if (!body || !root) return;
-  const isStandaloneLike = isHomeScreenStandaloneLike() && isIPhone();
+  const isIPhoneDevice = isIPhone();
+  const isStandaloneLike = isHomeScreenStandaloneLike() && isIPhoneDevice;
+  const roundedRadius = iPhoneRoundedCornerRadiusPx();
+  const radius = Number.isFinite(roundedRadius) && roundedRadius > 0 ? roundedRadius : 44;
   body.classList.toggle('ios-cue-fullscreen', isStandaloneLike);
-  if (isStandaloneLike) {
-    const radius = iPhoneRoundedCornerRadiusPx();
-    if (Number.isFinite(radius) && radius > 0) {
-      root.style.setProperty('--zen-cue-corner-radius', `${radius}px`);
-    }
+  if (isIPhoneDevice) {
+    const cornerRadius = isStandaloneLike
+      ? `${radius}px ${radius}px ${radius}px ${radius}px`
+      : `0 0 ${radius}px ${radius}px`;
+    root.style.setProperty('--zen-cue-corner-radius', cornerRadius);
     return;
   }
   root.style.removeProperty('--zen-cue-corner-radius');
