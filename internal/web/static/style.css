@@ -238,15 +238,22 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   --cue-frame-color: #000000;
   --cue-chip-border-color: #000000;
   --cue-chip-size: 22px;
-  --cue-frame-border: 4px;
+  --cue-frame-border: 5px;
+  --cue-safe-top: env(safe-area-inset-top, 0px);
+  --cue-safe-right: env(safe-area-inset-right, 0px);
+  --cue-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --cue-safe-left: env(safe-area-inset-left, 0px);
   display: block;
   position: fixed;
   inset: 0;
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
   pointer-events: none;
-  z-index: 360;
+  z-index: 1000;
   border: 0;
   box-shadow: none;
   background: transparent;
@@ -254,6 +261,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   transform: none;
   max-width: none;
   max-height: none;
+  transition: none;
+  animation: none;
 }
 
 .zen-indicator.is-recording::before,
@@ -261,12 +270,16 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   content: '';
   position: fixed;
   inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   box-sizing: border-box;
   border-radius: 0;
   border: var(--cue-frame-border) solid var(--cue-frame-color);
   box-shadow: none;
   background: transparent;
+  transition: none;
+  animation: none;
 }
 
 .zen-indicator.is-recording {
@@ -288,13 +301,15 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   width: var(--cue-chip-size);
   height: var(--cue-chip-size);
   border-radius: 0;
-  border: 2px solid var(--cue-chip-border-color);
-  background: #ffffff;
+  border: 2px solid #ffffff;
+  background: var(--cue-chip-border-color);
   box-shadow: none;
   user-select: none;
   -webkit-user-select: none;
   pointer-events: auto;
   touch-action: manipulation;
+  transition: none;
+  animation: none;
 }
 
 .zen-indicator.is-recording .zen-record-dot {
@@ -308,16 +323,28 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 @media (display-mode: standalone), (display-mode: fullscreen) {
+  .zen-indicator.is-recording,
+  .zen-indicator.is-stop {
+    left: calc(-1 * var(--cue-safe-left));
+    right: calc(-1 * var(--cue-safe-right));
+    top: calc(-1 * var(--cue-safe-top));
+    bottom: calc(-1 * var(--cue-safe-bottom));
+  }
   .zen-indicator.is-recording::before,
   .zen-indicator.is-stop::before {
-    inset: 0;
+    left: calc(-1 * var(--cue-safe-left));
+    right: calc(-1 * var(--cue-safe-right));
+    top: calc(-1 * var(--cue-safe-top));
+    bottom: calc(-1 * var(--cue-safe-bottom));
+    width: calc(100% + var(--cue-safe-left) + var(--cue-safe-right));
+    height: calc(100% + var(--cue-safe-top) + var(--cue-safe-bottom));
   }
 }
 
 @media (max-width: 767px) {
   .zen-indicator.is-recording::before,
   .zen-indicator.is-stop::before {
-    border-width: 4px;
+    border-width: 6px;
   }
 
   .zen-indicator .zen-record-dot,
@@ -731,7 +758,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 body.silent-mode .edge-left-tap { z-index: 250; }
 body.silent-mode .edge-top { z-index: 250; }
-body.silent-mode .zen-indicator { z-index: 360; }
+body.silent-mode .zen-indicator { z-index: 1000; }
 
 /* Chat pane input */
 .chat-pane-input-row {

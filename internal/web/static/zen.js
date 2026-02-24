@@ -132,7 +132,7 @@ export function showIndicatorMode(mode, x, y) {
   el.style.display = '';
   // Always reset geometry so stale inline styles can't shrink/offset the cue.
   el.style.position = 'fixed';
-  el.style.inset = '0';
+  el.style.inset = '';
   el.style.width = '';
   el.style.height = '';
   el.style.left = '';
