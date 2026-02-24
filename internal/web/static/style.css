@@ -235,11 +235,18 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .zen-indicator.is-recording,
 .zen-indicator.is-stop {
+  --cue-frame-color: #000000;
+  --cue-chip-border-color: #000000;
+  --cue-chip-size: 22px;
+  --cue-frame-border: 4px;
   display: block;
   position: fixed;
   inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
   pointer-events: none;
-  z-index: 240;
+  z-index: 360;
   border: 0;
   box-shadow: none;
   background: transparent;
@@ -252,39 +259,24 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .zen-indicator.is-recording::before,
 .zen-indicator.is-stop::before {
   content: '';
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
   box-sizing: border-box;
-  border: 4px solid var(--cue-color);
-  box-shadow:
-    inset 0 0 0 1px var(--cue-inner-color),
-    inset 0 0 0 10px var(--cue-fill-color);
-  background: linear-gradient(to bottom, var(--cue-top-color) 0%, var(--cue-mid-color) 22%, transparent 36%);
+  border-radius: 0;
+  border: var(--cue-frame-border) solid var(--cue-frame-color);
+  box-shadow: none;
+  background: transparent;
 }
 
 .zen-indicator.is-recording {
-  --cue-color: #d92d20;
-  --cue-inner-color: rgba(217, 45, 32, 0.45);
-  --cue-fill-color: rgba(217, 45, 32, 0.14);
-  --cue-top-color: rgba(217, 45, 32, 0.2);
-  --cue-mid-color: rgba(217, 45, 32, 0.07);
-  --cue-chip-bg: rgba(255, 255, 255, 0.95);
-  --cue-chip-text: #8f1d15;
-  --cue-chip-border: rgba(217, 45, 32, 0.85);
-  --cue-chip-shadow: rgba(217, 45, 32, 0.3);
+  --cue-frame-color: #d92d20;
+  --cue-chip-border-color: #d92d20;
 }
 
 .zen-indicator.is-stop {
-  --cue-color: #0066cc;
-  --cue-inner-color: rgba(0, 102, 204, 0.44);
-  --cue-fill-color: rgba(0, 102, 204, 0.14);
-  --cue-top-color: rgba(0, 102, 204, 0.2);
-  --cue-mid-color: rgba(0, 102, 204, 0.07);
-  --cue-chip-bg: rgba(255, 255, 255, 0.95);
-  --cue-chip-text: #003d80;
-  --cue-chip-border: rgba(0, 102, 204, 0.85);
-  --cue-chip-shadow: rgba(0, 102, 204, 0.3);
+  --cue-frame-color: #0066cc;
+  --cue-chip-border-color: #0066cc;
 }
 
 .zen-indicator .zen-record-dot,
@@ -293,57 +285,45 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
-  min-width: 90px;
-  height: 38px;
-  padding: 0 0.75rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  border: 2px solid var(--cue-chip-border);
-  background: var(--cue-chip-bg);
-  color: var(--cue-chip-text);
-  box-shadow: 0 4px 14px var(--cue-chip-shadow);
-  font-size: 0.73rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  width: var(--cue-chip-size);
+  height: var(--cue-chip-size);
+  border-radius: 0;
+  border: 2px solid var(--cue-chip-border-color);
+  background: #ffffff;
+  box-shadow: none;
   user-select: none;
   -webkit-user-select: none;
   pointer-events: auto;
   touch-action: manipulation;
-  cursor: pointer;
 }
 
 .zen-indicator.is-recording .zen-record-dot {
   display: inline-flex;
+  border-radius: 50%;
+  background: #d92d20;
 }
 
 .zen-indicator.is-stop .zen-stop-square {
   display: inline-flex;
 }
 
-.zen-indicator.is-recording .zen-record-dot::before {
-  content: 'stop rec';
-}
-
-.zen-indicator.is-stop .zen-stop-square::before {
-  content: 'stop';
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .zen-indicator.is-recording::before,
+  .zen-indicator.is-stop::before {
+    inset: 0;
+  }
 }
 
 @media (max-width: 767px) {
   .zen-indicator.is-recording::before,
   .zen-indicator.is-stop::before {
-    border-width: 6px;
-    box-shadow:
-      inset 0 0 0 3px var(--cue-inner-color),
-      inset 0 0 0 18px var(--cue-fill-color);
+    border-width: 4px;
   }
 
   .zen-indicator .zen-record-dot,
   .zen-indicator .zen-stop-square {
-    min-width: 100px;
-    height: 42px;
-    font-size: 0.79rem;
+    width: 24px;
+    height: 24px;
     top: max(10px, env(safe-area-inset-top));
     right: max(10px, env(safe-area-inset-right));
   }
@@ -751,7 +731,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 body.silent-mode .edge-left-tap { z-index: 250; }
 body.silent-mode .edge-top { z-index: 250; }
-body.silent-mode .zen-indicator { z-index: 320; }
+body.silent-mode .zen-indicator { z-index: 360; }
 
 /* Chat pane input */
 .chat-pane-input-row {
