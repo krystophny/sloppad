@@ -327,8 +327,20 @@ function canSpeakTTS() {
   return Boolean(ttsEnabled) && !Boolean(state.ttsSilent);
 }
 
+function isMobileViewport() {
+  return window.matchMedia('(max-width: 767px)').matches;
+}
+
 function isMobileSilent() {
-  return state.ttsSilent && window.matchMedia('(max-width: 767px)').matches;
+  return state.ttsSilent && isMobileViewport();
+}
+
+function isMobileChatMode() {
+  return isMobileViewport() && state.chatMode === 'chat';
+}
+
+function shouldQueueAssistantRow() {
+  return isVoiceTurn() || isMobileSilent() || isMobileChatMode();
 }
 
 function setTTSSilentMode(silent, { persist = true } = {}) {
@@ -1849,11 +1861,11 @@ function handleChatEvent(payload) {
     trackAssistantTurnStarted(turnID);
     state.voiceAwaitingTurn = false;
     state.indicatorSuppressedByCanvasUpdate = false;
-    if (turnIsVoice) {
-      ensurePendingForTurn(turnID);
-    } else if (isMobileSilent()) {
-      const edgeRight = document.getElementById('edge-right');
-      if (edgeRight) edgeRight.classList.add('edge-pinned');
+    if (shouldQueueAssistantRow()) {
+      if (isMobileViewport()) {
+        const edgeRight = document.getElementById('edge-right');
+        if (edgeRight) edgeRight.classList.add('edge-pinned');
+      }
       ensurePendingForTurn(turnID);
     }
     state.zenCanvasActionThisTurn = false;
@@ -1878,14 +1890,7 @@ function handleChatEvent(payload) {
     const md = String(payload.message || '');
     const autoCanvas = Boolean(payload.auto_canvas);
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
-    if (isVoiceTurn()) {
-      const row = ensurePendingForTurn(turnID);
-      if (String(md || '').trim()) {
-        updateAssistantRow(row, md, true);
-      } else if (!renderOnCanvas) {
-        updateAssistantRow(row, '_Thinking..._', true);
-      }
-    } else if (isMobileSilent()) {
+    if (isVoiceTurn() || isMobileChatMode()) {
       const row = ensurePendingForTurn(turnID);
       if (String(md || '').trim()) {
         updateAssistantRow(row, md, true);
@@ -1923,7 +1928,8 @@ function handleChatEvent(payload) {
     const displayMd = md || (ttsLastSpeakText ? `_${ttsLastSpeakText}_` : '');
     const hasDisplayMd = Boolean(String(displayMd || '').trim());
     const mobileSilent = isMobileSilent();
-    if (isVoiceTurn() || mobileSilent) {
+    const mobileChatMode = isMobileChatMode();
+    if (isVoiceTurn() || mobileSilent || mobileChatMode) {
       const row = takePendingRow(turnID);
       if (row && hasDisplayMd) {
         updateAssistantRow(row, displayMd, false);
@@ -1959,6 +1965,15 @@ function handleChatEvent(payload) {
         if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
       }
       hideOverlay();
+      state.zenCanvasActionThisTurn = false;
+      return;
+    }
+    if (mobileChatMode) {
+      hideOverlay();
+      if (!isAssistantWorking()) {
+        const edgeRight = document.getElementById('edge-right');
+        if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
+      }
       state.zenCanvasActionThisTurn = false;
       return;
     }
@@ -2116,7 +2131,7 @@ async function zenSubmitMessage(text) {
   updateAssistantActivityIndicator();
   appendPlainMessage('user', finalText);
 
-  if (!finalText.startsWith('/') && (isVoiceTurn() || isMobileSilent())) {
+  if (!finalText.startsWith('/') && shouldQueueAssistantRow()) {
     const pending = appendRenderedAssistant('_Thinking..._', { pending: true, localId: nextLocalMessageId() });
     state.pendingQueue.push(pending);
     updateAssistantActivityIndicator();
