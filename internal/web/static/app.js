@@ -54,6 +54,8 @@ const state = {
   zenCanvasActionThisTurn: false,
   turnFirstResponseShown: false,
   lastInputOrigin: 'text',
+  pendingSubmitController: null,
+  pendingSubmitKind: '',
 };
 
 export function getState() {
@@ -1240,7 +1242,7 @@ async function stopZenVoiceCaptureAndSend() {
       throw new Error('speech recognizer returned empty text');
     }
     showStatus('sending...');
-    void zenSubmitMessage(transcript);
+    void zenSubmitMessage(transcript, { kind: 'voice_transcript' });
   } catch (err) {
     state.voiceAwaitingTurn = false;
     updateAssistantActivityIndicator();
@@ -1263,6 +1265,7 @@ function cancelChatVoiceCapture() {
   if (!capture) return;
   setRecording(false);
   state.voiceAwaitingTurn = false;
+  abortPendingSubmit('voice_transcript');
   sttCancel();
   stopChatVoiceMedia(capture);
   state.chatVoiceCapture = null;
@@ -2275,9 +2278,36 @@ async function switchProject(projectID) {
   }
 }
 
-async function zenSubmitMessage(text) {
+function setPendingSubmit(controller, kind = '') {
+  state.pendingSubmitController = controller || null;
+  state.pendingSubmitKind = String(kind || '').trim();
+}
+
+function clearPendingSubmit(controller = null) {
+  if (controller && state.pendingSubmitController !== controller) return;
+  state.pendingSubmitController = null;
+  state.pendingSubmitKind = '';
+}
+
+function abortPendingSubmit(kind = '') {
+  const controller = state.pendingSubmitController;
+  if (!controller) return false;
+  const requiredKind = String(kind || '').trim();
+  if (requiredKind && state.pendingSubmitKind !== requiredKind) return false;
+  clearPendingSubmit(controller);
+  try { controller.abort(); } catch (_) {}
+  return true;
+}
+
+async function zenSubmitMessage(text, options = {}) {
   const trimmed = String(text || '').trim();
   if (!trimmed || !state.chatSessionId) return;
+  const submitKind = String(options?.kind || '').trim();
+  let submitController = null;
+  if (submitKind) {
+    submitController = new AbortController();
+    setPendingSubmit(submitController, submitKind);
+  }
   state.indicatorSuppressedByCanvasUpdate = false;
   // Interrupt TTS playback when sending a new message
   if (ttsPlayer) { ttsPlayer.stop(); ttsPlayer = null; }
@@ -2309,6 +2339,7 @@ async function zenSubmitMessage(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: submitController ? submitController.signal : undefined,
     });
     if (!resp.ok) {
       state.voiceAwaitingTurn = false;
@@ -2326,6 +2357,15 @@ async function zenSubmitMessage(text) {
       appendPlainMessage('system', String(payload.result.message));
     }
   } catch (err) {
+    if (err && (err.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted'))) {
+      state.voiceAwaitingTurn = false;
+      const pending = takePendingRow('');
+      pending?.remove();
+      trackAssistantTurnFinished('');
+      showStatus('stopped');
+      updateAssistantActivityIndicator();
+      return;
+    }
     state.voiceAwaitingTurn = false;
     const pending = takePendingRow('');
     pending?.remove();
@@ -2333,6 +2373,8 @@ async function zenSubmitMessage(text) {
     appendPlainMessage('system', `Send failed: ${String(err?.message || err)}`);
     updateOverlay(`**Send failed:** ${String(err?.message || err)}`);
     updateAssistantActivityIndicator();
+  } finally {
+    clearPendingSubmit(submitController);
   }
 }
 
@@ -2407,15 +2449,18 @@ async function handleZenStopAction() {
     stopTTSPlayback();
   }
 
-  const canceled = await cancelActiveAssistantTurnWithRetry(3);
-  if (canceled) return;
-
-  if (state.voiceAwaitingTurn) {
+  const hadVoiceAwaitingTurn = state.voiceAwaitingTurn;
+  if (hadVoiceAwaitingTurn) {
+    abortPendingSubmit('voice_transcript');
     state.voiceAwaitingTurn = false;
     sttCancel();
     updateAssistantActivityIndicator();
-    return;
   }
+
+  const canceled = await cancelActiveAssistantTurnWithRetry(3);
+  if (canceled) return;
+
+  if (hadVoiceAwaitingTurn) return;
 
   if (capture) {
     sttCancel();

@@ -29,6 +29,17 @@ async function injectChatEvent(page: Page, payload: Record<string, unknown>) {
 }
 
 async function tapElement(page: Page, selector: string) {
+  const box = await page.locator(selector).first().boundingBox();
+  if (box) {
+    const x = Math.round(box.x + box.width / 2);
+    const y = Math.round(box.y + box.height / 2);
+    try {
+      await page.touchscreen.tap(x, y);
+      return;
+    } catch (_) {
+      // Fall back to synthetic touch dispatch below.
+    }
+  }
   await page.evaluate((sel) => {
     const target = document.querySelector(sel);
     if (!target) return;
@@ -51,6 +62,27 @@ async function tapElement(page: Page, selector: string) {
     target.dispatchEvent(new TouchEvent('touchstart', { touches: [touch], changedTouches: [touch], bubbles: true }));
     target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch], bubbles: true, cancelable: true }));
   }, selector);
+}
+
+async function setHarnessCancelResponses(page: Page, responses: Array<Record<string, unknown>>) {
+  await page.evaluate((entries) => {
+    const setter = (window as any).__setCancelResponses;
+    if (typeof setter === 'function') setter(entries);
+  }, responses);
+}
+
+async function setHarnessActivityResponse(page: Page, response: Record<string, unknown>) {
+  await page.evaluate((payload) => {
+    const setter = (window as any).__setActivityResponse;
+    if (typeof setter === 'function') setter(payload);
+  }, response);
+}
+
+async function setHarnessMessagePostDelay(page: Page, delayMs: number) {
+  await page.evaluate((ms) => {
+    const setter = (window as any).__setMessagePostDelay;
+    if (typeof setter === 'function') setter(ms);
+  }, delayMs);
 }
 
 async function waitForApiCancel(page: Page) {
@@ -112,6 +144,9 @@ test.beforeEach(async ({ page }) => {
     return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
   }, null, { timeout: 5_000 });
   await page.waitForTimeout(200);
+  await setHarnessCancelResponses(page, []);
+  await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
+  await setHarnessMessagePostDelay(page, 0);
 });
 
 test('click on canvas starts voice recording', async ({ page }) => {
@@ -147,6 +182,7 @@ test('touch stop indicator routes through shared cancel endpoint', async ({ page
     content: 'delegate work',
   });
   await page.waitForTimeout(100);
+  await expect(page.locator('#chat-history .chat-message.chat-assistant.is-pending')).toHaveCount(1);
 
   const playIcon = page.locator('.zen-play-icon');
   await expect(playIcon).toBeVisible();
@@ -161,6 +197,48 @@ test('touch stop indicator routes through shared cancel endpoint', async ({ page
   expect(typeof cancelEntry!.payload?.canceled).toBe('number');
   expect(Number(cancelEntry!.payload?.canceled)).toBeGreaterThan(0);
   expect(Number(cancelEntry!.payload?.delegate_canceled)).toBeGreaterThan(0);
+
+  await injectChatEvent(page, { type: 'turn_cancelled', turn_id: 'stop-turn-test' });
+  await page.waitForTimeout(100);
+  await expect(page.locator('#chat-history .chat-message.chat-assistant.is-pending')).toHaveCount(0);
+  await expect(page.locator('#chat-history .chat-message.chat-assistant .chat-bubble').first()).toContainText('Stopped');
+});
+
+test('touch stop retries cancel when first cancel reports zero but work remains', async ({ page }) => {
+  await clearLog(page);
+  await setHarnessActivityResponse(page, { active_turns: 1, queued_turns: 0, delegate_active: 0 });
+  await setHarnessCancelResponses(page, [
+    { ok: true, canceled: 0, active_canceled: 0, queued_canceled: 0, delegate_canceled: 0 },
+    { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1, delegate_canceled: 0 },
+  ]);
+
+  await injectChatEvent(page, { type: 'turn_started', turn_id: 'stop-retry-turn' });
+  await page.waitForTimeout(100);
+  await tapElement(page, '.zen-play-icon');
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.filter((entry) => entry.type === 'api_fetch' && entry.action === 'cancel').length;
+  }, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+});
+
+test('touch stop while sending transcript aborts pending message submit', async ({ page }) => {
+  await clearLog(page);
+  await setHarnessMessagePostDelay(page, 1200);
+
+  await page.mouse.click(400, 400);
+  await waitForLogEntry(page, 'recorder', 'start');
+  await page.mouse.click(400, 400);
+  await waitForSTTAction(page, 'stop');
+  await expect(page.locator('#zen-status')).toContainText('sending');
+
+  await tapElement(page, '.zen-play-icon');
+  await waitForApiCancel(page);
+  await page.waitForTimeout(1400);
+
+  const log = await getLog(page);
+  expect(log.some((entry) => entry.type === 'message_sent')).toBe(false);
+  await expect(page.locator('#chat-history .chat-message.chat-assistant.is-pending')).toHaveCount(0);
 });
 
 test('mouse hold push-to-talk starts on hold and stops on release', async ({ page }) => {
