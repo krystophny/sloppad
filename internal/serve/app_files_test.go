@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -37,5 +38,27 @@ func TestHandleFilesRejectsEncodedTraversal(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", rr.Code)
+	}
+}
+
+func TestHandleFilesResolvesProjectAbsolutePathPrefix(t *testing.T) {
+	tmp := t.TempDir()
+	docDir := filepath.Join(tmp, ".tabura", "artifacts", "pdf-smoke")
+	if err := os.MkdirAll(docDir, 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	target := filepath.Join(docDir, "pandoc-smoke.pdf")
+	if err := os.WriteFile(target, []byte("%PDF-1.4\n%test\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	app := NewApp(tmp)
+	absLike := strings.TrimPrefix(filepath.ToSlash(target), "/")
+	req := httptest.NewRequest(http.MethodGet, "/files/"+absLike, nil)
+	rr := httptest.NewRecorder()
+	app.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }

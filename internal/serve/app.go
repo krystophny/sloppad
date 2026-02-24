@@ -178,13 +178,18 @@ func (a *App) handleFiles(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path encoding", http.StatusBadRequest)
 		return
 	}
-	raw = strings.TrimPrefix(raw, "/")
+	raw = filepath.ToSlash(strings.TrimPrefix(raw, "/"))
+	cleanProjectDir := filepath.Clean(a.ProjectDir)
+	projectPrefix := strings.TrimPrefix(filepath.ToSlash(cleanProjectDir), "/")
+	if strings.HasPrefix(raw, projectPrefix+"/") {
+		raw = strings.TrimPrefix(raw, projectPrefix+"/")
+	}
 	if raw == "" {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
-	full := filepath.Clean(filepath.Join(a.ProjectDir, raw))
-	if !strings.HasPrefix(full, filepath.Clean(a.ProjectDir)+string(os.PathSeparator)) {
+	full := filepath.Clean(filepath.Join(cleanProjectDir, filepath.FromSlash(raw)))
+	if !strings.HasPrefix(full, cleanProjectDir+string(os.PathSeparator)) {
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
