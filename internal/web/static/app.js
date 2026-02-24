@@ -2778,24 +2778,47 @@ function initEdgePanels() {
     const inputRow = document.querySelector('.chat-pane-input-row');
     if (inputRow) {
       const root = document.documentElement;
-      let baselineHeight = Math.max(
-        window.innerHeight,
-        window.visualViewport.height + window.visualViewport.offsetTop,
-      );
+      const isTextInputFocused = () => {
+        const el = document.activeElement;
+        if (!el) return false;
+        if (el instanceof HTMLTextAreaElement) return true;
+        if (el instanceof HTMLInputElement) {
+          const type = String(el.type || 'text').toLowerCase();
+          return ![
+            'button', 'checkbox', 'color', 'file', 'hidden',
+            'image', 'radio', 'range', 'reset', 'submit',
+          ].includes(type);
+        }
+        return el instanceof HTMLElement && el.isContentEditable;
+      };
+
+      const setKeyboardOpen = (keyboardOpen) => {
+        inputRow.classList.toggle('keyboard-open', keyboardOpen);
+        document.body.classList.toggle('keyboard-open', keyboardOpen);
+        if (!isIPhoneStandalone()) return;
+        if (keyboardOpen) {
+          root.style.setProperty('--zen-cue-corner-radius', '0 0 0 0');
+        } else {
+          applyIPhoneFrameCorners();
+        }
+      };
+
+      let baselineHeight = Math.max(window.innerHeight, window.visualViewport.height);
       const syncKeyboardState = () => {
         const vv = window.visualViewport;
         if (!vv) return;
-        const viewportHeight = vv.height + vv.offsetTop;
+        const viewportHeight = vv.height;
+        const focused = isTextInputFocused();
+        if (!focused) {
+          baselineHeight = Math.max(window.innerHeight, viewportHeight);
+          setKeyboardOpen(false);
+          return;
+        }
         if (viewportHeight > baselineHeight) baselineHeight = viewportHeight;
         const keyboardOpen = viewportHeight < baselineHeight - 100;
-        inputRow.classList.toggle('keyboard-open', keyboardOpen);
-        document.body.classList.toggle('keyboard-open', keyboardOpen);
-        if (isIPhoneStandalone()) {
-          if (keyboardOpen) {
-            root.style.setProperty('--zen-cue-corner-radius', '0 0 0 0');
-          } else {
-            applyIPhoneFrameCorners();
-          }
+        setKeyboardOpen(keyboardOpen);
+        if (!keyboardOpen) {
+          baselineHeight = Math.max(window.innerHeight, viewportHeight);
         }
       };
 
@@ -2805,18 +2828,15 @@ function initEdgePanels() {
         baselineHeight = Math.max(
           window.innerHeight,
           window.visualViewport
-            ? (window.visualViewport.height + window.visualViewport.offsetTop)
+            ? window.visualViewport.height
             : window.innerHeight,
         );
         window.setTimeout(syncKeyboardState, 80);
       });
-      const chatPaneInput = document.getElementById('chat-pane-input');
-      if (chatPaneInput) {
-        chatPaneInput.addEventListener('focus', syncKeyboardState);
-        chatPaneInput.addEventListener('blur', () => {
-          window.setTimeout(syncKeyboardState, 80);
-        });
-      }
+      document.addEventListener('focusin', syncKeyboardState, true);
+      document.addEventListener('focusout', () => {
+        window.setTimeout(syncKeyboardState, 80);
+      }, true);
       syncKeyboardState();
     }
   }
