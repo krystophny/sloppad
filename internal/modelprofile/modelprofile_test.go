@@ -46,7 +46,7 @@ func TestAvailableReasoningEffortsByAlias(t *testing.T) {
 		t.Fatalf("expected efforts map")
 	}
 	for alias, expectation := range map[string][]string{
-		AliasSpark: {ReasoningLow, ReasoningMedium, ReasoningHigh},
+		AliasSpark: {ReasoningLow, ReasoningMedium, ReasoningHigh, ReasoningExtraHigh},
 		AliasCodex: {ReasoningLow, ReasoningMedium, ReasoningHigh, ReasoningExtraHigh},
 		AliasGPT:   {ReasoningLow, ReasoningMedium, ReasoningHigh, ReasoningExtraHigh},
 	} {

@@ -46,7 +46,7 @@ const state = {
   reasoningEffortsByAlias: {
     codex: ['low', 'medium', 'high', 'extra_high'],
     gpt: ['low', 'medium', 'high', 'extra_high'],
-    spark: ['low', 'medium', 'high'],
+    spark: ['low', 'medium', 'high', 'extra_high'],
   },
   contextUsed: 0,
   contextMax: 0,
@@ -109,7 +109,7 @@ const PROJECT_CHAT_MODEL_ALIASES = ['codex', 'gpt', 'spark'];
 const PROJECT_CHAT_MODEL_REASONING_EFFORTS = {
   codex: ['low', 'medium', 'high', 'extra_high'],
   gpt: ['low', 'medium', 'high', 'extra_high'],
-  spark: ['low', 'medium', 'high'],
+  spark: ['low', 'medium', 'high', 'extra_high'],
 };
 const TTS_SILENT_STORAGE_KEY = 'tabura.ttsSilent';
 
@@ -2198,6 +2198,20 @@ async function cancelActiveAssistantTurn(options = null) {
   return canceled > 0;
 }
 
+async function cancelActiveAssistantTurnWithRetry(maxAttempts = 3) {
+  const attempts = Number.isFinite(maxAttempts) ? Math.max(1, Math.floor(maxAttempts)) : 1;
+  for (let i = 0; i < attempts; i += 1) {
+    const canceled = await cancelActiveAssistantTurn({ force: true });
+    if (canceled) return true;
+    await refreshAssistantActivity();
+    if (!isAssistantWorking()) return false;
+    if (i + 1 < attempts) {
+      await new Promise((resolve) => window.setTimeout(resolve, 140));
+    }
+  }
+  return false;
+}
+
 async function handleZenStopAction() {
   const capture = state.chatVoiceCapture;
   const isCaptureActive = Boolean(capture && !capture.stopping);
@@ -2210,7 +2224,7 @@ async function handleZenStopAction() {
     stopTTSPlayback();
   }
 
-  const canceled = await cancelActiveAssistantTurn({ force: true });
+  const canceled = await cancelActiveAssistantTurnWithRetry(3);
   if (canceled) return;
 
   if (state.voiceAwaitingTurn) {
@@ -2450,6 +2464,9 @@ function bindUi() {
   const canvasText = document.getElementById('canvas-text');
   const canvasViewport = document.getElementById('canvas-viewport');
   const zenIndicator = document.getElementById('zen-indicator');
+  if (zenIndicator && zenIndicator.parentElement !== document.body) {
+    document.body.appendChild(zenIndicator);
+  }
   let lastMouseX = Math.floor(window.innerWidth / 2);
   let lastMouseY = Math.floor(window.innerHeight / 2);
   let hasLastMousePosition = false;
@@ -2494,27 +2511,37 @@ function bindUi() {
 
   if (zenIndicator) {
     let lastIndicatorTouchAt = 0;
-    const handleZenIndicatorTap = () => {
-      if (!(zenIndicator instanceof HTMLElement)) return;
-      if (!zenIndicator.classList.contains('is-stop') && !zenIndicator.classList.contains('is-recording')) return;
+    const isIndicatorArmed = () => zenIndicator.classList.contains('is-stop') || zenIndicator.classList.contains('is-recording');
+    const pointHitsIndicatorChip = (x, y) => {
+      const chips = zenIndicator.querySelectorAll('.zen-record-dot, .zen-stop-square');
+      for (const chip of chips) {
+        if (!(chip instanceof HTMLElement)) continue;
+        const style = window.getComputedStyle(chip);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        const rect = chip.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const handleZenIndicatorTap = (ev, x, y, isTouch = false) => {
+      if (!isIndicatorArmed()) return;
+      if (!pointHitsIndicatorChip(x, y)) return;
+      if (!isTouch && Date.now() - lastIndicatorTouchAt < 600) return;
+      if (isTouch) lastIndicatorTouchAt = Date.now();
+      ev.preventDefault();
+      ev.stopPropagation();
       void handleZenStopAction();
     };
-    zenIndicator.addEventListener('click', (ev) => {
-      if (!(ev.currentTarget instanceof HTMLElement)) return;
-      if (!ev.currentTarget.classList.contains('is-stop') && !ev.currentTarget.classList.contains('is-recording')) return;
-      if (Date.now() - lastIndicatorTouchAt < 600) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      handleZenIndicatorTap();
-    });
-    zenIndicator.addEventListener('touchend', (ev) => {
-      if (!(ev.currentTarget instanceof HTMLElement)) return;
-      if (!ev.currentTarget.classList.contains('is-stop') && !ev.currentTarget.classList.contains('is-recording')) return;
-      lastIndicatorTouchAt = Date.now();
-      ev.preventDefault();
-      ev.stopPropagation();
-      handleZenIndicatorTap();
-    }, { passive: false });
+    document.addEventListener('click', (ev) => {
+      handleZenIndicatorTap(ev, ev.clientX, ev.clientY, false);
+    }, true);
+    document.addEventListener('touchend', (ev) => {
+      const touch = ev.changedTouches && ev.changedTouches.length > 0 ? ev.changedTouches[0] : null;
+      if (!touch) return;
+      handleZenIndicatorTap(ev, touch.clientX, touch.clientY, true);
+    }, { passive: false, capture: true });
   }
 
   // Zen: Left-click/tap on canvas -> toggle voice recording
