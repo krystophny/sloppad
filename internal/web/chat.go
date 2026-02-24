@@ -1120,23 +1120,34 @@ func (a *App) finalizeAssistantResponse(
 	outputMode = normalizeTurnOutputMode(outputMode)
 	canvasSessionID := a.resolveCanvasSessionID(projectKey)
 	fileBlocks := make([]fileBlock, 0)
-	if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
-		fileBlocks = append(fileBlocks, fBlocks...)
-		text = cleaned
-	}
-	autoCanvas := assistantNeedsAutoCanvas(text)
-	if !isVoiceOutputMode(outputMode) {
-		autoCanvas = true
-	}
-	if autoCanvas && len(fileBlocks) == 0 && canvasSessionID != "" {
-		longForm := assistantCompanionText(text)
-		if longForm != "" {
-			autoCanvas = a.writeCanvasFileBlock(projectKey, canvasSessionID, fileBlock{
-				Path:    "",
-				Content: longForm,
-			})
-		} else {
-			autoCanvas = false
+	autoCanvas := false
+	if isVoiceOutputMode(outputMode) {
+		if fBlocks, cleaned := parseFileBlocks(text); len(fBlocks) > 0 {
+			fileBlocks = append(fileBlocks, fBlocks...)
+			text = cleaned
+		}
+		autoCanvas = assistantNeedsAutoCanvas(text)
+		if autoCanvas && len(fileBlocks) == 0 && canvasSessionID != "" {
+			longForm := assistantCompanionText(text)
+			if longForm != "" {
+				autoCanvas = a.writeCanvasFileBlock(projectKey, canvasSessionID, fileBlock{
+					Path:    "",
+					Content: longForm,
+				})
+			} else {
+				autoCanvas = false
+			}
+		}
+	} else {
+		canvasCtx := a.resolveCanvasContext(projectKey)
+		if canvasCtx == nil || !canvasCtx.HasArtifact {
+			content := strings.TrimSpace(text)
+			if content != "" && canvasSessionID != "" {
+				autoCanvas = a.writeCanvasFileBlock(projectKey, canvasSessionID, fileBlock{
+					Path:    "",
+					Content: content,
+				})
+			}
 		}
 	}
 	renderOnCanvas := len(fileBlocks) > 0 || autoCanvas
@@ -1246,11 +1257,11 @@ func assistantRenderPlan(text string) assistantRenderDecision {
 
 func assistantRenderPlanForMode(text string, outputMode string) assistantRenderDecision {
 	outputMode = normalizeTurnOutputMode(outputMode)
+	if !isVoiceOutputMode(outputMode) {
+		return assistantRenderDecision{RenderOnCanvas: false, AutoCanvas: false}
+	}
 	hasFileBlocks := assistantMessageUsesCanvasBlocks(text)
 	autoCanvas := assistantNeedsAutoCanvas(text)
-	if !isVoiceOutputMode(outputMode) {
-		autoCanvas = true
-	}
 	return assistantRenderDecision{
 		RenderOnCanvas: hasFileBlocks || autoCanvas,
 		AutoCanvas:     autoCanvas,
@@ -1392,8 +1403,8 @@ func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, ca
 	}
 	var b strings.Builder
 
-	b.WriteString("You are Tabura, an AI assistant.\n")
 	if isVoiceMode {
+		b.WriteString("You are Tabura, an AI assistant.\n")
 		b.WriteString("Chat text is always spoken via TTS. Canvas content is never spoken and must be file-backed.\n\n")
 		b.WriteString("Use exactly one response shape:\n")
 		b.WriteString("1) Chat-only: write only spoken chat text (no blocks).\n")
@@ -1409,19 +1420,6 @@ func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, ca
 		b.WriteString("- For temporary canvas files, create/remove paths via temp_file_create and temp_file_remove tools.\n")
 		b.WriteString("- When user asks to show/open an existing file, do NOT paste that file body into chat markdown or :::file blocks.\n")
 		b.WriteString("- For existing files, use canvas_artifact_show (title=path, markdown_or_text=file content) and keep chat text brief.\n")
-		b.WriteString("- Do not use :::canvas blocks.\n")
-		b.WriteString("- Line references: when the user mentions [Line N of \"file\"], apply at that location.\n\n")
-	} else {
-		b.WriteString("Use one response shape only:\n")
-		b.WriteString("1) Canvas-only full response: write your full detailed response in one or more :::file blocks.\n\n")
-		b.WriteString("## Response Format\n\n")
-		b.WriteString("Do not include spoken companion text. Keep chat prose empty.\n")
-		b.WriteString("Canvas/file rules:\n")
-		b.WriteString("- Put all response content on canvas inside :::file blocks.\n")
-		b.WriteString("- Use :::file{path=\"relative/or/absolute/path\"}...::: for all canvas content.\n")
-		b.WriteString("- For temporary canvas files, create/remove paths via temp_file_create and temp_file_remove tools.\n")
-		b.WriteString("- When user asks to show/open an existing file, do NOT paste that file body into chat markdown or :::file blocks.\n")
-		b.WriteString("- For existing files, use canvas_artifact_show (title=path, markdown_or_text=file content).\n")
 		b.WriteString("- Do not use :::canvas blocks.\n")
 		b.WriteString("- Line references: when the user mentions [Line N of \"file\"], apply at that location.\n\n")
 	}
@@ -1440,7 +1438,7 @@ func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, ca
 	b.WriteString("- Use `delegate_to_model_cancel` if the user asks to stop.\n")
 	b.WriteString("- Final status includes `files_changed` and final `message`; relay that summary to the user.\n\n")
 
-	if canvas != nil && canvas.HasArtifact {
+	if isVoiceMode && canvas != nil && canvas.HasArtifact {
 		b.WriteString("## Current Artifact\n")
 		fmt.Fprintf(&b, "- Active artifact tab: %q (kind: %s)\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
 	}
@@ -1496,22 +1494,19 @@ func buildTurnPromptForMode(messages []store.ChatMessage, canvas *canvasContext,
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("Use one response shape only:\n")
 	if isVoiceMode {
+		b.WriteString("Use one response shape only:\n")
 		b.WriteString("- Chat-only (spoken text only), or\n")
 		b.WriteString("- Chat + file-canvas: short spoken chat text plus :::file blocks for canvas content.\n")
 		b.WriteString("Spoken chat must be one paragraph max.\n")
 		b.WriteString("If output needs more than one paragraph, put it in a temp file with temp_file_create and respond with :::file block(s) only (no chat prose).\n")
 		b.WriteString("Canvas content must be in :::file blocks only. Use temp_file_create/temp_file_remove for temporary files. Do not use :::canvas blocks.\n\n")
 		b.WriteString("When user asks to show/open an existing file, do NOT paste file body into chat markdown or :::file blocks; use canvas_artifact_show and keep chat text brief.\n\n")
+		if canvas != nil && canvas.HasArtifact {
+			fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
+		}
 	} else {
-		b.WriteString("- Canvas-only full response: write full detailed content in :::file block(s) only.\n")
-		b.WriteString("Do not output chat prose outside :::file blocks.\n")
-		b.WriteString("Use temp_file_create/temp_file_remove for temporary files. Do not use :::canvas blocks.\n")
-		b.WriteString("When user asks to show/open an existing file, do NOT paste file body into chat markdown or :::file blocks; use canvas_artifact_show.\n\n")
-	}
-	if canvas != nil && canvas.HasArtifact {
-		fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
+		b.WriteString("Reply as ASSISTANT.\n\n")
 	}
 	b.WriteString(applyDelegationHints(lastUserMsg))
 	return b.String()

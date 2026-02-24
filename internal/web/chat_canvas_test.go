@@ -189,19 +189,10 @@ func TestBuildPromptFromHistory_PlanMode(t *testing.T) {
 	}
 }
 
-func TestBuildPromptFromHistoryForMode_SilentUsesCanvasOnlyShape(t *testing.T) {
+func TestBuildPromptFromHistoryForMode_SilentUsesAssistantReplyShape(t *testing.T) {
 	prompt := buildPromptFromHistoryForMode("chat", nil, nil, turnOutputModeSilent)
-	if !strings.Contains(prompt, "Use one response shape only:") {
-		t.Error("silent prompt should enforce one response shape")
-	}
-	if !strings.Contains(prompt, "Canvas-only full response") {
-		t.Error("silent prompt should require canvas-only full response")
-	}
-	if !strings.Contains(prompt, "Do not include spoken companion text") {
-		t.Error("silent prompt should suppress spoken companion text")
-	}
-	if !strings.Contains(prompt, ":::file{") {
-		t.Error("silent prompt should mention :::file blocks")
+	if strings.Contains(prompt, "You are Tabura") {
+		t.Error("silent prompt should not include identity preamble")
 	}
 	if strings.Contains(prompt, "spoken via TTS") {
 		t.Error("silent prompt should not include voice TTS instructions")
@@ -211,6 +202,23 @@ func TestBuildPromptFromHistoryForMode_SilentUsesCanvasOnlyShape(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Use [lang:de]") {
 		t.Error("silent prompt should not include voice language tag guidance")
+	}
+	if !strings.Contains(prompt, "delegate_to_model") {
+		t.Error("silent prompt should include delegation section")
+	}
+	if !strings.Contains(prompt, "Reply as ASSISTANT.") {
+		t.Error("silent prompt should end with Reply as ASSISTANT")
+	}
+}
+
+func TestBuildPromptFromHistoryForMode_SilentSkipsCanvasContext(t *testing.T) {
+	ctx := &canvasContext{HasArtifact: true, ArtifactTitle: "Report.md", ArtifactKind: "text_artifact"}
+	prompt := buildPromptFromHistoryForMode("chat", nil, ctx, turnOutputModeSilent)
+	if strings.Contains(prompt, "Report.md") {
+		t.Error("silent prompt should not include canvas context")
+	}
+	if strings.Contains(prompt, "Current Artifact") {
+		t.Error("silent prompt should not include artifact section")
 	}
 }
 
@@ -286,6 +294,26 @@ File body.
 	}
 }
 
+func TestAssistantRenderPlanForMode_SilentAlwaysReturnsFalse(t *testing.T) {
+	text := "Paragraph one.\n\nParagraph two."
+	plan := assistantRenderPlanForMode(text, turnOutputModeSilent)
+	if plan.AutoCanvas {
+		t.Fatal("expected autoCanvas=false in silent mode")
+	}
+	if plan.RenderOnCanvas {
+		t.Fatal("expected renderOnCanvas=false in silent mode")
+	}
+
+	textWithFile := ":::file{path=\"notes.md\"}\nFile body.\n:::"
+	plan2 := assistantRenderPlanForMode(textWithFile, turnOutputModeSilent)
+	if plan2.AutoCanvas {
+		t.Fatal("expected autoCanvas=false in silent mode with file block")
+	}
+	if plan2.RenderOnCanvas {
+		t.Fatal("expected renderOnCanvas=false in silent mode with file block")
+	}
+}
+
 func TestAssistantSnapshotContent_AutoCanvasSuppressesChat(t *testing.T) {
 	markdown, plain, format := assistantSnapshotContent("Paragraph one.\n\nParagraph two.", true, true)
 	if markdown != "" || plain != "" {
@@ -311,25 +339,33 @@ File body line 2.
 	}
 }
 
-func TestBuildTurnPromptForMode_SilentUsesCanvasOnlyShape(t *testing.T) {
+func TestBuildTurnPromptForMode_SilentUsesAssistantReplyShape(t *testing.T) {
 	prompt := buildTurnPromptForMode([]store.ChatMessage{{
 		Role:         "user",
 		ContentPlain: "Please summarize this module.",
 	}}, nil, turnOutputModeSilent)
-	if !strings.Contains(prompt, "Use one response shape only:") {
-		t.Error("silent turn prompt should enforce one response shape")
-	}
-	if !strings.Contains(prompt, "Canvas-only full response") {
-		t.Error("silent turn prompt should require canvas-only full response")
-	}
-	if !strings.Contains(prompt, "Do not output chat prose outside :::file blocks.") {
-		t.Error("silent turn prompt should suppress chat prose")
+	if !strings.Contains(prompt, "Reply as ASSISTANT.") {
+		t.Error("silent turn prompt should request assistant reply style")
 	}
 	if strings.Contains(prompt, "Spoken chat must be one paragraph max.") {
 		t.Error("silent turn prompt should not include spoken paragraph limits")
 	}
 	if !strings.Contains(prompt, "Please summarize this module.") {
 		t.Error("silent turn prompt should include user message")
+	}
+}
+
+func TestBuildTurnPromptForMode_SilentSkipsCanvasContext(t *testing.T) {
+	ctx := &canvasContext{HasArtifact: true, ArtifactTitle: "Summary.md", ArtifactKind: "text_artifact"}
+	prompt := buildTurnPromptForMode([]store.ChatMessage{{
+		Role:         "user",
+		ContentPlain: "hello",
+	}}, ctx, turnOutputModeSilent)
+	if strings.Contains(prompt, "Summary.md") {
+		t.Error("silent turn prompt should not include canvas context")
+	}
+	if strings.Contains(prompt, "Active artifact") {
+		t.Error("silent turn prompt should not include artifact info")
 	}
 }
 
