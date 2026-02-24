@@ -377,7 +377,7 @@ const IPHONE_CORNER_RADIUS_PROFILES = [
   { shortSide: 390, longSide: 844, dpr: 3, radius: 47 },
   { shortSide: 393, longSide: 852, dpr: 3, radius: 55 },
   // iPhone 16 Pro: 1206x2622 physical at 3x => 402x874 CSS pixels.
-  { shortSide: 402, longSide: 874, dpr: 3, radius: 62, safeAreaTopPortrait: 62 },
+  { shortSide: 402, longSide: 874, dpr: 3, radius: 62, safeAreaTopPortrait: 59 },
   { shortSide: 414, longSide: 896, dpr: 2, radius: 41 },
   { shortSide: 428, longSide: 926, dpr: 3, radius: 53 },
   { shortSide: 430, longSide: 932, dpr: 3, radius: 55, safeAreaTopPortrait: 62 },

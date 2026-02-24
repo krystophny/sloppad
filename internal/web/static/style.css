@@ -276,8 +276,8 @@ body.ios-cue-fullscreen .zen-indicator.is-stop,
 body.ios-cue-fullscreen .zen-indicator.is-recording::before,
 body.ios-cue-fullscreen .zen-indicator.is-stop::before {
   --cue-frame-radius: var(--zen-cue-corner-radius);
-  --cue-frame-top-offset: var(--zen-cue-top-offset);
-  --cue-frame-border-top: 0px;
+  --cue-frame-top-offset: 0px;
+  --cue-frame-border-top: var(--cue-frame-border);
 }
 
 body.ios-cue-fullscreen .zen-indicator.is-recording::after,
