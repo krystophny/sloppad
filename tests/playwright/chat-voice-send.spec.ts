@@ -10,6 +10,34 @@ async function clearLog(page: Page) {
   await page.evaluate(() => { (window as any).__harnessLog.splice(0); });
 }
 
+async function injectCanvasModuleRef(page: Page) {
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/canvas.js');
+    (window as any).__canvasModule = mod;
+  });
+}
+
+async function renderTestArtifact(page: Page, text = 'Line one\nLine two\nLine three\nLine four\nLine five') {
+  await page.evaluate((content) => {
+    const mod = (window as any).__canvasModule;
+    mod.renderCanvas({
+      event_id: 'art-ctrl-ptt',
+      kind: 'text_artifact',
+      title: 'test.txt',
+      text: content,
+    });
+  }, text);
+  await page.evaluate(() => {
+    const ct = document.getElementById('canvas-text');
+    if (ct) {
+      ct.style.display = '';
+      ct.classList.add('is-active');
+    }
+    const app = (window as any)._taburaApp;
+    if (app?.getState) app.getState().hasArtifact = true;
+  });
+}
+
 async function waitForLogEntry(page: Page, type: string, action: string) {
   await expect.poll(async () => {
     const log = await getLog(page);
@@ -210,6 +238,43 @@ test('short Control press does not start voice recording', async ({ page }) => {
   const log = await getLog(page);
   const sttActions = log.filter(e => e.type === 'stt');
   expect(sttActions).toHaveLength(0);
+});
+
+test('Control long-press starts at mouse location and sends artifact line context', async ({ page }) => {
+  await clearLog(page);
+  await injectCanvasModuleRef(page);
+  await renderTestArtifact(page);
+
+  const canvasText = page.locator('#canvas-text');
+  const box = await canvasText.boundingBox();
+  if (!box) throw new Error('canvas-text not visible');
+  const x = Math.floor(box.x + 40);
+  const y = Math.floor(box.y + 20);
+
+  await page.mouse.move(x, y);
+  await page.keyboard.down('Control');
+  await page.waitForTimeout(300);
+  await waitForLogEntry(page, 'recorder', 'start');
+
+  const indicatorPos = await page.evaluate(() => {
+    const indicator = document.getElementById('zen-indicator');
+    if (!(indicator instanceof HTMLElement)) return null;
+    return {
+      x: Number.parseFloat(indicator.style.left || '0'),
+      y: Number.parseFloat(indicator.style.top || '0'),
+    };
+  });
+  expect(indicatorPos).toBeTruthy();
+  expect(Math.abs(indicatorPos!.x - x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(indicatorPos!.y - y)).toBeLessThanOrEqual(1);
+
+  await page.keyboard.up('Control');
+  await waitForSTTAction(page, 'stop');
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    const sent = log.find((entry) => entry.type === 'message_sent');
+    return String(sent?.text || '');
+  }).toMatch(/\[Line \d+ of "test\.txt"\] hello world/);
 });
 
 test('Enter stops active recording', async ({ page }) => {

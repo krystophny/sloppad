@@ -2090,10 +2090,47 @@ function bindUi() {
   const canvasText = document.getElementById('canvas-text');
   const canvasViewport = document.getElementById('canvas-viewport');
   const zenIndicator = document.getElementById('zen-indicator');
+  let lastMouseX = Math.floor(window.innerWidth / 2);
+  let lastMouseY = Math.floor(window.innerHeight / 2);
+  let hasLastMousePosition = false;
   const isVoiceInteractionTarget = (target) => (
     target instanceof Element
     && target.closest('button,a,input,textarea,select,[contenteditable="true"],.zen-overlay,.zen-input,.edge-panel')
   );
+  const rememberMousePosition = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    lastMouseX = Number(x);
+    lastMouseY = Number(y);
+    hasLastMousePosition = true;
+  };
+  const getCtrlVoiceCapturePoint = () => {
+    if (hasLastMousePosition) {
+      return { x: lastMouseX, y: lastMouseY };
+    }
+    const lastPos = getLastInputPosition();
+    if (Number.isFinite(lastPos?.x) && Number.isFinite(lastPos?.y)) {
+      return { x: Number(lastPos.x), y: Number(lastPos.y) };
+    }
+    return {
+      x: Math.floor(window.innerWidth / 2),
+      y: Math.floor(window.innerHeight / 2),
+    };
+  };
+  const beginVoiceCaptureFromPoint = (x, y, options = null) => {
+    let anchor = null;
+    if (state.hasArtifact && canvasText) {
+      anchor = getAnchorFromPoint(x, y);
+    }
+    return beginZenVoiceCapture(x, y, anchor, options);
+  };
+
+  document.addEventListener('mousemove', (ev) => {
+    rememberMousePosition(ev.clientX, ev.clientY);
+  }, { passive: true });
+  document.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType !== 'mouse') return;
+    rememberMousePosition(ev.clientX, ev.clientY);
+  }, true);
 
   if (zenIndicator) {
     zenIndicator.addEventListener('pointerdown', (ev) => {
@@ -2158,11 +2195,7 @@ function bindUi() {
         // Releasing a successful hold emits a click; ignore that click so we
         // do not immediately toggle/cancel after manual stop.
         mouseHoldSuppressClick = true;
-        let anchor = null;
-        if (state.hasArtifact && canvasText) {
-          anchor = getAnchorFromPoint(mouseHoldX, mouseHoldY);
-        }
-        void beginZenVoiceCapture(mouseHoldX, mouseHoldY, anchor, { manualStopOnly: true });
+        void beginVoiceCaptureFromPoint(mouseHoldX, mouseHoldY, { manualStopOnly: true });
       }, CHAT_SEND_HOLD_MS);
     }, true);
 
@@ -2222,19 +2255,14 @@ function bindUi() {
 
       const x = ev.clientX;
       const y = ev.clientY;
+      rememberMousePosition(x, y);
 
       if (isRecording()) {
         void stopZenVoiceCaptureAndSend();
         return;
       }
 
-      // Get anchor if on artifact
-      let anchor = null;
-      if (state.hasArtifact && canvasText) {
-        anchor = getAnchorFromPoint(x, y);
-      }
-
-      void beginZenVoiceCapture(x, y, anchor);
+      void beginVoiceCaptureFromPoint(x, y);
     });
   }
 
@@ -2334,9 +2362,8 @@ function bindUi() {
       if (state.chatCtrlHoldTimer || state.chatVoiceCapture) return;
       state.chatCtrlHoldTimer = window.setTimeout(() => {
         state.chatCtrlHoldTimer = null;
-        const cx = window.innerWidth / 2;
-        const cy = window.innerHeight / 2;
-        void beginZenVoiceCapture(cx, cy, null);
+        const point = getCtrlVoiceCapturePoint();
+        void beginVoiceCaptureFromPoint(point.x, point.y);
       }, CHAT_CTRL_LONG_PRESS_MS);
       return;
     }
@@ -2431,8 +2458,7 @@ function bindUi() {
       artHoldTimer = window.setTimeout(() => {
         artHoldTimer = null;
         artHoldActive = true;
-        const anchor = getAnchorFromPoint(artHoldX, artHoldY);
-        void beginZenVoiceCapture(artHoldX, artHoldY, anchor);
+        void beginVoiceCaptureFromPoint(artHoldX, artHoldY);
       }, CHAT_SEND_HOLD_MS);
     }, { passive: true });
 
