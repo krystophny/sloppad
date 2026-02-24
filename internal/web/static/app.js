@@ -376,6 +376,8 @@ const IPHONE_CORNER_RADIUS_PROFILES = [
   { shortSide: 375, longSide: 812, dpr: 3, radius: 44 },
   { shortSide: 390, longSide: 844, dpr: 3, radius: 47 },
   { shortSide: 393, longSide: 852, dpr: 3, radius: 55 },
+  // iPhone 16 Pro: 1206x2622 physical at 3x => 402x874 CSS pixels.
+  { shortSide: 402, longSide: 874, dpr: 3, radius: 62 },
   { shortSide: 414, longSide: 896, dpr: 2, radius: 41 },
   { shortSide: 428, longSide: 926, dpr: 3, radius: 53 },
   { shortSide: 430, longSide: 932, dpr: 3, radius: 55 },
@@ -414,7 +416,8 @@ function iPhoneRoundedCornerRadiusPx() {
   // Fallback by family/scale; keep values conservative so UI stays inside the visible radius.
   if (dpr >= 3) {
     if (shortSide >= 440) return 62;
-    if (shortSide >= 430) return 59;
+    if (shortSide >= 430) return 55;
+    if (shortSide === 402 && longSide === 874) return 62;
     if (shortSide >= 410) return 55;
     if (shortSide >= 393) return 55;
     if (shortSide >= 390) return 47;
@@ -437,8 +440,7 @@ function applyIPhoneStandaloneCueHints() {
   const isStandaloneLike = isHomeScreenStandaloneLike() && isIPhoneDevice;
   const roundedRadius = iPhoneRoundedCornerRadiusPx();
   const radius = Number.isFinite(roundedRadius) && roundedRadius > 0 ? roundedRadius : null;
-  const cueBorderWidth = Number.parseFloat(getComputedStyle(root).getPropertyValue('--cue-frame-border')) || 5;
-  const modeRadius = Number.isFinite(radius) ? Math.max(0, Math.round(radius - cueBorderWidth)) : 0;
+  const modeRadius = Number.isFinite(radius) ? Math.max(0, Math.round(radius)) : 0;
   body.classList.toggle('ios-cue-fullscreen', isStandaloneLike);
   if (isStandaloneLike && modeRadius > 0) {
     const cornerRadius = `0 0 ${modeRadius}px ${modeRadius}px`;
