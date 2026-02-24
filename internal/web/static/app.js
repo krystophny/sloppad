@@ -2515,15 +2515,7 @@ function initEdgePanels() {
     }, { passive: false });
   }
 
-  const edgeBottomTap = document.getElementById('edge-bottom-tap');
-  if (edgeBottomTap) {
-    edgeBottomTap.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      openChatPaneWithInput();
-    });
-  }
-
-  // Mobile: touch tap and swipe from all four edges.
+  // Mobile: touch tap and swipe from edges.
   // Buttons don't reliably fire click on iOS, so handle everything here.
   let edgeTouchHandled = false;
   document.addEventListener('touchstart', (ev) => {
@@ -2537,8 +2529,6 @@ function initEdgePanels() {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'right' };
     } else if (t.clientY < edgeTapSize) {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'top' };
-    } else if (t.clientY > window.innerHeight - edgeTapSize) {
-      edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'bottom' };
     } else {
       edgeTouchStart = null;
     }
@@ -2554,9 +2544,6 @@ function initEdgePanels() {
       edgeTouchHandled = true;
     } else if (edgeTouchStart.edge === 'top' && dy > 30 && edgeTop) {
       edgeTop.classList.add('edge-active');
-      edgeTouchHandled = true;
-    } else if (edgeTouchStart.edge === 'bottom' && dy < -30) {
-      openChatPaneWithInput();
       edgeTouchHandled = true;
     }
   }, { passive: true });
@@ -2576,7 +2563,6 @@ function initEdgePanels() {
           case 'left': handleLeftEdgeTap(); break;
           case 'right': if (edgeRight) edgeRight.classList.add('edge-pinned'); break;
           case 'top': if (edgeTop) edgeTop.classList.add('edge-pinned'); break;
-          case 'bottom': openChatPaneWithInput(); break;
         }
         // Prevent iOS from synthesizing a click after edge tap — the
         // panel pin above can cause the click to land inside the
@@ -2587,20 +2573,29 @@ function initEdgePanels() {
     edgeTouchStart = null;
   }, { passive: false });
 
-  // Keyboard dismiss detection: close chat panel when virtual keyboard closes
-  if (window.visualViewport) {
-    let prevViewportHeight = window.visualViewport.height;
-    window.visualViewport.addEventListener('resize', () => {
-      const currentHeight = window.visualViewport.height;
-      if (currentHeight > prevViewportHeight) {
-        const cpInput = document.getElementById('chat-pane-input');
-        if (cpInput && document.activeElement === cpInput) {
-          cpInput.blur();
-          closeEdgePanels();
-        }
+  // Blur chat input when app goes to background so iOS does not
+  // restore keyboard focus on resume.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      const cpInput = document.getElementById('chat-pane-input');
+      if (cpInput && document.activeElement === cpInput) {
+        cpInput.blur();
       }
-      prevViewportHeight = currentHeight;
-    });
+    }
+  });
+
+  // Toggle safe-area bottom padding on the input row when the virtual
+  // keyboard opens/closes.  When the keyboard is up the extra spacing
+  // is unnecessary; restore it once the keyboard is dismissed.
+  if (window.visualViewport) {
+    const inputRow = document.querySelector('.chat-pane-input-row');
+    if (inputRow) {
+      const fullHeight = window.innerHeight;
+      window.visualViewport.addEventListener('resize', () => {
+        const keyboardOpen = window.visualViewport.height < fullHeight - 100;
+        inputRow.classList.toggle('keyboard-open', keyboardOpen);
+      });
+    }
   }
 }
 
@@ -2609,21 +2604,6 @@ function closeEdgePanels() {
   const edgeRight = document.getElementById('edge-right');
   if (edgeTop) edgeTop.classList.remove('edge-active', 'edge-pinned');
   if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
-  closeChatBottomBar();
-}
-
-function closeChatBottomBar() {
-  const bar = document.getElementById('chat-bottom-bar');
-  if (bar) bar.classList.remove('is-active');
-}
-
-function openChatPaneWithInput() {
-  const bar = document.getElementById('chat-bottom-bar');
-  if (bar) bar.classList.add('is-active');
-  const cpInput = document.getElementById('chat-pane-input');
-  if (cpInput instanceof HTMLTextAreaElement) {
-    requestAnimationFrame(() => cpInput.focus());
-  }
 }
 
 function bindUi() {
@@ -2643,7 +2623,7 @@ function bindUi() {
   const isVoiceInteractionTarget = (target, x, y) => (
     isInEdgeZone(x, y)
     || (target instanceof Element
-      && target.closest('button,a,input,textarea,select,[contenteditable="true"],.zen-overlay,.zen-input,.edge-panel,.chat-bottom-bar'))
+      && target.closest('button,a,input,textarea,select,[contenteditable="true"],.zen-overlay,.zen-input,.edge-panel'))
   );
   const rememberMousePosition = (x, y) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -2889,7 +2869,6 @@ function bindUi() {
           chatPaneInput.value = '';
           chatPaneInput.style.height = '';
           chatPaneInput.blur();
-          closeChatBottomBar();
           void zenSubmitMessage(text);
         }
       }
@@ -2898,7 +2877,6 @@ function bindUi() {
         chatPaneInput.value = '';
         chatPaneInput.style.height = '';
         chatPaneInput.blur();
-        closeChatBottomBar();
       }
     });
     chatPaneInput.addEventListener('input', () => {

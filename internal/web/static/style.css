@@ -226,7 +226,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 /* Diff highlight (artifact update) */
 .diff-highlight {
   background: #fef3c7;
-  transition: background 2s ease-out;
 }
 
 .diff-highlight-fade {
@@ -381,6 +380,31 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   overflow-wrap: anywhere;
 }
 
+/* Chat pane input row (inside edge-right panel) */
+.chat-pane-input-row {
+  flex-shrink: 0;
+  padding: 0.4rem 0.6rem calc(0.4rem + var(--zen-safe-area-bottom, 0px));
+}
+
+.chat-pane-input-row.keyboard-open {
+  padding-bottom: 0.4rem;
+}
+
+.chat-pane-input-row textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  font-size: 16px;
+  font-family: inherit;
+  line-height: 1.4;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
 .zen-overlay-content {
   min-height: 1.2em;
 }
@@ -467,39 +491,11 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 }
 
-.edge-bottom-tap {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 30px;
-  z-index: 150;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 0;
-  background: transparent;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.edge-bottom-tap:hover,
-.edge-bottom-tap:active {
-  background: transparent;
-}
-
-@media (max-width: 768px) {
-  .edge-bottom-tap {
-    height: 44px;
-  }
-}
-
 .edge-panel {
   position: fixed;
   z-index: 200;
   background: var(--bg);
   overflow: hidden;
-  transition: transform 300ms ease;
 }
 
 .edge-panel-inner {
@@ -707,7 +703,6 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   background: var(--bg);
   font-size: 1.1rem;
   color: var(--text-dim);
-  transition: opacity 1.5s ease-out;
   pointer-events: none;
 }
 
@@ -776,47 +771,3 @@ body.silent-mode .edge-left-tap { z-index: 250; }
 body.silent-mode .edge-top { z-index: 250; }
 body.silent-mode .zen-indicator { z-index: 1000; }
 
-/* Floating chat input bar — hidden until bottom-tap activates it */
-.chat-bottom-bar {
-  display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 250;
-  padding: 0.4rem 0.6rem calc(0.4rem + var(--zen-safe-area-bottom, 0px));
-  background: var(--bg);
-}
-
-.chat-bottom-bar.is-active {
-  display: block;
-}
-
-/* In silent mode with panel open, constrain to panel width */
-body.silent-mode .edge-right.edge-pinned ~ .chat-bottom-bar.is-active,
-body.silent-mode .edge-right.edge-active ~ .chat-bottom-bar.is-active {
-  left: auto;
-  width: 380px;
-}
-
-@media (max-width: 767px) {
-  body.silent-mode .edge-right.edge-pinned ~ .chat-bottom-bar.is-active,
-  body.silent-mode .edge-right.edge-active ~ .chat-bottom-bar.is-active {
-    width: 100vw;
-  }
-}
-
-.chat-bottom-bar textarea {
-  width: 100%;
-  box-sizing: border-box;
-  resize: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem 0.5rem;
-  font-size: 16px;
-  font-family: inherit;
-  line-height: 1.4;
-  background: var(--bg);
-  color: var(--text);
-  outline: none;
-}

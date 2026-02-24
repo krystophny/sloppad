@@ -193,7 +193,6 @@ test.describe('chat pane interactions', () => {
   });
 
   test('chat-pane-input sends on Enter', async ({ page }) => {
-    await page.click('#edge-bottom-tap');
     const input = page.locator('#chat-pane-input');
     await input.focus();
     await input.fill('test message from chat pane');
