@@ -194,6 +194,9 @@ export function showTextInput(x, y, anchor) {
 export function hideTextInput() {
   const el = inputEl();
   if (!el) return;
+  if (document.activeElement === el) {
+    try { el.blur(); } catch (_) {}
+  }
   el.style.display = 'none';
   zenState.inputVisible = false;
   zenState.inputAnchor = null;

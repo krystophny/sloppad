@@ -376,6 +376,41 @@ function applyIPhoneFrameCorners() {
   root.style.setProperty('--zen-cue-corner-radius', `0 0 ${r}px ${r}px`);
 }
 
+let syncKeyboardStateNow = null;
+
+function isFocusedTextInput() {
+  const el = document.activeElement;
+  if (!el) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    const type = String(el.type || 'text').toLowerCase();
+    return ![
+      'button', 'checkbox', 'color', 'file', 'hidden',
+      'image', 'radio', 'range', 'reset', 'submit',
+    ].includes(type);
+  }
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
+function clearKeyboardOpenState() {
+  const inputRow = document.querySelector('.chat-pane-input-row');
+  if (inputRow) inputRow.classList.remove('keyboard-open');
+  document.body.classList.remove('keyboard-open');
+  if (isIPhoneStandalone()) applyIPhoneFrameCorners();
+}
+
+function settleKeyboardAfterSubmit() {
+  clearKeyboardOpenState();
+  const sync = syncKeyboardStateNow;
+  if (typeof sync !== 'function') return;
+  [0, 100, 220, 380].forEach((delay) => {
+    window.setTimeout(() => {
+      if (syncKeyboardStateNow !== sync) return;
+      sync();
+    }, delay);
+  });
+}
+
 function setTTSSilentMode(silent, { persist = true } = {}) {
   const next = Boolean(silent);
   if (state.ttsSilent === next) return;
@@ -2778,19 +2813,6 @@ function initEdgePanels() {
     const inputRow = document.querySelector('.chat-pane-input-row');
     if (inputRow) {
       const root = document.documentElement;
-      const isTextInputFocused = () => {
-        const el = document.activeElement;
-        if (!el) return false;
-        if (el instanceof HTMLTextAreaElement) return true;
-        if (el instanceof HTMLInputElement) {
-          const type = String(el.type || 'text').toLowerCase();
-          return ![
-            'button', 'checkbox', 'color', 'file', 'hidden',
-            'image', 'radio', 'range', 'reset', 'submit',
-          ].includes(type);
-        }
-        return el instanceof HTMLElement && el.isContentEditable;
-      };
 
       const setKeyboardOpen = (keyboardOpen) => {
         inputRow.classList.toggle('keyboard-open', keyboardOpen);
@@ -2808,7 +2830,7 @@ function initEdgePanels() {
         const vv = window.visualViewport;
         if (!vv) return;
         const viewportHeight = vv.height;
-        const focused = isTextInputFocused();
+        const focused = isFocusedTextInput();
         if (!focused) {
           baselineHeight = Math.max(window.innerHeight, viewportHeight);
           setKeyboardOpen(false);
@@ -2837,6 +2859,7 @@ function initEdgePanels() {
       document.addEventListener('focusout', () => {
         window.setTimeout(syncKeyboardState, 80);
       }, true);
+      syncKeyboardStateNow = syncKeyboardState;
       syncKeyboardState();
     }
   }
@@ -3085,7 +3108,9 @@ function bindUi() {
         if (text) {
           state.lastInputOrigin = 'text';
           zenInput.value = '';
+          zenInput.blur();
           hideTextInput();
+          settleKeyboardAfterSubmit();
           void zenSubmitMessage(text);
         }
       }
@@ -3112,6 +3137,7 @@ function bindUi() {
           chatPaneInput.value = '';
           chatPaneInput.style.height = '';
           chatPaneInput.blur();
+          settleKeyboardAfterSubmit();
           void zenSubmitMessage(text);
         }
       }
@@ -3120,6 +3146,7 @@ function bindUi() {
         chatPaneInput.value = '';
         chatPaneInput.style.height = '';
         chatPaneInput.blur();
+        settleKeyboardAfterSubmit();
       }
     });
     chatPaneInput.addEventListener('input', () => {
