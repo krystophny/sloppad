@@ -18,3 +18,19 @@ func TestParseServerConfigRejectsPublicMCPWithoutUnsafeFlag(t *testing.T) {
 		t.Fatalf("parseServerConfig(public mcp) status = %d, want 2", status)
 	}
 }
+
+func TestFormatVersionLinePrefixesVersion(t *testing.T) {
+	got := formatVersionLine("0.1.4", "abc1234", "linux", "amd64")
+	want := "tabura v0.1.4 (abc1234) linux/amd64"
+	if got != want {
+		t.Fatalf("formatVersionLine() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatVersionLineKeepsPrefixedVersionAndHandlesMissingCommit(t *testing.T) {
+	got := formatVersionLine("v1.2.3", "", "windows", "arm64")
+	want := "tabura v1.2.3 (unknown) windows/arm64"
+	if got != want {
+		t.Fatalf("formatVersionLine() = %q, want %q", got, want)
+	}
+}

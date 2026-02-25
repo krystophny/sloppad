@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -22,6 +23,13 @@ import (
 	"github.com/krystophny/tabura/internal/serve"
 	"github.com/krystophny/tabura/internal/store"
 	"github.com/krystophny/tabura/internal/web"
+)
+
+const defaultBinaryVersion = "0.1.4"
+
+var (
+	version = defaultBinaryVersion
+	commit  = "dev"
 )
 
 func main() {
@@ -44,6 +52,8 @@ func run(args []string) int {
 		return cmdMCPServer(args[1:])
 	case "set-password":
 		return cmdSetPassword(args[1:])
+	case "version":
+		return cmdVersion()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		printHelp()
@@ -53,7 +63,7 @@ func run(args []string) int {
 
 func printHelp() {
 	fmt.Println("tabura <command> [flags]")
-	fmt.Println("commands: schema bootstrap server mcp-server set-password")
+	fmt.Println("commands: schema bootstrap server mcp-server set-password version")
 }
 
 func cmdSchema() int {
@@ -299,4 +309,24 @@ func cmdSetPassword(args []string) int {
 	}
 	fmt.Println("Password set.")
 	return 0
+}
+
+func cmdVersion() int {
+	fmt.Println(formatVersionLine(version, commit, runtime.GOOS, runtime.GOARCH))
+	return 0
+}
+
+func formatVersionLine(rawVersion, rawCommit, goos, goarch string) string {
+	release := strings.TrimSpace(rawVersion)
+	if release == "" {
+		release = "0.0.0"
+	}
+	if !strings.HasPrefix(strings.ToLower(release), "v") {
+		release = "v" + release
+	}
+	shortCommit := strings.TrimSpace(rawCommit)
+	if shortCommit == "" {
+		shortCommit = "unknown"
+	}
+	return fmt.Sprintf("tabura %s (%s) %s/%s", release, shortCommit, goos, goarch)
 }
