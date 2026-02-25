@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -171,13 +172,24 @@ func (a *App) handleCanvasWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFiles(w http.ResponseWriter, r *http.Request) {
-	raw := strings.TrimPrefix(chi.URLParam(r, "*"), "/")
+	rawPath := strings.TrimPrefix(chi.URLParam(r, "*"), "/")
+	raw, err := url.PathUnescape(rawPath)
+	if err != nil {
+		http.Error(w, "invalid path encoding", http.StatusBadRequest)
+		return
+	}
+	raw = filepath.ToSlash(strings.TrimPrefix(raw, "/"))
+	cleanProjectDir := filepath.Clean(a.ProjectDir)
+	projectPrefix := strings.TrimPrefix(filepath.ToSlash(cleanProjectDir), "/")
+	if strings.HasPrefix(raw, projectPrefix+"/") {
+		raw = strings.TrimPrefix(raw, projectPrefix+"/")
+	}
 	if raw == "" {
 		http.Error(w, "missing path", http.StatusBadRequest)
 		return
 	}
-	full := filepath.Clean(filepath.Join(a.ProjectDir, raw))
-	if !strings.HasPrefix(full, filepath.Clean(a.ProjectDir)+string(os.PathSeparator)) {
+	full := filepath.Clean(filepath.Join(cleanProjectDir, filepath.FromSlash(raw)))
+	if !strings.HasPrefix(full, cleanProjectDir+string(os.PathSeparator)) {
 		http.Error(w, "access denied", http.StatusForbidden)
 		return
 	}
