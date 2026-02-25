@@ -1,0 +1,47 @@
+version: 2
+project_name: tabura
+
+builds:
+  - id: tabura
+    main: ./cmd/tabura
+    binary: tabura
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }}
+
+archives:
+  - id: tabura
+    ids:
+      - tabura
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "tabura_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - scripts/piper_tts_server.py
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  github:
+    owner: krystophny
+    name: tabura
+  draft: false
+  prerelease: auto
+
+changelog:
+  use: github-native
