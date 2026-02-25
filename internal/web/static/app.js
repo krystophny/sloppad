@@ -960,14 +960,14 @@ const MIC_CAPTURE_CONSTRAINTS = {
 
 let _cachedMicStream = null;
 let _micStreamPromise = null;
-let _micReleaseTimer = null;
-const MIC_RELEASE_COOLDOWN_MS = 5000;
+
+function speculativeAcquireMic() {
+  if (!state.chatVoiceCapture && canUseMicrophoneCapture() && !_cachedMicStream && !_micStreamPromise) {
+    acquireMicStream().catch(() => {});
+  }
+}
 
 function acquireMicStream() {
-  if (_micReleaseTimer) {
-    clearTimeout(_micReleaseTimer);
-    _micReleaseTimer = null;
-  }
   if (_cachedMicStream) {
     const tracks = _cachedMicStream.getAudioTracks();
     if (tracks.length > 0 && tracks[0].readyState === 'live') {
@@ -995,21 +995,8 @@ function releaseMicStream({ force = false } = {}) {
   if (!force && activeCapture && activeCapture.mediaStream === _cachedMicStream && !activeCapture.stopping) {
     return;
   }
-  if (force) {
-    if (_micReleaseTimer) { clearTimeout(_micReleaseTimer); _micReleaseTimer = null; }
-    _cachedMicStream.getTracks().forEach((t) => t.stop());
-    _cachedMicStream = null;
-    return;
-  }
-  // Defer release so the next tap reuses the warm stream.
-  if (_micReleaseTimer) return;
-  _micReleaseTimer = setTimeout(() => {
-    _micReleaseTimer = null;
-    if (_cachedMicStream && !state.chatVoiceCapture) {
-      _cachedMicStream.getTracks().forEach((t) => t.stop());
-      _cachedMicStream = null;
-    }
-  }, MIC_RELEASE_COOLDOWN_MS);
+  _cachedMicStream.getTracks().forEach((t) => t.stop());
+  _cachedMicStream = null;
 }
 
 function parseOptionalBoolean(value) {
@@ -3753,11 +3740,7 @@ function bindUi() {
     // with the touch-to-click delay (~50-100ms on iOS). If the tap completes,
     // beginZenVoiceCapture gets the cached stream instantly. If not, the
     // short cooldown auto-releases it.
-    zenClickTarget.addEventListener('touchstart', () => {
-      if (!state.chatVoiceCapture && canUseMicrophoneCapture() && !_cachedMicStream && !_micStreamPromise) {
-        acquireMicStream().catch(() => {});
-      }
-    }, { passive: true });
+    zenClickTarget.addEventListener('touchstart', speculativeAcquireMic, { passive: true });
 
     zenClickTarget.addEventListener('click', (ev) => {
       if (mouseHoldSuppressClick) {
@@ -3887,6 +3870,7 @@ function bindUi() {
 
     chatPaneInput.addEventListener('touchstart', (ev) => {
       if (ev.touches.length !== 1) return;
+      speculativeAcquireMic();
       const t = ev.touches[0];
       chatInputHoldActive = false;
       chatInputHoldX = t.clientX;
@@ -4128,6 +4112,7 @@ function bindUi() {
 
     canvasText.addEventListener('touchstart', (ev) => {
       if (ev.touches.length !== 1) return;
+      speculativeAcquireMic();
       const t = ev.touches[0];
       artHoldActive = false;
       artHoldX = t.clientX;
