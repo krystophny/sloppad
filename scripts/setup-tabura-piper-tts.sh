@@ -6,6 +6,9 @@ set -euo pipefail
 #
 # Prerequisites: curl, python3 (3.10+)
 # GPU not required - Piper uses ONNX and runs ~100x realtime on CPU.
+# Licensing: Piper runtime is GPL and is intentionally consumed as a local HTTP
+# sidecar. Voice models use per-model terms; model cards are shown before
+# download.
 
 PIPER_DIR="${HOME}/.local/share/tabura-piper-tts"
 MODEL_DIR="${PIPER_DIR}/models"
@@ -19,7 +22,40 @@ declare -A MODELS=(
     ["de_DE-karlsson-low"]="de/de_DE/karlsson/low"
 )
 
+declare -A MODEL_LICENSE_NOTES=(
+    ["en_GB-alan-medium"]="Model card indicates MIT-compatible terms."
+    ["de_DE-karlsson-low"]="Per-model terms must be checked in model card."
+)
+
+confirm_default_yes() {
+    local prompt="$1"
+    if [ "${TABURA_ASSUME_YES:-0}" = "1" ]; then
+        echo "TABURA_ASSUME_YES=1 set; accepting: ${prompt}"
+        return 0
+    fi
+
+    local response
+    read -r -p "${prompt} [Y/n] " response
+    case "$response" in
+        "" | [Yy] | [Yy][Ee][Ss]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 mkdir -p "$MODEL_DIR"
+
+# --- Tier 2 licensing notice ---
+
+echo "=== Piper TTS Tier-2 Notice ==="
+echo "Runtime license: GPL (installed in isolated Python venv)."
+echo "Integration boundary: local loopback HTTP sidecar, no Go binary linking."
+echo "Voice models: per-model terms; model card URL shown before each download."
+echo ""
+
+if ! confirm_default_yes "Continue with Piper TTS setup?"; then
+    echo "Skipped Piper TTS setup by user choice."
+    exit 0
+fi
 
 # --- Step 1: Download voice models ---
 
@@ -30,6 +66,14 @@ for model in "${!MODELS[@]}"; do
 
     if [ -f "$onnx" ] && [ -f "$json" ]; then
         echo "Model already exists: $model"
+        continue
+    fi
+
+    echo "Model license notice: ${model}"
+    echo "  ${MODEL_LICENSE_NOTES[$model]}"
+    echo "  Model card: ${HF_BASE}/${subpath}/MODEL_CARD"
+    if ! confirm_default_yes "Download ${model}?"; then
+        echo "Skipping model download: ${model}"
         continue
     fi
 
