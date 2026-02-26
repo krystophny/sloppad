@@ -3729,7 +3729,7 @@ function initEdgePanels() {
       setPrReviewDrawerOpen(false);
     });
   }
-  // Mobile: touch tap and swipe from edges.
+  // Mobile: touch tap and swipe from edges and open panels.
   // Buttons don't reliably fire click on iOS, so handle everything here.
   let edgeTouchHandled = false;
   document.addEventListener('touchstart', (ev) => {
@@ -3738,10 +3738,20 @@ function initEdgePanels() {
       edgeTouchStart = null;
       return;
     }
+    const target = ev.target instanceof Element ? ev.target : null;
     const t = ev.touches[0];
     const edgeTapSize = getEdgeTapSizePx();
     edgeTouchHandled = false;
-    if (isLeftEdgeTapCoordinate(t.clientX)) {
+    const topOpen = Boolean(edgeTop && (edgeTop.classList.contains('edge-active') || edgeTop.classList.contains('edge-pinned')));
+    const rightOpen = Boolean(edgeRight && (edgeRight.classList.contains('edge-active') || edgeRight.classList.contains('edge-pinned')));
+    const leftOpen = Boolean(state.prReviewDrawerOpen);
+    if (leftOpen && target && target.closest('#pr-file-pane')) {
+      edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'left-open' };
+    } else if (rightOpen && target && target.closest('#edge-right')) {
+      edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'right-open' };
+    } else if (topOpen && target && target.closest('#edge-top')) {
+      edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'top-open' };
+    } else if (isLeftEdgeTapCoordinate(t.clientX)) {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'left' };
     } else if (t.clientX > window.innerWidth - edgeTapSize) {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'right' };
@@ -3759,11 +3769,22 @@ function initEdgePanels() {
     const t = ev.touches[0];
     const dx = t.clientX - edgeTouchStart.x;
     const dy = t.clientY - edgeTouchStart.y;
-    if (edgeTouchStart.edge === 'right' && dx < -30 && edgeRight) {
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+    if (edgeTouchStart.edge === 'right' && dx < -30 && absDx > absDy * 1.1 && edgeRight) {
       edgeRight.classList.add('edge-active');
       edgeTouchHandled = true;
-    } else if (edgeTouchStart.edge === 'top' && dy > 30 && edgeTop) {
+    } else if (edgeTouchStart.edge === 'top' && dy > 30 && absDy > absDx * 1.1 && edgeTop) {
       edgeTop.classList.add('edge-active');
+      edgeTouchHandled = true;
+    } else if (edgeTouchStart.edge === 'left-open' && dx < -30 && absDx > absDy * 1.1 && state.prReviewDrawerOpen) {
+      setPrReviewDrawerOpen(false);
+      edgeTouchHandled = true;
+    } else if (edgeTouchStart.edge === 'right-open' && dx > 30 && absDx > absDy * 1.1 && edgeRight) {
+      edgeRight.classList.remove('edge-active', 'edge-pinned');
+      edgeTouchHandled = true;
+    } else if (edgeTouchStart.edge === 'top-open' && dy < -30 && absDy > absDx * 1.1 && edgeTop) {
+      edgeTop.classList.remove('edge-active', 'edge-pinned');
       edgeTouchHandled = true;
     }
   }, { passive: true });

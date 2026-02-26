@@ -79,6 +79,43 @@ async function injectCanvasEvent(page: Page, payload: Record<string, unknown>) {
   }, payload);
 }
 
+async function dispatchTouchTap(page: Page, x: number, y: number) {
+  await page.evaluate(({ x, y }) => {
+    if (typeof Touch === 'undefined') return;
+    const target = document.elementFromPoint(x, y) || document.body;
+    const touchInit = { clientX: x, clientY: y, pageX: x, pageY: y, identifier: 0, target };
+    const touch = new Touch(touchInit);
+    target.dispatchEvent(new TouchEvent('touchstart', { touches: [touch], changedTouches: [touch], bubbles: true }));
+    target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch], bubbles: true, cancelable: true }));
+  }, { x, y });
+}
+
+async function dispatchTouchSwipe(page: Page, startX: number, startY: number, endX: number, endY: number) {
+  await page.evaluate(({ startX, startY, endX, endY }) => {
+    if (typeof Touch === 'undefined') return;
+    const target = document.elementFromPoint(startX, startY) || document.body;
+    const start = new Touch({
+      clientX: startX,
+      clientY: startY,
+      pageX: startX,
+      pageY: startY,
+      identifier: 0,
+      target,
+    });
+    const end = new Touch({
+      clientX: endX,
+      clientY: endY,
+      pageX: endX,
+      pageY: endY,
+      identifier: 0,
+      target,
+    });
+    target.dispatchEvent(new TouchEvent('touchstart', { touches: [start], changedTouches: [start], bubbles: true }));
+    target.dispatchEvent(new TouchEvent('touchmove', { touches: [end], changedTouches: [end], bubbles: true, cancelable: true }));
+    target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [end], bubbles: true, cancelable: true }));
+  }, { startX, startY, endX, endY });
+}
+
 test.describe('zen canvas - tabula rasa', () => {
   test.beforeEach(async ({ page }) => {
     await waitReady(page);
@@ -726,5 +763,51 @@ test.describe('zen canvas - edge panels', () => {
     const log = await getLog(page);
     const sttStart = log.find(e => e.type === 'stt' && e.action === 'start');
     expect(sttStart).toBeFalsy();
+  });
+
+  test('touch swipe right hides pinned chat panel', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const edgeRight = page.locator('#edge-right');
+    await dispatchTouchTap(page, 372, 333);
+    await page.waitForTimeout(200);
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+
+    await dispatchTouchSwipe(page, 90, 333, 230, 333);
+    await page.waitForTimeout(150);
+
+    const classes = await edgeRight.getAttribute('class');
+    expect(classes).not.toContain('edge-pinned');
+    expect(classes).not.toContain('edge-active');
+  });
+
+  test('touch swipe up hides pinned top panel', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const edgeTop = page.locator('#edge-top');
+    await dispatchTouchTap(page, 187, 3);
+    await page.waitForTimeout(200);
+    await expect(edgeTop).toHaveClass(/edge-pinned/);
+
+    await dispatchTouchSwipe(page, 187, 140, 187, 24);
+    await page.waitForTimeout(150);
+
+    const classes = await edgeTop.getAttribute('class');
+    expect(classes).not.toContain('edge-pinned');
+    expect(classes).not.toContain('edge-active');
+  });
+
+  test('touch swipe left hides file sidebar drawer', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const pane = page.locator('#pr-file-pane');
+    await dispatchTouchTap(page, 3, 333);
+    await page.waitForTimeout(200);
+    await expect(pane).toHaveClass(/is-open/);
+
+    await dispatchTouchSwipe(page, 220, 333, 80, 333);
+    await page.waitForTimeout(150);
+
+    const paneClasses = await pane.getAttribute('class');
+    expect(paneClasses).not.toContain('is-open');
+    const bodyClass = await page.locator('body').getAttribute('class');
+    expect(bodyClass || '').not.toContain('file-sidebar-open');
   });
 });
