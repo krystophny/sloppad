@@ -970,12 +970,6 @@ const MIC_CAPTURE_CONSTRAINTS = {
 let _cachedMicStream = null;
 let _micStreamPromise = null;
 
-function speculativeAcquireMic() {
-  if (!state.chatVoiceCapture && canUseMicrophoneCapture() && !_cachedMicStream && !_micStreamPromise) {
-    acquireMicStream().catch(() => {});
-  }
-}
-
 function acquireMicStream() {
   if (_cachedMicStream) {
     const tracks = _cachedMicStream.getAudioTracks();
@@ -4213,12 +4207,6 @@ function bindUi() {
     window.addEventListener('pointercancel', handleMousePointerRelease, true);
     window.addEventListener('blur', clearMouseHoldState);
 
-    // Speculatively acquire the mic on touchstart so getUserMedia() overlaps
-    // with the touch-to-click delay (~50-100ms on iOS). If the tap completes,
-    // beginZenVoiceCapture gets the cached stream instantly. If not, the
-    // short cooldown auto-releases it.
-    zenClickTarget.addEventListener('touchstart', speculativeAcquireMic, { passive: true });
-
     zenClickTarget.addEventListener('click', (ev) => {
       if (mouseHoldSuppressClick) {
         mouseHoldSuppressClick = false;
@@ -4347,7 +4335,6 @@ function bindUi() {
 
     chatPaneInput.addEventListener('touchstart', (ev) => {
       if (ev.touches.length !== 1) return;
-      speculativeAcquireMic();
       const t = ev.touches[0];
       chatInputHoldActive = false;
       chatInputHoldX = t.clientX;
@@ -4602,7 +4589,6 @@ function bindUi() {
 
     canvasText.addEventListener('touchstart', (ev) => {
       if (ev.touches.length !== 1) return;
-      speculativeAcquireMic();
       const t = ev.touches[0];
       artHoldActive = false;
       artHoldX = t.clientX;
@@ -4654,15 +4640,6 @@ function showSplash() {
   window.setTimeout(() => splash.remove(), 1700);
 }
 
-function warmMicStream() {
-  if (!canUseMicrophoneCapture()) return;
-  navigator.mediaDevices.getUserMedia({ audio: { ...MIC_CAPTURE_CONSTRAINTS } })
-    .then((stream) => {
-      stream.getTracks().forEach((track) => track.stop());
-    })
-    .catch(() => {});
-}
-
 async function init() {
   applyIPhoneFrameCorners();
   window.addEventListener('resize', () => {
@@ -4670,7 +4647,6 @@ async function init() {
     applyIPhoneFrameCorners();
   });
   bindUi();
-  warmMicStream();
   updateAssistantActivityIndicator();
   startDevReloadWatcher();
   startAssistantActivityWatcher();
