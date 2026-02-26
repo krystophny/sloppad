@@ -108,4 +108,21 @@ test.describe('pr review canvas mode', () => {
     await page.locator('#edge-left-tap').click();
     await expect(page.locator('#pr-file-pane')).not.toHaveClass(/is-open/);
   });
+
+  test('workspace chooser supports parent row navigation', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await waitReady(page);
+
+    await page.locator('#edge-left-tap').click();
+    await expect(page.locator('#pr-file-pane')).toHaveClass(/is-open/);
+    await expect(page.locator('#pr-file-list .pr-file-item .pr-file-name', { hasText: 'docs' })).toHaveCount(1);
+
+    await page.locator('#pr-file-list .pr-file-item', { hasText: 'docs' }).click();
+    await expect(page.locator('#pr-file-list .pr-file-item .pr-file-name', { hasText: '..' })).toHaveCount(1);
+    await expect(page.locator('#pr-file-list .pr-file-item .pr-file-name', { hasText: 'guide.md' })).toHaveCount(1);
+
+    await page.locator('#pr-file-list .pr-file-item', { hasText: '..' }).click();
+    await expect(page.locator('#pr-file-list .pr-file-item .pr-file-name', { hasText: 'README.md' })).toHaveCount(1);
+    await expect(page.locator('#pr-file-list .pr-file-item .pr-file-name', { hasText: '..' })).toHaveCount(0);
+  });
 });

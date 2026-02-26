@@ -3525,6 +3525,21 @@ function handleRasaEdgeTap() {
   }
 }
 
+function isLeftEdgeTapCoordinate(clientX) {
+  const edgeTapSize = getEdgeTapSizePx();
+  if (!state.prReviewDrawerOpen) {
+    return clientX < edgeTapSize;
+  }
+  const pane = document.getElementById('pr-file-pane');
+  if (!(pane instanceof HTMLElement) || !pane.classList.contains('is-open')) {
+    return clientX < edgeTapSize;
+  }
+  const rect = pane.getBoundingClientRect();
+  const zoneStart = Math.max(0, rect.right - edgeTapSize);
+  const zoneEnd = Math.min(window.innerWidth, rect.right);
+  return clientX >= zoneStart && clientX <= zoneEnd;
+}
+
 function initEdgePanels() {
   const edgeTop = document.getElementById('edge-top');
   const edgeRight = document.getElementById('edge-right');
@@ -3649,7 +3664,7 @@ function initEdgePanels() {
     const t = ev.touches[0];
     const edgeTapSize = getEdgeTapSizePx();
     edgeTouchHandled = false;
-    if (t.clientX < edgeTapSize) {
+    if (isLeftEdgeTapCoordinate(t.clientX)) {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'left' };
     } else if (t.clientX > window.innerWidth - edgeTapSize) {
       edgeTouchStart = { x: t.clientX, y: t.clientY, edge: 'right' };
