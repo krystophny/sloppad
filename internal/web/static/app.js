@@ -2114,6 +2114,7 @@ function renderPrReviewFileList() {
           setPrReviewActiveFile(index);
           if (isMobileViewport()) {
             setPrReviewDrawerOpen(false);
+            closeEdgePanels();
           }
         },
       }));
@@ -2202,7 +2203,7 @@ async function openWorkspaceSidebarFile(path) {
       path: filePath,
     });
     showCanvasColumn('canvas-image');
-    if (isMobileViewport()) setPrReviewDrawerOpen(false);
+    if (isMobileViewport()) { setPrReviewDrawerOpen(false); closeEdgePanels(); }
     return true;
   }
   if (kind === 'pdf_artifact') {
@@ -2215,7 +2216,7 @@ async function openWorkspaceSidebarFile(path) {
       path: filePath,
     });
     showCanvasColumn('canvas-pdf');
-    if (isMobileViewport()) setPrReviewDrawerOpen(false);
+    if (isMobileViewport()) { setPrReviewDrawerOpen(false); closeEdgePanels(); }
     return true;
   }
 
@@ -2237,7 +2238,7 @@ async function openWorkspaceSidebarFile(path) {
         path: filePath,
       });
       showCanvasColumn('canvas-image');
-      if (isMobileViewport()) setPrReviewDrawerOpen(false);
+      if (isMobileViewport()) { setPrReviewDrawerOpen(false); closeEdgePanels(); }
       return true;
     }
     if (contentType.includes('application/pdf')) {
@@ -2250,7 +2251,7 @@ async function openWorkspaceSidebarFile(path) {
         path: filePath,
       });
       showCanvasColumn('canvas-pdf');
-      if (isMobileViewport()) setPrReviewDrawerOpen(false);
+      if (isMobileViewport()) { setPrReviewDrawerOpen(false); closeEdgePanels(); }
       return true;
     }
     const text = await resp.text();
@@ -2263,7 +2264,7 @@ async function openWorkspaceSidebarFile(path) {
       text,
     });
     showCanvasColumn('canvas-text');
-    if (isMobileViewport()) setPrReviewDrawerOpen(false);
+    if (isMobileViewport()) { setPrReviewDrawerOpen(false); closeEdgePanels(); }
     return true;
   } catch (err) {
     showStatus(`open failed: ${String(err?.message || err || 'unknown error')}`);
