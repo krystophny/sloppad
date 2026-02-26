@@ -2673,18 +2673,22 @@ function renderEdgeTopProjects() {
   if (!(host instanceof HTMLElement)) return;
   host.innerHTML = '';
   for (const project of state.projects) {
-    if (isHubProject(project)) {
-      continue;
-    }
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'edge-project-btn';
+    if (isHubProject(project)) {
+      button.classList.add('edge-hub-btn');
+    }
     if (project.id === state.activeProjectId) {
       button.classList.add('is-active');
     }
     button.textContent = String(project.name || project.id || 'Project');
     button.title = String(project.root_path || '');
     button.addEventListener('click', () => {
+      if (isHubProject(project)) {
+        void switchToHub();
+        return;
+      }
       if (project.id === state.activeProjectId) return;
       void switchProject(project.id);
     });
@@ -2697,25 +2701,10 @@ function renderEdgeTopModelButtons() {
   if (!(host instanceof HTMLElement)) return;
   host.innerHTML = '';
   const project = activeProject();
-  const hub = hubProject();
   const hubActive = isHubActive();
   const selectedAlias = activeProjectChatModelAlias();
   const selectedEffort = activeProjectChatModelReasoningEffort();
   const effortOptions = reasoningEffortOptionsForAlias(selectedAlias);
-  if (hub && hub.id) {
-    const hubButton = document.createElement('button');
-    hubButton.type = 'button';
-    hubButton.className = 'edge-project-btn edge-model-btn edge-hub-btn';
-    hubButton.textContent = 'Hub';
-    if (hubActive) {
-      hubButton.classList.add('is-active');
-    }
-    hubButton.disabled = state.projectSwitchInFlight || state.projectModelSwitchInFlight;
-    hubButton.addEventListener('click', () => {
-      void switchToHub();
-    });
-    host.appendChild(hubButton);
-  }
   for (const alias of PROJECT_CHAT_MODEL_ALIASES) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -2739,7 +2728,7 @@ function renderEdgeTopModelButtons() {
   for (const effort of effortOptions) {
     const option = document.createElement('option');
     option.value = effort;
-    option.textContent = effort.replace(/_/g, ' ');
+    option.textContent = effort === 'extra_high' ? 'xhigh' : effort.replace(/_/g, ' ');
     effortSelect.appendChild(option);
   }
   effortSelect.value = effortOptions.includes(selectedEffort) ? selectedEffort : (effortOptions[0] || '');
@@ -4221,7 +4210,7 @@ function bindUi() {
     };
     const handleZenIndicatorTap = (ev, x, y, isTouch = false) => {
       if (!isIndicatorArmed()) return;
-      if (!pointHitsIndicatorChip(x, y)) return;
+      if (!(isTouch && shouldStopInUiClick()) && !pointHitsIndicatorChip(x, y)) return;
       if (!isTouch && Date.now() - lastIndicatorTouchAt < 600) return;
       if (isTouch) lastIndicatorTouchAt = Date.now();
       ev.preventDefault();
