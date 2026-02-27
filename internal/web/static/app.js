@@ -27,6 +27,7 @@ import {
   getPreRollAudio,
   getHotwordMicStream,
 } from './hotword.js';
+import { initRasa, showRasa, hideRasa } from './rasa.js';
 
 const state = {
   sessionId: 'local',
@@ -1762,6 +1763,7 @@ function cancelChatVoiceCapture() {
 }
 
 function showCanvasColumn(paneId) {
+  hideRasa();
   const col = document.getElementById('canvas-column');
   if (!col) return;
   if (paneId !== 'canvas-text') {
@@ -1804,6 +1806,7 @@ function hideCanvasColumn() {
       p.classList.remove('is-active');
     });
   }
+  showRasa(document.getElementById('canvas-viewport'));
   updateAssistantActivityIndicator();
 }
 
@@ -5198,6 +5201,7 @@ async function init() {
   startAssistantActivityWatcher();
   clearCanvas();
   hideCanvasColumn();
+  void initRasa();
   showStatus('starting...');
 
   // Check TTS availability from runtime

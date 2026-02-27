@@ -284,6 +284,7 @@ body.file-sidebar-enabled #pr-file-drawer-backdrop.is-open {
 
 .canvas-pane.is-active {
   display: flex;
+  z-index: 1;
 }
 
 /* Canvas text */
@@ -1240,3 +1241,12 @@ body.panel-motion-enabled {
 
 body.silent-mode .edge-top { z-index: 250; }
 body.silent-mode .indicator { z-index: 1000; }
+
+.rasa-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  touch-action: none;
+}
