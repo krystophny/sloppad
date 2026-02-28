@@ -7,8 +7,9 @@ MODEL_URL="${TABURA_STT_MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/
 SERVER_BIN="${WHISPER_SERVER_BIN:-whisper-server}"
 HOST="${TABURA_STT_HOST:-127.0.0.1}"
 PORT="${TABURA_STT_PORT:-8427}"
-LANGUAGE="${TABURA_STT_LANGUAGE:-en}"
+LANGUAGE="${TABURA_STT_LANGUAGE:-en,de}"
 THREADS="${TABURA_STT_THREADS:-4}"
+PROMPT="${TABURA_STT_PROMPT:-}"
 
 # Check for existing model from voxtype to avoid re-downloading.
 VOXTYPE_MODEL="$HOME/.local/share/voxtype/models/$MODEL_FILE"
@@ -33,9 +34,35 @@ if [ ! -s "$MODEL_PATH" ]; then
 fi
 
 echo "Starting whisper STT sidecar at http://$HOST:$PORT"
-exec "$SERVER_BIN" \
-  -m "$MODEL_PATH" \
-  --host "$HOST" \
-  --port "$PORT" \
-  -l "$LANGUAGE" \
+LANGUAGE_TRIMMED="$(printf '%s' "$LANGUAGE" | tr -d '[:space:]')"
+if [[ "$LANGUAGE_TRIMMED" == *,* ]]; then
+  IFS=',' read -r -a _langs <<< "$LANGUAGE_TRIMMED"
+  _joined=""
+  for _lang in "${_langs[@]}"; do
+    if [ -z "$_lang" ]; then
+      continue
+    fi
+    if [ -z "$_joined" ]; then
+      _joined="$_lang"
+    else
+      _joined="$_joined, $_lang"
+    fi
+  done
+  LANGUAGE="auto"
+  if [ -n "$_joined" ] && [ -z "$PROMPT" ]; then
+    PROMPT="The spoken language is one of: ${_joined}."
+  fi
+fi
+
+args=(
+  -m "$MODEL_PATH"
+  --host "$HOST"
+  --port "$PORT"
+  -l "$LANGUAGE"
   --threads "$THREADS"
+)
+if [ -n "$PROMPT" ]; then
+  args+=(--prompt "$PROMPT")
+fi
+
+exec "$SERVER_BIN" "${args[@]}"

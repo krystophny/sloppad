@@ -60,7 +60,8 @@ func (a *App) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	replacements := a.loadSTTReplacements()
-	text, transcribeErr := stt.Transcribe(a.sttURL, normalizedMimeType, normalizedData, replacements)
+	options := a.sttTranscribeOptions()
+	text, transcribeErr := stt.TranscribeWithOptions(a.sttURL, normalizedMimeType, normalizedData, replacements, options)
 	if transcribeErr != nil {
 		if errors.Is(transcribeErr, stt.ErrLikelyNoise) {
 			log.Printf("stt empty: reason=likely_noise mime=%s bytes=%d", normalizedMimeType, len(normalizedData))

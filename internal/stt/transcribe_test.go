@@ -1,11 +1,14 @@
 package stt
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 )
 
@@ -342,6 +345,185 @@ func TestApplyReplacements(t *testing.T) {
 			t.Errorf("got %q, want %q", got, "stellarators and adiabatic")
 		}
 	})
+}
+
+func TestTranscribeWithOptionsConstrainedLanguages(t *testing.T) {
+	var requestCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		lang := r.FormValue("language")
+		if r.FormValue("response_format") != "verbose_json" {
+			t.Fatalf("response_format=%q, want verbose_json", r.FormValue("response_format"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch lang {
+		case "en":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"text":     "hello world",
+				"language": "en",
+				"segments": []map[string]any{{"avg_logprob": -0.40, "no_speech_prob": 0.25}},
+			})
+		case "de":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"text":     "hallo welt",
+				"language": "de",
+				"segments": []map[string]any{{"avg_logprob": -0.10, "no_speech_prob": 0.05}},
+			})
+		default:
+			http.Error(w, "unexpected language", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	text, err := TranscribeWithOptions(srv.URL, "audio/webm", []byte("fake-audio-data"), nil, TranscribeOptions{
+		AllowedLanguages: []string{"en", "de"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "hallo welt" {
+		t.Fatalf("text=%q, want hallo welt", text)
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 2 {
+		t.Fatalf("request count=%d, want 2", got)
+	}
+}
+
+func TestTranscribeWithOptionsSingleLanguageAndPrompt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		if r.FormValue("language") != "de" {
+			t.Fatalf("language=%q, want de", r.FormValue("language"))
+		}
+		if r.FormValue("prompt") != "Physics terms: stellarator, adiabatic." {
+			t.Fatalf("prompt=%q", r.FormValue("prompt"))
+		}
+		if r.FormValue("response_format") != "json" {
+			t.Fatalf("response_format=%q, want json", r.FormValue("response_format"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(whisperResponse{Text: "hallo welt"})
+	}))
+	defer srv.Close()
+
+	text, err := TranscribeWithOptions(srv.URL, "audio/webm", []byte("fake-audio-data"), nil, TranscribeOptions{
+		AllowedLanguages: []string{"de"},
+		InitialPrompt:    "Physics terms: stellarator, adiabatic.",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if text != "hallo welt" {
+		t.Fatalf("text=%q, want hallo welt", text)
+	}
+}
+
+func TestTranscribeWithOptionsPreVADSkipsSilentWAV(t *testing.T) {
+	var requestCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&requestCount, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(whisperResponse{Text: "should not be called"})
+	}))
+	defer srv.Close()
+
+	silent := buildTestPCM16WAV(16000, 1, 1500, 0)
+	_, err := TranscribeWithOptions(srv.URL, "audio/wav", silent, nil, TranscribeOptions{
+		PreVAD: PreVADConfig{
+			Enabled:     true,
+			ThresholdDB: -55,
+			MinSpeechMS: 200,
+			FrameMS:     20,
+		},
+	})
+	if err != ErrLikelyNoise {
+		t.Fatalf("err=%v, want ErrLikelyNoise", err)
+	}
+	if got := atomic.LoadInt32(&requestCount); got != 0 {
+		t.Fatalf("request count=%d, want 0", got)
+	}
+}
+
+func TestDetectSpeechPCM16WAV(t *testing.T) {
+	silence := buildTestPCM16WAV(16000, 1, 1200, 0)
+	speech := buildTestPCM16WAV(16000, 1, 1200, 0.25)
+
+	detected, err := detectSpeechPCM16WAV(silence, PreVADConfig{
+		Enabled:     true,
+		ThresholdDB: -55,
+		MinSpeechMS: 120,
+		FrameMS:     20,
+	})
+	if err != nil {
+		t.Fatalf("silence detection error: %v", err)
+	}
+	if detected {
+		t.Fatal("silence detected as speech")
+	}
+
+	detected, err = detectSpeechPCM16WAV(speech, PreVADConfig{
+		Enabled:     true,
+		ThresholdDB: -55,
+		MinSpeechMS: 120,
+		FrameMS:     20,
+	})
+	if err != nil {
+		t.Fatalf("speech detection error: %v", err)
+	}
+	if !detected {
+		t.Fatal("speech not detected")
+	}
+}
+
+func buildTestPCM16WAV(sampleRate, channels, durationMS int, amplitude float64) []byte {
+	if channels <= 0 {
+		channels = 1
+	}
+	if sampleRate <= 0 {
+		sampleRate = 16000
+	}
+	if durationMS <= 0 {
+		durationMS = 500
+	}
+	if amplitude < 0 {
+		amplitude = 0
+	}
+	if amplitude > 1 {
+		amplitude = 1
+	}
+	totalSamples := sampleRate * durationMS / 1000
+	dataSize := totalSamples * channels * 2
+	out := make([]byte, 44+dataSize)
+
+	copy(out[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(out[4:8], uint32(36+dataSize))
+	copy(out[8:12], "WAVE")
+	copy(out[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(out[16:20], 16)
+	binary.LittleEndian.PutUint16(out[20:22], 1)
+	binary.LittleEndian.PutUint16(out[22:24], uint16(channels))
+	binary.LittleEndian.PutUint32(out[24:28], uint32(sampleRate))
+	binary.LittleEndian.PutUint32(out[28:32], uint32(sampleRate*channels*2))
+	binary.LittleEndian.PutUint16(out[32:34], uint16(channels*2))
+	binary.LittleEndian.PutUint16(out[34:36], 16)
+	copy(out[36:40], "data")
+	binary.LittleEndian.PutUint32(out[40:44], uint32(dataSize))
+
+	pos := 44
+	for i := 0; i < totalSamples; i++ {
+		t := float64(i) / float64(sampleRate)
+		sample := int16(amplitude * 32767.0 * math.Sin(2*math.Pi*220*t))
+		for c := 0; c < channels; c++ {
+			binary.LittleEndian.PutUint16(out[pos:pos+2], uint16(sample))
+			pos += 2
+		}
+	}
+	return out
 }
 
 // Privacy: docs/meeting-notes-privacy.md

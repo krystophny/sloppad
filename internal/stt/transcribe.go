@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,7 +30,20 @@ var (
 
 // whisperResponse is the JSON envelope returned by whisper-server /inference.
 type whisperResponse struct {
-	Text string `json:"text"`
+	Text     string                   `json:"text"`
+	Language string                   `json:"language,omitempty"`
+	Segments []whisperResponseSegment `json:"segments,omitempty"`
+}
+
+type whisperResponseSegment struct {
+	AvgLogprob   *float64 `json:"avg_logprob,omitempty"`
+	NoSpeechProb *float64 `json:"no_speech_prob,omitempty"`
+}
+
+type whisperResult struct {
+	Text     string
+	Language string
+	Score    float64
 }
 
 // Transcribe sends audio data to a whisper.cpp server's /inference endpoint
@@ -38,26 +52,158 @@ type whisperResponse struct {
 // Privacy: audio is transmitted only via HTTP POST; no temp files are created.
 // See docs/meeting-notes-privacy.md.
 func Transcribe(serverURL, mimeType string, data []byte, replacements []Replacement) (string, error) {
+	return TranscribeWithOptions(serverURL, mimeType, data, replacements, TranscribeOptions{})
+}
+
+// TranscribeWithOptions sends audio data to whisper.cpp and optionally applies
+// constrained language selection and pre-VAD gating.
+func TranscribeWithOptions(serverURL, mimeType string, data []byte, replacements []Replacement, options TranscribeOptions) (string, error) {
 	if strings.TrimSpace(serverURL) == "" {
 		return "", ErrSTTDisabled
 	}
 
+	if options.PreVAD.Enabled && strings.Contains(strings.ToLower(mimeType), "wav") {
+		vadCfg := options.PreVAD
+		if vadCfg.ThresholdDB == 0 {
+			vadCfg.ThresholdDB = defaultPreVADThresholdDB
+		}
+		if vadCfg.MinSpeechMS <= 0 {
+			vadCfg.MinSpeechMS = defaultPreVADMinSpeechMS
+		}
+		if vadCfg.FrameMS <= 0 {
+			vadCfg.FrameMS = defaultPreVADFrameMS
+		}
+		speechDetected, vadErr := detectSpeechPCM16WAV(data, vadCfg)
+		if vadErr == nil && !speechDetected {
+			return "", ErrLikelyNoise
+		}
+	}
+
+	allowed := normalizeLanguageList(options.AllowedLanguages)
+	prompt := strings.TrimSpace(options.InitialPrompt)
+	fallback := normalizeLanguageCode(options.FallbackLanguage)
+	if fallback != "" {
+		found := false
+		for _, lang := range allowed {
+			if lang == fallback {
+				found = true
+				break
+			}
+		}
+		if !found {
+			allowed = append(allowed, fallback)
+		}
+	}
+
+	if len(allowed) <= 1 {
+		requestLanguage := ""
+		if len(allowed) == 1 {
+			requestLanguage = allowed[0]
+		}
+		res, err := transcribeOnce(serverURL, mimeType, data, requestLanguage, prompt, options.Translate, "json")
+		if err != nil {
+			return "", err
+		}
+		return ApplyReplacements(res.Text, replacements), nil
+	}
+
+	return transcribeWithConstrainedLanguages(serverURL, mimeType, data, allowed, prompt, options.Translate, replacements)
+}
+
+func transcribeWithConstrainedLanguages(serverURL, mimeType string, data []byte, allowed []string, prompt string, translate bool, replacements []Replacement) (string, error) {
+	type candidate struct {
+		lang string
+		res  whisperResult
+		err  error
+		idx  int
+	}
+
+	candidates := make([]candidate, len(allowed))
+	var wg sync.WaitGroup
+	wg.Add(len(allowed))
+	for i, lang := range allowed {
+		i := i
+		lang := lang
+		go func() {
+			defer wg.Done()
+			res, err := transcribeOnce(serverURL, mimeType, data, lang, prompt, translate, "verbose_json")
+			candidates[i] = candidate{lang: lang, res: res, err: err, idx: i}
+		}()
+	}
+	wg.Wait()
+
+	var best *candidate
+	var firstRetryable error
+	var firstErr error
+	for i := range candidates {
+		c := &candidates[i]
+		if c.err != nil {
+			if IsRetryableNoSpeechError(c.err) {
+				if firstRetryable == nil {
+					firstRetryable = c.err
+				}
+			} else if firstErr == nil {
+				firstErr = c.err
+			}
+			continue
+		}
+		if best == nil {
+			best = c
+			continue
+		}
+		if c.res.Score > best.res.Score {
+			best = c
+		}
+	}
+
+	if best != nil {
+		return ApplyReplacements(best.res.Text, replacements), nil
+	}
+	if firstRetryable != nil {
+		return "", firstRetryable
+	}
+	if firstErr != nil {
+		return "", firstErr
+	}
+	return "", ErrNoTranscriptOutput
+}
+
+func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt string, translate bool, responseFormat string) (whisperResult, error) {
 	ext := FileExtFromMime(mimeType)
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", "audio"+ext)
 	if err != nil {
-		return "", fmt.Errorf("stt multipart create: %w", err)
+		return whisperResult{}, fmt.Errorf("stt multipart create: %w", err)
 	}
 	if _, err := part.Write(data); err != nil {
-		return "", fmt.Errorf("stt multipart write: %w", err)
+		return whisperResult{}, fmt.Errorf("stt multipart write: %w", err)
 	}
-	if err := writer.WriteField("response_format", "json"); err != nil {
-		return "", fmt.Errorf("stt multipart field: %w", err)
+	format := strings.TrimSpace(responseFormat)
+	if format == "" {
+		format = "json"
+	}
+	if err := writer.WriteField("response_format", format); err != nil {
+		return whisperResult{}, fmt.Errorf("stt multipart field: %w", err)
+	}
+	if v := strings.TrimSpace(language); v != "" {
+		if err := writer.WriteField("language", v); err != nil {
+			return whisperResult{}, fmt.Errorf("stt language field: %w", err)
+		}
+	}
+	if v := strings.TrimSpace(prompt); v != "" {
+		if err := writer.WriteField("prompt", v); err != nil {
+			return whisperResult{}, fmt.Errorf("stt prompt field: %w", err)
+		}
+	}
+	if translate {
+		if err := writer.WriteField("translate", "true"); err != nil {
+			return whisperResult{}, fmt.Errorf("stt translate field: %w", err)
+		}
 	}
 	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("stt multipart close: %w", err)
+		return whisperResult{}, fmt.Errorf("stt multipart close: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -66,39 +212,74 @@ func Transcribe(serverURL, mimeType string, data []byte, replacements []Replacem
 	endpoint := strings.TrimRight(strings.TrimSpace(serverURL), "/") + "/inference"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	if err != nil {
-		return "", fmt.Errorf("stt request: %w", err)
+		return whisperResult{}, fmt.Errorf("stt request: %w", err)
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("stt request failed: %w", err)
+		return whisperResult{}, fmt.Errorf("stt request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("stt HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return whisperResult{}, fmt.Errorf("stt HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
 	var result whisperResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&result); err != nil {
-		return "", fmt.Errorf("stt response decode: %w", err)
+		return whisperResult{}, fmt.Errorf("stt response decode: %w", err)
 	}
 
 	text := strings.TrimSpace(result.Text)
 	if text == "" {
-		return "", ErrNoTranscriptOutput
+		return whisperResult{}, ErrNoTranscriptOutput
 	}
 	if IsWhisperHallucination(text) {
-		return "", ErrLikelyHallucination
+		return whisperResult{}, ErrLikelyHallucination
 	}
 	if IsLikelyNoise(text) {
-		return "", ErrLikelyNoise
+		return whisperResult{}, ErrLikelyNoise
 	}
 
-	text = ApplyReplacements(text, replacements)
-	return text, nil
+	score := computeWhisperScore(result, text)
+	return whisperResult{
+		Text:     text,
+		Language: normalizeLanguageCode(result.Language),
+		Score:    score,
+	}, nil
+}
+
+func computeWhisperScore(result whisperResponse, text string) float64 {
+	var (
+		logprobSum  float64
+		logprobN    float64
+		noSpeechSum float64
+		noSpeechN   float64
+	)
+	for _, segment := range result.Segments {
+		if segment.AvgLogprob != nil {
+			logprobSum += *segment.AvgLogprob
+			logprobN++
+		}
+		if segment.NoSpeechProb != nil {
+			noSpeechSum += *segment.NoSpeechProb
+			noSpeechN++
+		}
+	}
+
+	score := 0.0
+	if logprobN > 0 {
+		score += logprobSum / logprobN
+	}
+	if noSpeechN > 0 {
+		score -= noSpeechSum / noSpeechN
+	}
+	if score == 0 {
+		score = float64(len(strings.Fields(text))) * 0.01
+	}
+	return score
 }
 
 // IsRetryableNoSpeechError reports whether err means "no usable speech yet"

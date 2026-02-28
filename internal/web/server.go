@@ -32,6 +32,10 @@ const (
 	DefaultPort                 = 8420
 	DefaultAppServerURL         = "ws://127.0.0.1:8787"
 	DefaultSTTURL               = "http://127.0.0.1:8427"
+	DefaultSTTAllowedLanguages  = "en,de"
+	DefaultSTTFallbackLanguage  = "en"
+	DefaultSTTPreVADThresholdDB = -58.0
+	DefaultSTTPreVADMinSpeechMS = 120
 	SessionCookie               = "tabura_session"
 	cookieMaxAgeSec             = 60 * 60 * 24 * 365
 	DaemonPort                  = 9420
@@ -55,6 +59,12 @@ type App struct {
 	intentClassifierURL           string
 	intentLLMURL                  string
 	sttURL                        string
+	sttAllowedLanguagesDefault    []string
+	sttFallbackLanguageDefault    string
+	sttInitialPromptDefault       string
+	sttPreVADEnabledDefault       bool
+	sttPreVADThresholdDBDefault   float64
+	sttPreVADMinSpeechMSDefault   int
 	ttsURL                        string
 	devRuntime                    bool
 
@@ -139,6 +149,25 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	} else if resolvedSTTURL == "" {
 		resolvedSTTURL = DefaultSTTURL
 	}
+	resolvedSTTAllowedLanguages := parseLanguageListEnv(strings.TrimSpace(os.Getenv("TABURA_STT_ALLOWED_LANGUAGES")))
+	if len(resolvedSTTAllowedLanguages) == 0 {
+		resolvedSTTAllowedLanguages = parseLanguageListEnv(strings.TrimSpace(os.Getenv("TABURA_STT_LANGUAGE")))
+	}
+	if len(resolvedSTTAllowedLanguages) == 0 {
+		resolvedSTTAllowedLanguages = parseLanguageListEnv(DefaultSTTAllowedLanguages)
+	}
+	resolvedSTTFallbackLanguage := normalizeLanguageCodeEnv(strings.TrimSpace(os.Getenv("TABURA_STT_FALLBACK_LANGUAGE")))
+	if resolvedSTTFallbackLanguage == "" {
+		if len(resolvedSTTAllowedLanguages) > 0 {
+			resolvedSTTFallbackLanguage = resolvedSTTAllowedLanguages[0]
+		} else {
+			resolvedSTTFallbackLanguage = DefaultSTTFallbackLanguage
+		}
+	}
+	resolvedSTTInitialPrompt := strings.TrimSpace(os.Getenv("TABURA_STT_PROMPT"))
+	resolvedSTTPreVADEnabled := parseEnvBoolDefault("TABURA_STT_PREVAD_ENABLED", true)
+	resolvedSTTPreVADThresholdDB := parseEnvFloatDefault("TABURA_STT_PREVAD_THRESHOLD_DB", DefaultSTTPreVADThresholdDB)
+	resolvedSTTPreVADMinSpeechMS := parseEnvIntDefault("TABURA_STT_PREVAD_MIN_SPEECH_MS", DefaultSTTPreVADMinSpeechMS)
 	if err := s.SetAppState(appStateDefaultChatModelKey, modelprofile.AliasSpark); err != nil {
 		_ = s.Close()
 		return nil, err
@@ -153,6 +182,12 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		intentClassifierURL:           resolvedIntentClassifierURL,
 		intentLLMURL:                  resolvedIntentLLMURL,
 		sttURL:                        resolvedSTTURL,
+		sttAllowedLanguagesDefault:    resolvedSTTAllowedLanguages,
+		sttFallbackLanguageDefault:    resolvedSTTFallbackLanguage,
+		sttInitialPromptDefault:       resolvedSTTInitialPrompt,
+		sttPreVADEnabledDefault:       resolvedSTTPreVADEnabled,
+		sttPreVADThresholdDBDefault:   resolvedSTTPreVADThresholdDB,
+		sttPreVADMinSpeechMSDefault:   resolvedSTTPreVADMinSpeechMS,
 		ttsURL:                        resolvedTTSURL,
 		devRuntime:                    devRuntime,
 		store:                         s,
@@ -265,6 +300,8 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/chat/sessions/{session_id}/cancel-delegates", a.handleChatSessionCancelDelegates)
 	r.Get("/api/hotword/status", a.handleHotwordStatus)
 	r.Post("/api/stt/transcribe", a.handleSTTTranscribe)
+	r.Get("/api/stt/config", a.handleSTTConfigGet)
+	r.Put("/api/stt/config", a.handleSTTConfigPut)
 	r.Get("/api/stt/replacements", a.handleSTTReplacementsGet)
 	r.Put("/api/stt/replacements", a.handleSTTReplacementsPut)
 
