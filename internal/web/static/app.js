@@ -842,6 +842,36 @@ function showStatus(text) {
   if (statusEl) statusEl.textContent = text;
 }
 
+let lastVoiceCaptureNoticeText = '';
+let lastVoiceCaptureNoticeAt = 0;
+
+function showVoiceCaptureNotice(message, x = null, y = null) {
+  const text = String(message || '').trim();
+  if (!text) return;
+  showStatus(text);
+  const now = Date.now();
+  if (text !== lastVoiceCaptureNoticeText || now - lastVoiceCaptureNoticeAt > 2000) {
+    appendPlainMessage('system', text);
+    lastVoiceCaptureNoticeText = text;
+    lastVoiceCaptureNoticeAt = now;
+  }
+  const px = Number.isFinite(x) ? x : Math.floor(window.innerWidth / 2);
+  const py = Number.isFinite(y) ? y : Math.floor(window.innerHeight / 2);
+  showOverlay(px, py + 20);
+  updateOverlay(text);
+}
+
+function microphoneUnavailableMessage() {
+  if (!window.isSecureContext) {
+    const httpsUrl = `https://${location.hostname}:8443`;
+    return `Microphone unavailable on insecure HTTP. Open ${httpsUrl} and allow microphone access.`;
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    return 'Microphone API unavailable in this browser context. Use Safari/Chrome with microphone access enabled.';
+  }
+  return 'Microphone unavailable. Check browser microphone permissions and audio input availability.';
+}
+
 function forceUiHardReload() {
   const url = new URL(window.location.href);
   url.searchParams.set('__tabura_reload', Date.now().toString(36));
@@ -1726,7 +1756,10 @@ function stopChatVoiceMediaAndFlush(capture) {
 
 async function beginVoiceCapture(x, y, anchor) {
   if (state.chatVoiceCapture) return;
-  if (!canUseMicrophoneCapture()) return;
+  if (!canUseMicrophoneCapture()) {
+    showVoiceCaptureNotice(microphoneUnavailableMessage(), x, y);
+    return;
+  }
   cancelConversationListen();
   // Interrupt TTS playback when starting recording
   stopTTSPlayback();
@@ -1775,7 +1808,7 @@ async function beginVoiceCapture(x, y, anchor) {
     setVoiceLifecycle(VOICE_LIFECYCLE.IDLE, 'voice-capture-start-failed');
     updateAssistantActivityIndicator();
     const message = String(err?.message || err || 'voice capture failed');
-    showStatus(`voice capture failed: ${message}`);
+    showVoiceCaptureNotice(`voice capture failed: ${message}`, x, y);
     sttCancel();
     stopChatVoiceMedia(capture);
     if (state.chatVoiceCapture === capture) {

@@ -256,6 +256,23 @@ test('unrelated touchend does not suppress first click-to-record', async ({ page
   await waitForLogEntry(page, 'recorder', 'start');
 });
 
+test('missing getUserMedia shows explicit microphone-unavailable notice', async ({ page }) => {
+  await clearLog(page);
+  await page.evaluate(() => {
+    if (!navigator.mediaDevices) return;
+    navigator.mediaDevices.getUserMedia = undefined as unknown as typeof navigator.mediaDevices.getUserMedia;
+  });
+
+  await page.mouse.click(400, 400);
+  await page.waitForTimeout(120);
+
+  await expect(page.locator('#chat-history')).toContainText('Microphone API unavailable');
+  await expect(page.locator('#overlay')).toContainText('Microphone API unavailable');
+
+  const log = await getLog(page);
+  expect(log.some((entry) => entry.type === 'recorder' && entry.action === 'start')).toBe(false);
+});
+
 test('touch stop indicator routes through shared cancel endpoint', async ({ page }) => {
   await clearLog(page);
 
