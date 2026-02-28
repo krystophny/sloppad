@@ -78,6 +78,7 @@ When user asks to show/open an existing file, do NOT paste file body into chat; 
 type chatMessageRequest struct {
 	Text       string `json:"text"`
 	OutputMode string `json:"output_mode"`
+	LocalOnly  bool   `json:"local_only,omitempty"`
 }
 
 type chatCommandRequest struct {
@@ -327,7 +328,7 @@ func (a *App) handleChatSessionMessage(w http.ResponseWriter, r *http.Request) {
 		"content": text,
 		"id":      storedUser.ID,
 	})
-	queuedTurns := a.enqueueAssistantTurn(sessionID, outputMode)
+	queuedTurns := a.enqueueAssistantTurn(sessionID, outputMode, req.LocalOnly)
 	writeJSON(w, map[string]interface{}{
 		"ok":         true,
 		"kind":       "turn_queued",
@@ -737,10 +738,12 @@ func (a *App) queuedChatTurnCount(sessionID string) int {
 	return a.chatTurnQueue[sessionID]
 }
 
-func (a *App) enqueueAssistantTurn(sessionID, outputMode string) int {
+func (a *App) enqueueAssistantTurn(sessionID, outputMode string, opts ...bool) int {
 	mode := normalizeTurnOutputMode(outputMode)
+	localOnly := len(opts) > 0 && opts[0]
 	a.mu.Lock()
 	a.chatTurnOutputMode[sessionID] = append(a.chatTurnOutputMode[sessionID], mode)
+	a.chatTurnLocalOnly[sessionID] = append(a.chatTurnLocalOnly[sessionID], localOnly)
 	a.chatTurnQueue[sessionID] = a.chatTurnQueue[sessionID] + 1
 	queued := a.chatTurnQueue[sessionID]
 	workerRunning := a.chatTurnWorker[sessionID]
@@ -754,12 +757,17 @@ func (a *App) enqueueAssistantTurn(sessionID, outputMode string) int {
 	return queued
 }
 
-func (a *App) dequeueAssistantTurn(sessionID string) (string, bool) {
+type dequeuedTurn struct {
+	outputMode string
+	localOnly  bool
+}
+
+func (a *App) dequeueAssistantTurn(sessionID string) (dequeuedTurn, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	queued := a.chatTurnQueue[sessionID]
 	if queued <= 0 {
-		return "", false
+		return dequeuedTurn{}, false
 	}
 	modes := a.chatTurnOutputMode[sessionID]
 	mode := turnOutputModeVoice
@@ -772,14 +780,26 @@ func (a *App) dequeueAssistantTurn(sessionID string) (string, bool) {
 			a.chatTurnOutputMode[sessionID] = modes
 		}
 	}
+	localFlags := a.chatTurnLocalOnly[sessionID]
+	localOnly := false
+	if len(localFlags) > 0 {
+		localOnly = localFlags[0]
+		localFlags = localFlags[1:]
+		if len(localFlags) == 0 {
+			delete(a.chatTurnLocalOnly, sessionID)
+		} else {
+			a.chatTurnLocalOnly[sessionID] = localFlags
+		}
+	}
 	queued--
 	if queued <= 0 {
 		delete(a.chatTurnQueue, sessionID)
 		delete(a.chatTurnOutputMode, sessionID)
-		return mode, true
+		delete(a.chatTurnLocalOnly, sessionID)
+		return dequeuedTurn{outputMode: mode, localOnly: localOnly}, true
 	}
 	a.chatTurnQueue[sessionID] = queued
-	return mode, true
+	return dequeuedTurn{outputMode: mode, localOnly: localOnly}, true
 }
 
 func (a *App) markAssistantWorkerIdleIfQueueEmpty(sessionID string) bool {
@@ -794,14 +814,14 @@ func (a *App) markAssistantWorkerIdleIfQueueEmpty(sessionID string) bool {
 
 func (a *App) runAssistantTurnQueue(sessionID string) {
 	for {
-		outputMode, ok := a.dequeueAssistantTurn(sessionID)
+		turn, ok := a.dequeueAssistantTurn(sessionID)
 		if !ok {
 			if a.markAssistantWorkerIdleIfQueueEmpty(sessionID) {
 				return
 			}
 			continue
 		}
-		a.runAssistantTurn(sessionID, outputMode)
+		a.runAssistantTurn(sessionID, turn.outputMode, turn.localOnly)
 	}
 }
 
@@ -854,7 +874,7 @@ func (a *App) closeAppSession(sessionID string) {
 	}
 }
 
-func (a *App) runAssistantTurn(sessionID string, outputMode string) {
+func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bool) {
 	session, err := a.store.GetChatSession(sessionID)
 	if err != nil {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
@@ -866,7 +886,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string) {
 		return
 	}
 	if project, projectErr := a.store.GetProjectByProjectKey(session.ProjectKey); projectErr == nil && isHubProject(project) {
-		a.runHubTurn(sessionID, session, messages, outputMode)
+		a.runHubTurn(sessionID, session, messages, outputMode, localOnly)
 		return
 	}
 	if a.appServerClient == nil {

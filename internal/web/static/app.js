@@ -114,7 +114,6 @@ const ASSISTANT_ACTIVITY_POLL_MS = 1200;
 const CHAT_WS_STALE_THRESHOLD_MS = 20000;
 let localMessageSeq = 0;
 const CHAT_CTRL_LONG_PRESS_MS = 180;
-const CHAT_SEND_HOLD_MS = 300;
 // Frontend end-of-utterance policy:
 // - start/end speech from local mic energy
 // - pure VAD commit (no semantic EOU sidecar)
@@ -1628,10 +1627,9 @@ function stopChatVoiceMediaAndFlush(capture) {
   });
 }
 
-async function beginVoiceCapture(x, y, anchor, options = null) {
+async function beginVoiceCapture(x, y, anchor) {
   if (state.chatVoiceCapture) return;
   if (!canUseMicrophoneCapture()) return;
-  const manualStopOnly = Boolean(options && options.manualStopOnly);
   cancelConversationListen();
   // Interrupt TTS playback when starting recording
   stopTTSPlayback();
@@ -1639,7 +1637,6 @@ async function beginVoiceCapture(x, y, anchor, options = null) {
     active: false,
     stopping: false,
     stopRequested: false,
-    manualStopOnly,
     autoSend: true,
     mediaStream: null,
     mediaRecorder: null,
@@ -1670,7 +1667,7 @@ async function beginVoiceCapture(x, y, anchor, options = null) {
       capture.chunks.push(ev.data);
     });
     recorder.start(VOICE_VAD_RECORDER_CHUNK_MS);
-    if (!capture.stopRequested && !capture.manualStopOnly) {
+    if (!capture.stopRequested) {
       startVADMonitor(capture);
     }
     if (capture.stopRequested) {
@@ -1733,6 +1730,9 @@ async function stopVoiceCaptureAndSend() {
     updateAssistantActivityIndicator();
     const message = String(err?.message || err || 'voice capture failed');
     showStatus(`voice capture failed: ${message}`);
+    if (state.conversationMode) {
+      onTTSPlaybackComplete();
+    }
   } finally {
     if (!remoteStopped) {
       sttCancel();
@@ -3227,7 +3227,17 @@ function openChatWs() {
     let payload = null;
     try { payload = JSON.parse(event.data); } catch (_) { return; }
     if (handleSTTWSMessage(payload)) return;
-    handleChatEvent(payload);
+    try {
+      handleChatEvent(payload);
+    } catch (err) {
+      console.error('handleChatEvent error:', err);
+      const turnID = String(payload?.turn_id || '').trim();
+      if (turnID) trackAssistantTurnFinished(turnID);
+      state.voiceAwaitingTurn = false;
+      appendPlainMessage('system', `Internal error: ${String(err?.message || err)}`);
+      showStatus('error');
+      updateAssistantActivityIndicator();
+    }
   };
 
   ws.onclose = () => {
@@ -3488,6 +3498,12 @@ function handleChatEvent(payload) {
       }
     }
     state.canvasActionThisTurn = false;
+    // If conversation mode is active but no TTS was queued (e.g. TTS error,
+    // empty md, or all text already spoken during streaming), kick the listen
+    // cycle so conversation mode does not stall.
+    if (state.conversationMode && !ttsPlayer && shouldSpeakTurn) {
+      onTTSPlaybackComplete();
+    }
     return;
   }
 
@@ -3585,6 +3601,9 @@ function handleChatEvent(payload) {
     void refreshAssistantActivity();
     updateOverlay(`**Error:** ${errText}`);
     window.setTimeout(() => hideOverlay(), 2000);
+    if (state.conversationMode) {
+      onTTSPlaybackComplete();
+    }
   }
 }
 
@@ -4479,12 +4498,12 @@ function bindUi() {
       y: Math.floor(window.innerHeight / 2),
     };
   };
-  const beginVoiceCaptureFromPoint = (x, y, options = null) => {
+  const beginVoiceCaptureFromPoint = (x, y) => {
     let anchor = null;
     if (state.hasArtifact && canvasText) {
       anchor = getAnchorFromPoint(x, y);
     }
-    return beginVoiceCapture(x, y, anchor, options);
+    return beginVoiceCapture(x, y, anchor);
   };
 
   document.addEventListener('mousemove', (ev) => {
@@ -4495,8 +4514,12 @@ function bindUi() {
     rememberMousePosition(ev.clientX, ev.clientY);
   }, true);
 
+  // Track last touchend globally to suppress ghost clicks on iOS.
+  let lastTouchAt = 0;
+  document.addEventListener('touchend', () => { lastTouchAt = Date.now(); }, { passive: true });
+  const isGhostClick = () => Date.now() - lastTouchAt < 600;
+
   if (indicatorNode) {
-    let lastIndicatorTouchAt = 0;
     const isIndicatorArmed = () => (
       indicatorNode.classList.contains('is-working')
       || indicatorNode.classList.contains('is-recording')
@@ -4522,11 +4545,10 @@ function bindUi() {
     };
     const handleIndicatorTap = (ev, x, y, isTouch = false) => {
       if (!isIndicatorArmed()) return;
+      if (!isTouch && isGhostClick()) return;
       const hitsChip = pointHitsIndicatorChip(x, y);
       if (!hitsChip && isTouch && shouldStopInUiClick() && isTapOnInteractiveUi(ev)) return;
       if (!hitsChip && !(isTouch && shouldStopInUiClick())) return;
-      if (!isTouch && Date.now() - lastIndicatorTouchAt < 600) return;
-      if (isTouch) lastIndicatorTouchAt = Date.now();
       ev.preventDefault();
       ev.stopPropagation();
       void handleStopAction();
@@ -4598,95 +4620,35 @@ function bindUi() {
   window.addEventListener('resize', syncIndicatorOnViewportChange);
 
   if (clickTarget) {
-    let mouseHoldTimer = null;
-    let mouseHoldActive = false;
-    let mouseHoldSuppressClick = false;
-    let mouseHoldPointerId = null;
-    let mouseHoldX = 0;
-    let mouseHoldY = 0;
     let touchTapStartX = 0;
     let touchTapStartY = 0;
     let touchTapTracking = false;
     let touchTapMoved = false;
-    const MOUSE_HOLD_MOVE_THRESHOLD = 5;
+    let touchTapSuppressClick = false;
     const TOUCH_TAP_MOVE_THRESHOLD = 10;
-    const clearMouseHoldTimer = () => {
-      if (!mouseHoldTimer) return;
-      clearTimeout(mouseHoldTimer);
-      mouseHoldTimer = null;
-    };
-    const clearMouseHoldState = () => {
-      clearMouseHoldTimer();
-      mouseHoldActive = false;
-      mouseHoldPointerId = null;
-    };
 
-    // Mouse hold behaves as push-to-talk: press to start, release to stop.
-    // A short click still uses tap-to-talk via the click handler below.
-    clickTarget.addEventListener('pointerdown', (ev) => {
-      if (ev.pointerType !== 'mouse' || !ev.isPrimary || ev.button !== 0) return;
-      if (isVoiceInteractionTarget(ev.target, ev.clientX, ev.clientY)) return;
+    const handleWorkspaceTap = (target, x, y) => {
       if (isConversationListenActive()) {
+        if (isVoiceInteractionTarget(target, x, y)) return;
         cancelConversationListen();
-      }
-      if (isRecording() || shouldStopInUiClick()) return;
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed) return;
-      clearMouseHoldTimer();
-      mouseHoldActive = false;
-      mouseHoldPointerId = ev.pointerId;
-      mouseHoldX = ev.clientX;
-      mouseHoldY = ev.clientY;
-      if (typeof clickTarget.setPointerCapture === 'function') {
-        try { clickTarget.setPointerCapture(ev.pointerId); } catch (_) {}
-      }
-      mouseHoldTimer = window.setTimeout(() => {
-        mouseHoldTimer = null;
-        if (mouseHoldPointerId !== ev.pointerId || state.chatVoiceCapture) return;
-        mouseHoldActive = true;
-        // Releasing a successful hold emits a click; ignore that click so we
-        // do not immediately toggle/cancel after manual stop.
-        mouseHoldSuppressClick = true;
-        void beginVoiceCaptureFromPoint(mouseHoldX, mouseHoldY, { manualStopOnly: true });
-      }, CHAT_SEND_HOLD_MS);
-    }, true);
-
-    clickTarget.addEventListener('pointermove', (ev) => {
-      if (!mouseHoldTimer || mouseHoldPointerId !== ev.pointerId) return;
-      const dx = ev.clientX - mouseHoldX;
-      const dy = ev.clientY - mouseHoldY;
-      if (Math.sqrt(dx * dx + dy * dy) > MOUSE_HOLD_MOVE_THRESHOLD) {
-        clearMouseHoldTimer();
-        mouseHoldPointerId = null;
-      }
-    }, true);
-
-    const stopMousePushToTalk = () => {
-      if (!mouseHoldActive) return;
-      mouseHoldActive = false;
-      if (isRecording()) {
-        void stopVoiceCaptureAndSend();
-      }
-    };
-    const handleMousePointerRelease = (ev) => {
-      if (mouseHoldPointerId !== null && mouseHoldPointerId !== ev.pointerId) return;
-      if (typeof clickTarget.releasePointerCapture === 'function') {
-        try { clickTarget.releasePointerCapture(ev.pointerId); } catch (_) {}
-      }
-      if (mouseHoldTimer) {
-        clearMouseHoldTimer();
-        mouseHoldPointerId = null;
+        void beginVoiceCaptureFromPoint(x, y);
         return;
       }
-      stopMousePushToTalk();
-      mouseHoldPointerId = null;
+      if (shouldStopInUiClick()) {
+        void handleStopAction();
+        return;
+      }
+      if (isVoiceInteractionTarget(target, x, y)) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
+      rememberMousePosition(x, y);
+      if (isRecording()) {
+        void stopVoiceCaptureAndSend();
+        return;
+      }
+      void beginVoiceCaptureFromPoint(x, y);
     };
-    window.addEventListener('pointerup', handleMousePointerRelease, true);
-    window.addEventListener('pointercancel', handleMousePointerRelease, true);
-    window.addEventListener('blur', clearMouseHoldState);
 
-    // Some mobile browsers do not consistently synthesize click for canvas taps.
-    // Handle tap-to-talk / tap-to-stop directly on touchend.
     clickTarget.addEventListener('touchstart', (ev) => {
       if (ev.touches.length !== 1) {
         touchTapTracking = false;
@@ -4703,9 +4665,7 @@ function bindUi() {
     clickTarget.addEventListener('touchmove', (ev) => {
       if (!touchTapTracking || touchTapMoved || ev.touches.length !== 1) return;
       const touch = ev.touches[0];
-      const dx = touch.clientX - touchTapStartX;
-      const dy = touch.clientY - touchTapStartY;
-      if (Math.hypot(dx, dy) > TOUCH_TAP_MOVE_THRESHOLD) {
+      if (Math.hypot(touch.clientX - touchTapStartX, touch.clientY - touchTapStartY) > TOUCH_TAP_MOVE_THRESHOLD) {
         touchTapMoved = true;
       }
     }, { passive: true });
@@ -4713,39 +4673,12 @@ function bindUi() {
     clickTarget.addEventListener('touchend', (ev) => {
       if (!touchTapTracking) return;
       touchTapTracking = false;
-      if (touchTapMoved) {
-        touchTapMoved = false;
-        return;
-      }
+      if (touchTapMoved) { touchTapMoved = false; return; }
       const touch = ev.changedTouches && ev.changedTouches.length > 0 ? ev.changedTouches[0] : null;
       if (!touch) return;
-      const x = touch.clientX;
-      const y = touch.clientY;
-      rememberMousePosition(x, y);
-
-      if (isConversationListenActive()) {
-        if (isVoiceInteractionTarget(ev.target, x, y)) return;
-        ev.preventDefault();
-        cancelConversationListen();
-        void beginVoiceCaptureFromPoint(x, y);
-        return;
-      }
-      if (shouldStopInUiClick()) {
-        ev.preventDefault();
-        void handleStopAction();
-        return;
-      }
-
-      if (isVoiceInteractionTarget(ev.target, x, y)) return;
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed) return;
-
+      touchTapSuppressClick = true;
       ev.preventDefault();
-      if (isRecording()) {
-        void stopVoiceCaptureAndSend();
-        return;
-      }
-      void beginVoiceCaptureFromPoint(x, y);
+      handleWorkspaceTap(ev.target, touch.clientX, touch.clientY);
     }, { passive: false });
 
     clickTarget.addEventListener('touchcancel', () => {
@@ -4754,45 +4687,9 @@ function bindUi() {
     }, { passive: true });
 
     clickTarget.addEventListener('click', (ev) => {
-      if (mouseHoldSuppressClick) {
-        mouseHoldSuppressClick = false;
-        ev.preventDefault();
-        return;
-      }
-      if (isConversationListenActive()) {
-        if (isVoiceInteractionTarget(ev.target, ev.clientX, ev.clientY)) return;
-        if (ev.button !== 0) return;
-        const x = ev.clientX;
-        const y = ev.clientY;
-        rememberMousePosition(x, y);
-        cancelConversationListen();
-        void beginVoiceCaptureFromPoint(x, y);
-        return;
-      }
-      if (shouldStopInUiClick()) {
-        ev.preventDefault();
-        void handleStopAction();
-        return;
-      }
-
-      // Ignore clicks on interactive elements
-      if (isVoiceInteractionTarget(ev.target, ev.clientX, ev.clientY)) return;
-      // Ignore if right-click
+      if (touchTapSuppressClick) { touchTapSuppressClick = false; return; }
       if (ev.button !== 0) return;
-      // Ignore text selection
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed) return;
-
-      const x = ev.clientX;
-      const y = ev.clientY;
-      rememberMousePosition(x, y);
-
-      if (isRecording()) {
-        void stopVoiceCaptureAndSend();
-        return;
-      }
-
-      void beginVoiceCaptureFromPoint(x, y);
+      handleWorkspaceTap(ev.target, ev.clientX, ev.clientY);
     });
   }
 
@@ -4872,50 +4769,6 @@ function bindUi() {
       chatPaneInput.style.height = `${Math.min(chatPaneInput.scrollHeight, 240)}px`;
     });
 
-    // Touch-hold PTT on chat pane input
-    let chatInputHoldTimer = null;
-    let chatInputHoldActive = false;
-    let chatInputHoldX = 0;
-    let chatInputHoldY = 0;
-    const CHAT_INPUT_HOLD_MOVE_THRESHOLD = 5;
-
-    chatPaneInput.addEventListener('touchstart', (ev) => {
-      if (ev.touches.length !== 1) return;
-      const t = ev.touches[0];
-      chatInputHoldActive = false;
-      chatInputHoldX = t.clientX;
-      chatInputHoldY = t.clientY;
-      chatInputHoldTimer = window.setTimeout(() => {
-        chatInputHoldTimer = null;
-        chatInputHoldActive = true;
-        chatPaneInput.blur();
-        void beginVoiceCaptureFromPoint(chatInputHoldX, chatInputHoldY, { manualStopOnly: true });
-      }, CHAT_SEND_HOLD_MS);
-    }, { passive: true });
-
-    chatPaneInput.addEventListener('touchmove', (ev) => {
-      if (!chatInputHoldTimer) return;
-      if (ev.touches.length !== 1) return;
-      const t = ev.touches[0];
-      const dx = t.clientX - chatInputHoldX;
-      const dy = t.clientY - chatInputHoldY;
-      if (Math.sqrt(dx * dx + dy * dy) > CHAT_INPUT_HOLD_MOVE_THRESHOLD) {
-        if (chatInputHoldTimer) { clearTimeout(chatInputHoldTimer); chatInputHoldTimer = null; }
-      }
-    }, { passive: true });
-
-    window.addEventListener('touchend', () => {
-      if (chatInputHoldTimer) { clearTimeout(chatInputHoldTimer); chatInputHoldTimer = null; return; }
-      if (chatInputHoldActive) {
-        chatInputHoldActive = false;
-        if (isRecording()) void stopVoiceCaptureAndSend();
-      }
-    }, { passive: true });
-
-    window.addEventListener('touchcancel', () => {
-      if (chatInputHoldTimer) { clearTimeout(chatInputHoldTimer); chatInputHoldTimer = null; }
-      chatInputHoldActive = false;
-    });
   }
 
   // Voice tap on chat history (only when panel is pinned, not just hover-active)
@@ -5004,7 +4857,7 @@ function bindUi() {
       state.chatCtrlHoldTimer = window.setTimeout(() => {
         state.chatCtrlHoldTimer = null;
         const point = getCtrlVoiceCapturePoint();
-        void beginVoiceCaptureFromPoint(point.x, point.y, { manualStopOnly: true });
+        void beginVoiceCaptureFromPoint(point.x, point.y);
       }, CHAT_CTRL_LONG_PRESS_MS);
       return;
     }
@@ -5125,52 +4978,6 @@ function bindUi() {
     });
   }
 
-  // Touch long-press for PTT on artifact
-  if (canvasText) {
-    let artHoldTimer = null;
-    let artHoldActive = false;
-    let artHoldX = 0;
-    let artHoldY = 0;
-    const ART_HOLD_MOVE_THRESHOLD = 5;
-
-    canvasText.addEventListener('touchstart', (ev) => {
-      if (ev.touches.length !== 1) return;
-      const t = ev.touches[0];
-      artHoldActive = false;
-      artHoldX = t.clientX;
-      artHoldY = t.clientY;
-      artHoldTimer = window.setTimeout(() => {
-        artHoldTimer = null;
-        artHoldActive = true;
-        void beginVoiceCaptureFromPoint(artHoldX, artHoldY);
-      }, CHAT_SEND_HOLD_MS);
-    }, { passive: true });
-
-    canvasText.addEventListener('touchmove', (ev) => {
-      if (!artHoldTimer) return;
-      if (ev.touches.length !== 1) return;
-      const t = ev.touches[0];
-      const dx = t.clientX - artHoldX;
-      const dy = t.clientY - artHoldY;
-      if (Math.sqrt(dx * dx + dy * dy) > ART_HOLD_MOVE_THRESHOLD) {
-        if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; }
-      }
-    }, { passive: true });
-
-    window.addEventListener('touchend', () => {
-      if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; return; }
-      if (artHoldActive || state.chatVoiceCapture) {
-        artHoldActive = false;
-        void stopVoiceCaptureAndSend();
-      }
-    }, { passive: true });
-
-    window.addEventListener('touchcancel', () => {
-      if (artHoldTimer) { clearTimeout(artHoldTimer); artHoldTimer = null; }
-      artHoldActive = false;
-    });
-  }
-
   initEdgePanels();
 }
 
@@ -5226,12 +5033,14 @@ async function init() {
 }
 
 async function authGate() {
-  const resp = await fetch('/api/setup');
-  const data = await resp.json();
-  if (data.authenticated) return;
-
   const loginView = document.getElementById('view-login');
   const mainView = document.getElementById('view-main');
+  const resp = await fetch('/api/setup');
+  const data = await resp.json();
+  if (data.authenticated) {
+    if (loginView) loginView.style.display = 'none';
+    return;
+  }
   const loginForm = document.getElementById('login-form');
   const loginPassword = document.getElementById('login-password');
   const loginError = document.getElementById('login-error');
@@ -5282,6 +5091,8 @@ authGate()
     return init();
   })
   .catch((err) => {
-    showStatus('failed');
-    appendPlainMessage('system', `Initialization failed: ${String(err?.message || err)}`);
+    const loginErr = document.getElementById('login-error');
+    if (loginErr) loginErr.textContent = `Initialization failed: ${String(err?.message || err)}`;
+    const loginView = document.getElementById('view-login');
+    if (loginView) loginView.style.display = '';
   });

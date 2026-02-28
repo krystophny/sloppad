@@ -54,7 +54,7 @@ run_install_sh_dry_run() {
     HOME="$home_dir" \
     TABURA_ASSUME_YES=1 \
     TABURA_INSTALL_SKIP_BROWSER=1 \
-    TABURA_INSTALL_SKIP_VOXTYPE=1 \
+    TABURA_INSTALL_SKIP_STT=1 \
     "${ROOT_DIR}/scripts/install.sh" --dry-run --version v0.0.0-test >"$out_file" 2>&1
 
     assert_contains "$out_file" "Install complete"
@@ -67,6 +67,7 @@ run_install_sh_dry_run() {
     assert_contains "$out_file" "Piper TTS"
     assert_contains "$out_file" "Intent Classifier"
     assert_contains "$out_file" "Local LLM"
+    assert_contains "$out_file" "skipping whisper STT setup"
 
     PATH="${fakebin}:/usr/bin:/bin" \
     HOME="$home_dir" \
@@ -81,13 +82,14 @@ run_install_ps1_static_checks() {
     ps1="${ROOT_DIR}/scripts/install.ps1"
 
     assert_contains "$ps1" "Get-FileHash -Algorithm SHA256"
-    assert_contains "$ps1" "Speech-to-text requires voxtype (Linux/macOS only)"
+    assert_contains "$ps1" "Speech-to-text requires whisper.cpp (Linux/macOS only)"
     assert_contains "$ps1" "schtasks /Create"
     assert_contains "$ps1" "piper-tts"
     assert_contains "$ps1" "tabura-intent"
     assert_contains "$ps1" "tabura-llm"
     assert_contains "$ps1" "Setup-IntentClassifier"
     assert_contains "$ps1" "Setup-LocalLlm"
+    assert_contains "$ps1" "Print-WindowsSTTNotice"
 }
 
 main() {

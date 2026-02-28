@@ -1,0 +1,14 @@
+[Unit]
+Description=Tabura Desktop Push-to-Talk Daemon
+After=network.target tabura-stt.service
+Wants=tabura-stt.service
+
+[Service]
+Type=simple
+ExecStart=%h/code/assi/tabula/tabura ptt-daemon
+Restart=on-failure
+RestartSec=5
+SupplementaryGroups=input
+
+[Install]
+WantedBy=default.target

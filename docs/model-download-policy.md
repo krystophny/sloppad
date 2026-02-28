@@ -27,7 +27,7 @@ Examples:
 - Piper TTS runtime (GPL, deployed as local HTTP sidecar)
 - Piper voice models (per-model terms documented in model cards)
 - ffmpeg (GPL/LGPL, package dependent)
-- voxtype (MIT external executable)
+- whisper.cpp (MIT external STT sidecar)
 - Qwen3 0.6B GGUF (Apache-2.0 model download)
 
 ## Current Downloaded Components
@@ -37,7 +37,7 @@ Examples:
 | Piper TTS runtime | PyPI (`piper-tts`) | GPL | Tier 2 |
 | Piper voice models | Hugging Face (`rhasspy/piper-voices`) | Per-model | Tier 2 |
 | ffmpeg | System package manager | GPL/LGPL | Tier 2 |
-| voxtype | Cargo/AUR/Homebrew path | MIT | Tier 2 |
+| whisper.cpp | AUR/Homebrew/source build | MIT | Tier 2 |
 
 ## Planned Model Downloads
 

@@ -450,7 +450,7 @@ func TestHubRunTurnKeepsPlainTextAssistantOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent)
+	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
 
 	lastAssistant := latestAssistantMessage(t, app, session.ID)
 	if lastAssistant != assistantReply {
@@ -490,7 +490,7 @@ func TestHubRunTurnExecutesHighConfidenceLocalIntent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent)
+	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
 
 	if got := latestAssistantMessage(t, app, session.ID); got != "Toggled silent mode." {
 		t.Fatalf("assistant message = %q, want %q", got, "Toggled silent mode.")
@@ -537,7 +537,7 @@ func TestHubRunTurnFallsBackToSparkOnLowIntentConfidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent)
+	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
 
 	if got := latestAssistantMessage(t, app, session.ID); got != assistantReply {
 		t.Fatalf("assistant message = %q, want %q", got, assistantReply)
@@ -579,7 +579,7 @@ func TestHubRunTurnUsesIntentLLMFallbackOnLowIntentConfidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent)
+	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
 
 	if got := latestAssistantMessage(t, app, session.ID); got != "Toggled silent mode." {
 		t.Fatalf("assistant message = %q, want %q", got, "Toggled silent mode.")
@@ -623,7 +623,7 @@ func TestHubRunTurnFallsBackToSparkWhenLocalIntentExecutionFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent)
+	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
 
 	if got := latestAssistantMessage(t, app, session.ID); got != assistantReply {
 		t.Fatalf("assistant message = %q, want %q", got, assistantReply)

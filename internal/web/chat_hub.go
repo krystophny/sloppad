@@ -177,7 +177,7 @@ func (a *App) hubFindProjectByName(name string) (store.Project, error) {
 	return store.Project{}, fmt.Errorf("project %q was not found", name)
 }
 
-func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages []store.ChatMessage, outputMode string) {
+func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages []store.ChatMessage, outputMode string, localOnly bool) {
 	userText := latestUserMessage(messages)
 	if userText == "" {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": "hub message is empty"})
@@ -241,6 +241,22 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 				return
 			}
 		}
+	}
+
+	if localOnly {
+		assistantText := "I can only handle system actions in local-only mode."
+		a.finalizeAssistantResponse(
+			sessionID,
+			session.ProjectKey,
+			assistantText,
+			&persistedAssistantID,
+			&persistedAssistantText,
+			"",
+			runID,
+			"",
+			outputMode,
+		)
+		return
 	}
 
 	if a.appServerClient == nil {

@@ -370,8 +370,8 @@ function Write-TaskFiles {
     schtasks /Run /TN "tabura-web" | Out-Null
 }
 
-function Print-WindowsVoxtypeNotice {
-    Write-Log "Speech-to-text requires voxtype (Linux/macOS only)"
+function Print-WindowsSTTNotice {
+    Write-Log "Speech-to-text requires whisper.cpp (Linux/macOS only)"
 }
 
 function Open-Browser {
@@ -441,7 +441,7 @@ function Install-Tabura {
     Setup-Piper
     Setup-IntentClassifier
     Setup-LocalLlm
-    Print-WindowsVoxtypeNotice
+    Print-WindowsSTTNotice
     Write-TaskFiles -CodexPath $codexPath
     Open-Browser
     Print-Summary -Tag $tag

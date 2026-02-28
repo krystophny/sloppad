@@ -20,6 +20,7 @@ import (
 	"github.com/krystophny/tabura/internal/canvas"
 	"github.com/krystophny/tabura/internal/mcp"
 	"github.com/krystophny/tabura/internal/protocol"
+	"github.com/krystophny/tabura/internal/ptt"
 	"github.com/krystophny/tabura/internal/serve"
 	"github.com/krystophny/tabura/internal/store"
 	updater "github.com/krystophny/tabura/internal/update"
@@ -58,6 +59,8 @@ func run(args []string) int {
 		return cmdVersion()
 	case "update":
 		return cmdUpdate(args[1:])
+	case "ptt-daemon":
+		return cmdPTTDaemon(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		printHelp()
@@ -67,7 +70,7 @@ func run(args []string) int {
 
 func printHelp() {
 	fmt.Println("tabura <command> [flags]")
-	fmt.Println("commands: schema bootstrap server mcp-server set-password version update")
+	fmt.Println("commands: schema bootstrap server mcp-server set-password version update ptt-daemon")
 }
 
 func cmdSchema() int {
@@ -333,6 +336,25 @@ func cmdSetPassword(args []string) int {
 		return 1
 	}
 	fmt.Println("Password set.")
+	return 0
+}
+
+func cmdPTTDaemon(args []string) int {
+	fs := flag.NewFlagSet("ptt-daemon", flag.ContinueOnError)
+	cfg := ptt.DefaultConfig()
+	fs.StringVar(&cfg.DevicePath, "device", cfg.DevicePath, "evdev device path (auto-detected if empty)")
+	keyCode := fs.Int("key", int(cfg.KeyCode), "evdev key code to listen for (183=F13)")
+	fs.StringVar(&cfg.WhisperURL, "whisper-url", cfg.WhisperURL, "whisper.cpp sidecar URL")
+	fs.StringVar(&cfg.WebAPIURL, "web-api-url", cfg.WebAPIURL, "tabura web API URL for STT replacements")
+	fs.StringVar(&cfg.OutputMode, "output", cfg.OutputMode, "output mode: type (ydotool) or clipboard (wl-copy)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	cfg.KeyCode = uint16(*keyCode)
+	if err := ptt.Run(context.Background(), cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return 0
 }
 

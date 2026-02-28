@@ -8,7 +8,7 @@ RELEASE_API_BASE="${TABURA_RELEASE_API_BASE:-https://api.github.com/repos/${REPO
 ASSUME_YES="${TABURA_ASSUME_YES:-0}"
 DRY_RUN="${TABURA_INSTALL_DRY_RUN:-0}"
 SKIP_BROWSER="${TABURA_INSTALL_SKIP_BROWSER:-0}"
-SKIP_VOXTYPE="${TABURA_INSTALL_SKIP_VOXTYPE:-0}"
+SKIP_STT="${TABURA_INSTALL_SKIP_STT:-0}"
 SKIP_INTENT="${TABURA_INSTALL_SKIP_INTENT:-0}"
 SKIP_LLM="${TABURA_INSTALL_SKIP_LLM:-0}"
 REQUESTED_VERSION=""
@@ -87,7 +87,7 @@ Options:
 Environment overrides:
   TABURA_INSTALL_DRY_RUN=1
   TABURA_INSTALL_SKIP_BROWSER=1
-  TABURA_INSTALL_SKIP_VOXTYPE=1
+  TABURA_INSTALL_SKIP_STT=1
   TABURA_INSTALL_SKIP_INTENT=1
   TABURA_INSTALL_SKIP_LLM=1
   TABURA_REPO_OWNER / TABURA_REPO_NAME / TABURA_RELEASE_API_BASE
@@ -552,38 +552,61 @@ NOTICE
     fi
 }
 
-install_voxtype() {
-    if [ "$SKIP_VOXTYPE" = "1" ]; then
-        log "skipping voxtype setup due to TABURA_INSTALL_SKIP_VOXTYPE=1"
+install_whisper_stt() {
+    if [ "$SKIP_STT" = "1" ]; then
+        log "skipping whisper STT setup due to TABURA_INSTALL_SKIP_STT=1"
         return
     fi
-    if have_cmd voxtype; then
-        log "voxtype already installed"
-    elif [ "$TABURA_OS" = "darwin" ] && have_cmd brew; then
-        if confirm_default_yes "Install voxtype via Homebrew cask (beta, unsigned)?"; then
-            run_cmd brew tap peteonrails/voxtype
-            run_cmd brew install --cask peteonrails/voxtype/voxtype
-            cat <<NOTICE
-=== voxtype macOS security setup ===
-The voxtype binary is currently unsigned. After first launch:
-  1. System Settings > Privacy & Security > click "Open Anyway"
-  2. System Settings > Privacy & Security > Input Monitoring > enable Voxtype
-  3. Restart daemon: launchctl stop io.voxtype.daemon && launchctl start io.voxtype.daemon
+    cat <<NOTICE
+=== Whisper STT (MIT, runs as HTTP sidecar) ===
+whisper.cpp provides local speech-to-text via an HTTP endpoint on port 8427.
+License: MIT (isolated sidecar process, does not affect Tabura MIT license)
+Model: ggml-large-v3-turbo (~1.5 GB download from Hugging Face)
 NOTICE
-        fi
-    elif have_cmd cargo; then
-        if confirm_default_yes "Install voxtype via cargo install voxtype?"; then
-            run_cmd cargo install voxtype
-        fi
+    if ! confirm_default_yes "Install whisper.cpp STT sidecar?"; then
+        log "skipping whisper STT setup"
+        return
     fi
 
-    if have_cmd voxtype; then
-        if confirm_default_yes "Download voxtype speech model now?"; then
-            run_cmd voxtype setup --download
+    if have_cmd whisper-server; then
+        log "whisper-server already installed"
+    elif [ "$TABURA_OS" = "linux" ] && have_cmd pacman; then
+        if confirm_default_yes "Install whisper.cpp-cuda via pacman/AUR? (falls back to whisper.cpp)"; then
+            if have_cmd paru; then
+                run_cmd paru -S --noconfirm whisper.cpp-cuda || run_cmd paru -S --noconfirm whisper.cpp
+            elif have_cmd yay; then
+                run_cmd yay -S --noconfirm whisper.cpp-cuda || run_cmd yay -S --noconfirm whisper.cpp
+            else
+                log "no AUR helper found (paru/yay); install whisper.cpp manually"
+            fi
+        fi
+    elif [ "$TABURA_OS" = "darwin" ] && have_cmd brew; then
+        if confirm_default_yes "Install whisper.cpp via Homebrew?"; then
+            run_cmd brew install whisper-cpp
+        fi
+    else
+        log "whisper-server not found; install whisper.cpp and ensure whisper-server is on PATH"
+    fi
+
+    if have_cmd whisper-server; then
+        local model_dir="${HOME}/.local/share/tabura-stt/models"
+        local model_file="ggml-large-v3-turbo.bin"
+        local model_path="${model_dir}/${model_file}"
+        if [ -f "$model_path" ]; then
+            log "whisper model already present: ${model_file}"
+        elif confirm_default_yes "Download whisper model ggml-large-v3-turbo (~1.5 GB)?"; then
+            run_cmd mkdir -p "$model_dir"
+            local model_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model_file}"
+            if [ "$DRY_RUN" = "1" ]; then
+                run_cmd curl -fL -o "$model_path" "$model_url"
+            else
+                curl -fL --retry 3 --retry-delay 2 -o "${model_path}.tmp" "$model_url"
+                mv "${model_path}.tmp" "$model_path"
+            fi
         fi
         return
     fi
-    log "voxtype was not installed; speech-to-text remains unavailable"
+    log "whisper-server was not installed; speech-to-text remains unavailable"
 }
 
 write_systemd_units() {
@@ -922,7 +945,7 @@ install_flow() {
     setup_piper_tts
     setup_intent_classifier "$tmpdir"
     setup_local_llm "$tmpdir"
-    install_voxtype
+    install_whisper_stt
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos
     else

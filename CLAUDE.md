@@ -158,3 +158,5 @@ Current core specs include:
 - `tests/playwright/canvas-refresh.spec.ts`
 - `tests/playwright/hotword.spec.ts`
 - `tests/playwright/conversation-mode.spec.ts`
+- `tests/playwright/e2e-system.spec.ts`
+- `tests/playwright/stt-tts-system.spec.ts`

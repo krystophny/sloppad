@@ -100,7 +100,7 @@ def main() -> None:
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=args.epochs,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="no",
         logging_strategy="epoch",
         report_to=[],

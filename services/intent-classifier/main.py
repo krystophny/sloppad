@@ -9,18 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import onnxruntime as ort
 from fastapi import FastAPI
 from pydantic import BaseModel
-
-try:
-    import numpy as np
-    import onnxruntime as ort
-    from transformers import AutoTokenizer
-except Exception:  # pragma: no cover - optional runtime dependency set
-    np = None
-    ort = None
-    AutoTokenizer = None
-
+from transformers import AutoTokenizer
 
 SUPPORTED_ACTIONS = {
     "switch_project",
@@ -32,24 +25,8 @@ SUPPORTED_ACTIONS = {
 }
 
 STOP_WORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "for",
-    "from",
-    "how",
-    "in",
-    "is",
-    "me",
-    "of",
-    "on",
-    "or",
-    "please",
-    "the",
-    "to",
-    "we",
-    "you",
+    "a", "an", "and", "are", "for", "from", "how", "in", "is", "me",
+    "of", "on", "or", "please", "the", "to", "we", "you",
 }
 
 ACTION_PATTERNS: list[tuple[re.Pattern[str], str, float]] = [
@@ -103,13 +80,9 @@ def jaccard_similarity(a: set[str], b: set[str]) -> float:
 
 
 def softmax(values: list[float]) -> list[float]:
-    if not values:
-        return []
     max_val = max(values)
     exps = [math.exp(v - max_val) for v in values]
     denom = sum(exps)
-    if denom == 0:
-        return [0.0 for _ in values]
     return [value / denom for value in exps]
 
 
@@ -117,12 +90,14 @@ class IntentClassifier:
     def __init__(self, dataset_path: Path, model_dir: Path):
         self.examples = self._load_examples(dataset_path)
         self.label_order = sorted({example.intent for example in self.examples})
-        self.session = None
-        self.tokenizer = None
-        self.label_map: dict[int, str] = {}
+        self.session: ort.InferenceSession
+        self.tokenizer: AutoTokenizer
+        self.label_map: dict[int, str]
         self._load_onnx_model(model_dir)
 
     def _load_examples(self, dataset_path: Path) -> list[Example]:
+        if not dataset_path.is_file():
+            raise RuntimeError(f"intent dataset not found: {dataset_path}")
         records = json.loads(dataset_path.read_text(encoding="utf-8"))
         examples: list[Example] = []
         for record in records:
@@ -144,13 +119,15 @@ class IntentClassifier:
         return examples
 
     def _load_onnx_model(self, model_dir: Path) -> None:
-        if np is None or ort is None or AutoTokenizer is None:
-            return
         model_path = model_dir / "model.onnx"
         labels_path = model_dir / "labels.json"
         tokenizer_path = model_dir / "tokenizer"
-        if not model_path.is_file() or not labels_path.is_file() or not tokenizer_path.is_dir():
-            return
+        if not model_path.is_file():
+            raise RuntimeError(f"ONNX model not found: {model_path}")
+        if not labels_path.is_file():
+            raise RuntimeError(f"labels.json not found: {labels_path}")
+        if not tokenizer_path.is_dir():
+            raise RuntimeError(f"tokenizer directory not found: {tokenizer_path}")
         labels = json.loads(labels_path.read_text(encoding="utf-8"))
         self.label_map = {int(index): str(label) for index, label in labels.items()}
         self.session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
@@ -163,11 +140,7 @@ class IntentClassifier:
 
         pattern_intent, pattern_conf = self._pattern_classification(text)
         lexical_intent, lexical_conf = self._lexical_classification(text)
-
-        model_intent = ""
-        model_conf = 0.0
-        if self.session is not None and self.tokenizer is not None:
-            model_intent, model_conf = self._onnx_classification(text)
+        model_intent, model_conf = self._onnx_classification(text)
 
         candidates = [
             (pattern_intent, pattern_conf),
@@ -216,20 +189,17 @@ class IntentClassifier:
             if input_meta.name in encoded:
                 inputs[input_meta.name] = encoded[input_meta.name].astype("int64")
         if not inputs:
-            return "chat", 0.0
+            raise RuntimeError("ONNX model produced no matching inputs for tokenized text")
 
         outputs = self.session.run(None, inputs)
         if not outputs:
-            return "chat", 0.0
+            raise RuntimeError("ONNX model produced no outputs")
 
         logits = outputs[0][0].tolist()
         probabilities = softmax(logits)
-        if not probabilities:
-            return "chat", 0.0
-
         best_index = int(max(range(len(probabilities)), key=lambda idx: probabilities[idx]))
         confidence = float(probabilities[best_index])
-        intent = self.label_map.get(best_index, "chat")
+        intent = self.label_map[best_index]
         return intent, confidence
 
     def _extract_entities(self, text: str, intent: str) -> dict[str, Any]:
@@ -278,7 +248,7 @@ app = FastAPI(title="Tabura Intent Classifier", version="1.0.0")
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "model_loaded": classifier.session is not None,
+        "model_loaded": True,
         "examples": len(classifier.examples),
     }
 

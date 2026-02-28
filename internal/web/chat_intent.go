@@ -237,6 +237,9 @@ func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAc
 		"model":       intentLLMModel,
 		"temperature": 0,
 		"max_tokens":  128,
+		"chat_template_kwargs": map[string]interface{}{
+			"enable_thinking": false,
+		},
 		"messages": []map[string]string{
 			{"role": "system", "content": intentLLMSystemPrompt},
 			{"role": "user", "content": trimmedText},

@@ -15,3 +15,4 @@ tabura
 services/intent-classifier/model/
 services/intent-classifier/checkpoints/
 tools/
+.env
