@@ -336,6 +336,29 @@ test('touch stop while sending transcript aborts pending message submit', async 
   await expect(page.locator('#chat-history .chat-message.chat-assistant.is-pending')).toHaveCount(0);
 });
 
+test('duplicate stop action while stopping does not cancel voice transcript send', async ({ page }) => {
+  await clearLog(page);
+  await setHarnessMessagePostDelay(page, 1500);
+
+  await page.mouse.click(400, 400);
+  await waitForLogEntry(page, 'recorder', 'start');
+  await page.mouse.click(400, 400);
+  await page.waitForTimeout(20);
+  await page.keyboard.press('Enter');
+
+  await waitForSTTAction(page, 'stop');
+  await expect(page.locator('#status-label')).toContainText('sending');
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some((entry) => entry.type === 'message_sent');
+  }, { timeout: 6_000 }).toBe(true);
+
+  const log = await getLog(page);
+  expect(log.some((entry) => entry.type === 'api_fetch' && entry.action === 'cancel')).toBe(false);
+  expect(log.some((entry) => entry.type === 'stt' && entry.action === 'cancel')).toBe(false);
+});
+
 test('silence auto-stop sends transcript without manual stop click', async ({ page }) => {
   await clearLog(page);
   await page.evaluate(() => {

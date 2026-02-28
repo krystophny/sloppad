@@ -4012,7 +4012,9 @@ async function handleStopAction() {
 
   const capture = state.chatVoiceCapture;
   if (capture && capture.stopping) {
-    cancelChatVoiceCapture();
+    // Duplicate stop gestures can arrive while recorder.stop()/STT stop is
+    // already in flight (notably delayed synthetic clicks on iOS). Treat this
+    // as idempotent so we do not cancel the transcript send path.
     return;
   }
   const isCaptureActive = Boolean(capture && !capture.stopping);
@@ -4639,7 +4641,8 @@ function bindUi() {
   // Track last touchend globally to suppress ghost clicks on iOS.
   let lastTouchAt = 0;
   document.addEventListener('touchend', () => { lastTouchAt = Date.now(); }, { passive: true });
-  const isGhostClick = () => Date.now() - lastTouchAt < 600;
+  const GHOST_CLICK_SUPPRESS_MS = isLikelyIOS() ? 1400 : 700;
+  const isGhostClick = () => Date.now() - lastTouchAt < GHOST_CLICK_SUPPRESS_MS;
 
   if (indicatorNode) {
     const isIndicatorArmed = () => (
