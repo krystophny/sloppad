@@ -17,7 +17,7 @@ func TestThirdPartyLicenseInventoryIncludesRequiredComponents(t *testing.T) {
 		"| Piper TTS Python runtime | GPL |",
 		"| Piper voice models | Per-model",
 		"| ffmpeg | GPL/LGPL",
-		"| whisper.cpp | MIT |",
+		"| voxtype | MIT |",
 		"not linked into the Go binary",
 	)
 }

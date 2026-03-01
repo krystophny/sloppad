@@ -65,6 +65,7 @@ const state = {
   assistantRemoteActiveCount: 0,
   assistantRemoteQueuedCount: 0,
   assistantRemoteDelegateActiveCount: 0,
+  assistantLastStartedAt: 0,
   assistantCancelInFlight: false,
   assistantLastError: '',
   ttsPlaying: false,
@@ -73,6 +74,7 @@ const state = {
   conversationListenTimer: null,
   hotwordEnabled: false,
   hotwordActive: false,
+  voiceTranscriptSubmitInFlight: false,
   voiceAwaitingTurn: false,
   voiceTurns: new Set(),
   voiceLifecycle: 'idle',
@@ -190,6 +192,9 @@ const VOICE_VAD_NOISE_FLOOR_MIN_DB = -60;
 const VOICE_VAD_NOISE_FLOOR_MAX_DB = -18;
 const VOICE_CAPTURE_STOP_FLUSH_TIMEOUT_MS = 1500;
 const STOP_REQUEST_TIMEOUT_MS = 3500;
+const VOICE_TRANSCRIPT_SUBMIT_GUARD_MS = 220;
+const ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS = 1500;
+const ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS = 450;
 const VOICE_LIFECYCLE = Object.freeze({
   IDLE: 'idle',
   LISTENING: 'listening',
@@ -1681,6 +1686,7 @@ function startVADMonitor(capture) {
 
   const options = {
     startAtMs: performance.now(),
+    lastFrameAtMs: performance.now(),
     speechMs: 0,
     silenceMs: 0,
     hasSpeech: false,
@@ -1726,6 +1732,11 @@ function startVADMonitor(capture) {
       analyser.getByteTimeDomainData(bins);
       const db = computeDecibelFromTimeDomain(bins);
       const now = performance.now();
+      const frameElapsedMsRaw = now - options.lastFrameAtMs;
+      const frameElapsedMs = Number.isFinite(frameElapsedMsRaw) && frameElapsedMsRaw > 0
+        ? Math.min(300, frameElapsedMsRaw)
+        : VOICE_VAD_FRAME_MS;
+      options.lastFrameAtMs = now;
       const elapsed = now - options.startAtMs;
 
       if (options.noiseFloorDb == null && options.noiseSamples.length < VOICE_VAD_NOISE_FLOOR_SAMPLES) {
@@ -1802,7 +1813,7 @@ function startVADMonitor(capture) {
       if (db >= endThresholdDb) {
         options.silenceMs = 0;
       } else {
-        options.silenceMs += VOICE_VAD_FRAME_MS;
+        options.silenceMs += frameElapsedMs;
       }
 
       options.speechMs = Math.max(0, now - options.speechStartAt);
@@ -2040,6 +2051,7 @@ async function stopVoiceCaptureAndSend() {
       throw new Error(voiceCaptureEmptyReasonMessage(result?.reason));
     }
     showStatus('sending...');
+    state.voiceTranscriptSubmitInFlight = true;
     void submitMessage(transcript, { kind: 'voice_transcript' });
   } catch (err) {
     if (opSeq !== state.voiceLifecycleSeq) return;
@@ -2084,6 +2096,7 @@ function cancelChatVoiceCapture() {
   const capture = state.chatVoiceCapture;
   if (!capture) return;
   setRecording(false);
+  state.voiceTranscriptSubmitInFlight = false;
   state.voiceAwaitingTurn = false;
   abortPendingSubmit('voice_transcript');
   sttCancel();
@@ -2194,6 +2207,16 @@ function hasLocalStopCapableWork() {
     || state.assistantCancelInFlight;
 }
 
+function isVoiceTranscriptSubmitPending() {
+  return Boolean(state.pendingSubmitController) && state.pendingSubmitKind === 'voice_transcript';
+}
+
+function hasPendingOverlayTurn() {
+  const ui = getUiState();
+  if (!ui || !ui.overlayVisible) return false;
+  return Boolean(String(ui.overlayTurnId || '').trim());
+}
+
 function isDirectAssistantWorking() {
   return hasLocalStopCapableWork()
     || state.assistantRemoteActiveCount > 0
@@ -2283,6 +2306,13 @@ function currentIndicatorMode() {
 
 function shouldStopInUiClick() {
   return isStopCapableLifecycle(syncVoiceLifecycle('ui-stop-check'));
+}
+
+function isUiStopGestureActive() {
+  return shouldStopInUiClick()
+    || isVoiceTranscriptSubmitPending()
+    || state.voiceTranscriptSubmitInFlight
+    || hasPendingOverlayTurn();
 }
 
 function updateAssistantActivityIndicator() {
@@ -2911,6 +2941,7 @@ function isLikelyPrReviewArtifact(payload) {
 
 function trackAssistantTurnStarted(turnID) {
   state.assistantLastError = '';
+  state.assistantLastStartedAt = Date.now();
   const key = String(turnID || '').trim();
   if (key) {
     state.assistantActiveTurns.add(key);
@@ -2930,6 +2961,10 @@ function trackAssistantTurnFinished(turnID) {
   } else if (state.assistantUnknownTurns > 0) {
     state.assistantUnknownTurns -= 1;
   } else if (state.assistantActiveTurns.size > 0) {
+    if ((Date.now() - state.assistantLastStartedAt) < ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS) {
+      updateAssistantActivityIndicator();
+      return;
+    }
     // Some cancel/error events can arrive without turn_id. In that case, clear
     // one active local turn so the stop indicator cannot get stuck indefinitely.
     const firstActiveTurn = state.assistantActiveTurns.values().next().value;
@@ -3157,6 +3192,7 @@ function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.assistantRemoteQueuedCount = 0;
   state.assistantRemoteDelegateActiveCount = 0;
   state.assistantCancelInFlight = false;
+  state.voiceTranscriptSubmitInFlight = false;
   state.voiceAwaitingTurn = false;
   state.indicatorSuppressedByCanvasUpdate = false;
   if (clearError) {
@@ -3435,7 +3471,15 @@ async function refreshAssistantActivity() {
     state.assistantRemoteActiveCount = activeTurns;
     state.assistantRemoteQueuedCount = queuedTurns;
     state.assistantRemoteDelegateActiveCount = delegateActive;
-    if (activeTurns <= 0 && queuedTurns <= 0 && delegateActive <= 0 && !state.assistantCancelInFlight) {
+    const recentlyStarted = (Date.now() - state.assistantLastStartedAt) < ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS;
+    if (activeTurns <= 0
+      && queuedTurns <= 0
+      && delegateActive <= 0
+      && !state.assistantCancelInFlight
+      && !state.voiceAwaitingTurn
+      && !state.voiceTranscriptSubmitInFlight
+      && !isVoiceTranscriptSubmitPending()
+      && !recentlyStarted) {
       state.assistantActiveTurns.clear();
       state.assistantUnknownTurns = 0;
     }
@@ -3711,6 +3755,9 @@ function handleChatEvent(payload) {
     state.voiceAwaitingTurn = false;
     state.indicatorSuppressedByCanvasUpdate = false;
     ensurePendingForTurn(turnID);
+    // A previous canvas update can suppress indicator rendering. Re-sync after
+    // clearing suppression so stop control is available immediately on turn start.
+    updateAssistantActivityIndicator();
     if (isMobileSilent()) {
       const edgeRight = document.getElementById('edge-right');
       if (edgeRight) edgeRight.classList.add('edge-pinned');
@@ -4028,16 +4075,55 @@ function abortPendingSubmit(kind = '') {
   return true;
 }
 
+function abortError() {
+  try {
+    return new DOMException('aborted', 'AbortError');
+  } catch (_) {
+    const err = new Error('aborted');
+    err.name = 'AbortError';
+    return err;
+  }
+}
+
+function waitWithAbort(delayMs, signal) {
+  const ms = Number(delayMs);
+  if (!Number.isFinite(ms) || ms <= 0) return Promise.resolve();
+  if (!signal) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(abortError());
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 async function submitMessage(text, options = {}) {
   const trimmed = String(text || '').trim();
-  if (!trimmed || !state.chatSessionId) return;
+  const submitKind = String(options?.kind || '').trim();
+  if (!trimmed || !state.chatSessionId) {
+    if (submitKind === 'voice_transcript') {
+      state.voiceTranscriptSubmitInFlight = false;
+    }
+    return;
+  }
   cancelConversationListen();
   startVoiceLifecycleOp('submit-message');
-  const submitKind = String(options?.kind || '').trim();
   let submitController = null;
   if (submitKind) {
     submitController = new AbortController();
     setPendingSubmit(submitController, submitKind);
+    if (submitKind === 'voice_transcript') {
+      state.voiceTranscriptSubmitInFlight = true;
+    }
   }
   state.indicatorSuppressedByCanvasUpdate = false;
   // Interrupt TTS playback when sending a new message
@@ -4066,6 +4152,12 @@ async function submitMessage(text, options = {}) {
     output_mode: state.ttsSilent ? 'silent' : 'voice',
   };
   try {
+    if (submitKind === 'voice_transcript' && submitController) {
+      await waitWithAbort(VOICE_TRANSCRIPT_SUBMIT_GUARD_MS, submitController.signal);
+      if (submitController.signal.aborted) {
+        throw abortError();
+      }
+    }
     const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -4112,11 +4204,15 @@ async function submitMessage(text, options = {}) {
     updateAssistantActivityIndicator();
   } finally {
     clearPendingSubmit(submitController);
+    if (submitKind === 'voice_transcript') {
+      state.voiceTranscriptSubmitInFlight = false;
+    }
   }
 }
 
 function forceVoiceLifecycleIdle(statusText = 'stopped') {
   cancelConversationListen();
+  state.voiceTranscriptSubmitInFlight = false;
   abortPendingSubmit('voice_transcript');
   sttCancel();
   stopTTSPlayback();
@@ -4244,8 +4340,10 @@ async function handleStopAction() {
   if (capture && capture.stopping) {
     // Duplicate stop gestures can arrive while recorder.stop()/STT stop is
     // already in flight (notably delayed synthetic clicks on iOS). Treat this
-    // as idempotent so we do not cancel the transcript send path.
-    return;
+    // as idempotent unless voice transcript submit is now pending.
+    if (!isVoiceTranscriptSubmitPending() && !state.voiceTranscriptSubmitInFlight) {
+      return;
+    }
   }
   const isCaptureActive = Boolean(capture && !capture.stopping);
   if (isCaptureActive) {
@@ -4257,9 +4355,14 @@ async function handleStopAction() {
     stopTTSPlayback();
   }
 
-  const localStopCapable = shouldStopInUiClick() || hasLocalStopCapableWork() || state.voiceAwaitingTurn;
-  forceVoiceLifecycleIdle('stopped');
+  const localStopCapable = shouldStopInUiClick()
+    || hasLocalStopCapableWork()
+    || state.voiceAwaitingTurn
+    || state.voiceTranscriptSubmitInFlight
+    || isVoiceTranscriptSubmitPending()
+    || hasPendingOverlayTurn();
   if (!localStopCapable && !hasRemoteAssistantWork()) return;
+  forceVoiceLifecycleIdle('stopped');
   void cancelActiveAssistantTurnWithRetry(3, { silent: true }).finally(() => {
     void refreshAssistantActivity();
   });
@@ -4908,9 +5011,10 @@ function bindUi() {
     const handleIndicatorTap = (ev, x, y, isTouch = false) => {
       if (!isIndicatorArmed()) return;
       if (!isTouch && isSuppressedClick()) return;
+      const stopGestureActive = isUiStopGestureActive();
       const hitsChip = pointHitsIndicatorChip(x, y);
-      if (!hitsChip && isTouch && shouldStopInUiClick() && isTapOnInteractiveUi(ev)) return;
-      if (!hitsChip && !(isTouch && shouldStopInUiClick())) return;
+      if (!hitsChip && isTouch && stopGestureActive && isTapOnInteractiveUi(ev)) return;
+      if (!hitsChip && !(isTouch && stopGestureActive)) return;
       ev.preventDefault();
       ev.stopPropagation();
       if (isTouch) suppressSyntheticClick();
@@ -5028,7 +5132,7 @@ function bindUi() {
         void beginVoiceCaptureFromPoint(x, y);
         return;
       }
-      if (shouldStopInUiClick()) {
+      if (isUiStopGestureActive()) {
         void handleStopAction();
         return;
       }

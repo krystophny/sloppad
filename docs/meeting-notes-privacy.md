@@ -9,7 +9,7 @@ This document formalizes the audio privacy guarantees for Tabura's speech-to-tex
 1. **Capture**: browser MediaRecorder captures audio chunks.
 2. **Transport**: chunks are sent over WebSocket as binary frames to the Go server.
 3. **Buffer**: chunks accumulate in `chatWSConn.sttBuf` (RAM-only `[]byte`, bounded by `stt.MaxAudioBytes` = 10 MB).
-4. **Transcribe**: on STT stop, the buffer is sent via HTTP POST (multipart) to the whisper.cpp sidecar. The sidecar processes audio in-memory and returns JSON text.
+4. **Transcribe**: on STT stop, the buffer is sent via HTTP POST (multipart) to the voxtype STT sidecar. The sidecar processes audio in-memory and returns JSON text.
 5. **Discard**: the buffer reference is set to nil immediately after the HTTP call returns (or on cancel/error/disconnect). The Go garbage collector reclaims the memory.
 
 Only the transcript text is stored. Audio data never reaches the database or filesystem.
@@ -34,11 +34,11 @@ The following are prohibited in all Tabura code paths:
   - WebSocket disconnect (connection teardown releases all fields)
 - No audio data is copied to secondary buffers or caches within the Go process.
 
-## Whisper Sidecar Boundary
+## Voxtype Sidecar Boundary
 
-The whisper.cpp sidecar (`tabura-stt.service`) receives audio via HTTP multipart POST to `/inference`. The sidecar:
+The voxtype sidecar (`tabura-stt.service`) receives audio via HTTP multipart POST to `/v1/audio/transcriptions`. The sidecar:
 
-- Processes audio entirely in RAM (whisper.cpp does not write temp files for inference).
+- Processes audio entirely in RAM for request handling.
 - Returns only transcript text as JSON (`{"text": "..."}`).
 - Does not persist audio between requests.
 
@@ -46,7 +46,7 @@ The whisper.cpp sidecar (`tabura-stt.service`) receives audio via HTTP multipart
 
 - **Swap/page-file**: on a local install, the OS may page RAM to swap. This is outside Tabura's control. Users who require confidentiality against swap forensics should use encrypted swap or disable swap.
 - **Crash dumps**: a process crash dump may contain the in-flight audio buffer. Users who require confidentiality against crash-dump forensics should configure their OS to restrict core dumps.
-- **Network**: audio transits the local WebSocket (browser to Go server) and local HTTP (Go server to whisper sidecar). Both default to loopback (`127.0.0.1`). No audio leaves the machine in the default configuration.
+- **Network**: audio transits the local WebSocket (browser to Go server) and local HTTP (Go server to voxtype sidecar). Both default to loopback (`127.0.0.1`). No audio leaves the machine in the default configuration.
 
 ## Schema Invariant
 

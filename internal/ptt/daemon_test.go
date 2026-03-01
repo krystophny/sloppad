@@ -239,8 +239,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.KeyCode != 183 {
 		t.Fatalf("expected key code 183, got %d", cfg.KeyCode)
 	}
-	if cfg.WhisperURL != "http://127.0.0.1:8427" {
-		t.Fatalf("unexpected whisper URL: %s", cfg.WhisperURL)
+	if cfg.STTURL != "http://127.0.0.1:8427" {
+		t.Fatalf("unexpected stt URL: %s", cfg.STTURL)
 	}
 	if cfg.WebAPIURL != "http://127.0.0.1:8420" {
 		t.Fatalf("unexpected web API URL: %s", cfg.WebAPIURL)

@@ -67,7 +67,7 @@ run_install_sh_dry_run() {
     assert_contains "$out_file" "Piper TTS"
     assert_contains "$out_file" "Intent Classifier"
     assert_contains "$out_file" "Local LLM"
-    assert_contains "$out_file" "skipping whisper STT setup"
+    assert_contains "$out_file" "skipping voxtype STT setup"
 
     PATH="${fakebin}:/usr/bin:/bin" \
     HOME="$home_dir" \
@@ -82,7 +82,7 @@ run_install_ps1_static_checks() {
     ps1="${ROOT_DIR}/scripts/install.ps1"
 
     assert_contains "$ps1" "Get-FileHash -Algorithm SHA256"
-    assert_contains "$ps1" "Speech-to-text requires whisper.cpp (Linux/macOS only)"
+    assert_contains "$ps1" "Speech-to-text requires voxtype (Linux/macOS only)"
     assert_contains "$ps1" "schtasks /Create"
     assert_contains "$ps1" "piper-tts"
     assert_contains "$ps1" "tabura-intent"

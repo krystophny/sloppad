@@ -25,7 +25,7 @@ const (
 type Config struct {
 	DevicePath string // evdev device path, e.g. /dev/input/event5
 	KeyCode    uint16 // evdev key code (default: KEY_F13 = 183)
-	WhisperURL string // STT sidecar URL (default: http://127.0.0.1:8427)
+	STTURL     string // STT sidecar URL (default: http://127.0.0.1:8427)
 	WebAPIURL  string // tabura web API URL for replacements (default: http://127.0.0.1:8420)
 	OutputMode string // "type" (ydotool) or "clipboard" (wl-copy)
 }
@@ -34,7 +34,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		KeyCode:    183, // KEY_F13
-		WhisperURL: "http://127.0.0.1:8427",
+		STTURL:     "http://127.0.0.1:8427",
 		WebAPIURL:  "http://127.0.0.1:8420",
 		OutputMode: "type",
 	}
@@ -63,7 +63,7 @@ func WrapWAV(pcm []byte) []byte {
 }
 
 // TranscribeAudio sends WAV audio to an OpenAI-compatible STT sidecar and returns text.
-func TranscribeAudio(whisperURL string, wav []byte, replacements []stt.Replacement) (string, error) {
+func TranscribeAudio(sttURL string, wav []byte, replacements []stt.Replacement) (string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", "audio.wav")
@@ -87,7 +87,7 @@ func TranscribeAudio(whisperURL string, wav []byte, replacements []stt.Replaceme
 		return "", fmt.Errorf("ptt multipart close: %w", err)
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(whisperURL), "/")
+	baseURL := strings.TrimRight(strings.TrimSpace(sttURL), "/")
 	endpoint := baseURL
 	if !strings.Contains(baseURL, "/v1/audio/transcriptions") {
 		endpoint = baseURL + "/v1/audio/transcriptions"

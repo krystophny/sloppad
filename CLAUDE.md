@@ -21,7 +21,7 @@ Tabura keeps five local sidecars:
 - `tabura-piper-tts.service` for Piper TTS over loopback HTTP
 - `tabura-intent.service` for local intent classification (`/classify` on `127.0.0.1:8425`)
 - `tabura-llm.service` for Qwen3 0.6B via llama.cpp (`/v1/chat/completions` on `127.0.0.1:8426`)
-- `tabura-stt.service` for whisper.cpp STT (`/inference` on `127.0.0.1:8427`)
+- `tabura-stt.service` for voxtype STT (`/v1/audio/transcriptions` on `127.0.0.1:8427`)
 
 ## Security Boundary
 
@@ -63,7 +63,7 @@ Primary units:
 - `tabura-web.service`
 - `tabura-codex-app-server.service`
 - `tabura-piper-tts.service`
-- `tabura-stt.service` (whisper.cpp STT sidecar)
+- `tabura-stt.service` (voxtype STT sidecar)
 - `tabura-intent.service` (optional but recommended)
 - `tabura-llm.service` (optional for ambiguous-intent fallback)
 
@@ -88,7 +88,7 @@ systemctl --user restart tabura-codex-app-server.service tabura-piper-tts.servic
 - TTS (Piper): `http://127.0.0.1:8424`
 - Intent classifier: `http://127.0.0.1:8425/classify` (`TABURA_INTENT_CLASSIFIER_URL`, use `off` to disable)
 - Intent LLM fallback: `http://127.0.0.1:8426/v1/chat/completions` (`TABURA_INTENT_LLM_URL`, use `off` to disable)
-- STT (whisper.cpp): `http://127.0.0.1:8427/inference` (`TABURA_STT_URL`, use `off` to disable)
+- STT (voxtype): `http://127.0.0.1:8427/v1/audio/transcriptions` (`TABURA_STT_URL`, use `off` to disable)
 - Local canvas session: `local`
 
 ## Start Local Web UI In Temporary Directory

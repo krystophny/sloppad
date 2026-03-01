@@ -371,7 +371,7 @@ function Write-TaskFiles {
 }
 
 function Print-WindowsSTTNotice {
-    Write-Log "Speech-to-text requires whisper.cpp (Linux/macOS only)"
+    Write-Log "Speech-to-text requires voxtype (Linux/macOS only)"
 }
 
 function Open-Browser {

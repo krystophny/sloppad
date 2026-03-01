@@ -518,7 +518,7 @@ test.describe('STT/TTS system tests', () => {
 
     test('Piper-generated M4A round-trips through authenticated /api/stt/transcribe', async () => {
       test.skip(!ffmpegUp, 'ffmpeg not available');
-      const wav = await synthesizePiperWav('Tabura m4a normalization to whisper verification.');
+      const wav = await synthesizePiperWav('Tabura m4a normalization to stt verification.');
       const m4a = transcodeWavToM4A(wav);
       expect(m4a.length).toBeGreaterThan(512);
 

@@ -13,7 +13,7 @@ import (
 const ffmpegNormalizeTimeout = 25 * time.Second
 
 // NormalizeForWhisper converts any incoming audio payload to a deterministic
-// whisper-friendly format: mono 16k WAV.
+// STT-service-friendly format: mono 16k WAV.
 func NormalizeForWhisper(mimeType string, data []byte) (string, []byte, error) {
 	_ = NormalizeMimeType(mimeType)
 	wav, err := transcodeToMono16kWAV(data)

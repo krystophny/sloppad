@@ -41,7 +41,7 @@ EOF
   assert_contains "${output_dir}/aur/PKGBUILD" 'pkgver=1.2.3'
   assert_contains "${output_dir}/aur/PKGBUILD" 'source_x86_64=("https://github.com/krystophny/tabura/releases/download/v1.2.3/tabura_1.2.3_linux_amd64.tar.gz")'
   assert_contains "${output_dir}/aur/PKGBUILD" "sha256sums_aarch64=('2222222222222222222222222222222222222222222222222222222222222222')"
-  assert_contains "${output_dir}/aur/PKGBUILD" "whisper.cpp: speech-to-text sidecar"
+  assert_contains "${output_dir}/aur/PKGBUILD" "voxtype: speech-to-text sidecar"
 
   assert_contains "${output_dir}/winget/manifests/k/krystophny/tabura/1.2.3/krystophny.tabura.yaml" 'PackageVersion: 1.2.3'
   assert_contains "${output_dir}/winget/manifests/k/krystophny/tabura/1.2.3/krystophny.tabura.installer.yaml" 'InstallerUrl: https://github.com/krystophny/tabura/releases/download/v1.2.3/tabura_1.2.3_windows_amd64.zip'

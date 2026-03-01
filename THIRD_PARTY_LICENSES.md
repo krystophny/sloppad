@@ -21,7 +21,7 @@ bundled in the repository build outputs or downloaded at setup/runtime.
 | Piper TTS Python runtime | GPL | Installed into isolated Python virtualenv and exposed over local HTTP |
 | Piper voice models | Per-model (see Hugging Face model cards) | Downloaded model files |
 | ffmpeg | GPL/LGPL (package dependent) | Installed as system package |
-| whisper.cpp | MIT | Installed as external STT sidecar (whisper-server) |
+| voxtype | MIT | Installed as external STT sidecar service |
 
 ## Planned Optional Downloads
 

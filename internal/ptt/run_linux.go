@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	evKey  = 0x01
-	keyUp  = 0
+	evKey   = 0x01
+	keyUp   = 0
 	keyDown = 1
 
 	inputEventSize = 24 // sizeof(struct input_event) on linux/amd64
@@ -127,7 +127,7 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 func processAndOutput(cfg Config, wav []byte, replacements []stt.Replacement) {
-	text, err := TranscribeAudio(cfg.WhisperURL, wav, replacements)
+	text, err := TranscribeAudio(cfg.STTURL, wav, replacements)
 	if err != nil {
 		if stt.IsRetryableNoSpeechError(err) {
 			log.Printf("no speech detected: %v", err)
