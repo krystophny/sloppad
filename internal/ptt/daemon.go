@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -24,7 +25,7 @@ const (
 type Config struct {
 	DevicePath string // evdev device path, e.g. /dev/input/event5
 	KeyCode    uint16 // evdev key code (default: KEY_F13 = 183)
-	WhisperURL string // whisper.cpp sidecar URL (default: http://127.0.0.1:8427)
+	STTURL     string // STT sidecar URL (default: http://127.0.0.1:8427)
 	WebAPIURL  string // tabura web API URL for replacements (default: http://127.0.0.1:8420)
 	OutputMode string // "type" (ydotool) or "clipboard" (wl-copy)
 }
@@ -33,7 +34,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		KeyCode:    183, // KEY_F13
-		WhisperURL: "http://127.0.0.1:8427",
+		STTURL:     "http://127.0.0.1:8427",
 		WebAPIURL:  "http://127.0.0.1:8420",
 		OutputMode: "type",
 	}
@@ -61,8 +62,8 @@ func WrapWAV(pcm []byte) []byte {
 	return buf
 }
 
-// TranscribeAudio sends WAV audio to the whisper.cpp sidecar and returns text.
-func TranscribeAudio(whisperURL string, wav []byte, replacements []stt.Replacement) (string, error) {
+// TranscribeAudio sends WAV audio to an OpenAI-compatible STT sidecar and returns text.
+func TranscribeAudio(sttURL string, wav []byte, replacements []stt.Replacement) (string, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	part, err := writer.CreateFormFile("file", "audio.wav")
@@ -75,11 +76,22 @@ func TranscribeAudio(whisperURL string, wav []byte, replacements []stt.Replaceme
 	if err := writer.WriteField("response_format", "json"); err != nil {
 		return "", fmt.Errorf("ptt multipart field: %w", err)
 	}
+	model := strings.TrimSpace(os.Getenv("TABURA_STT_MODEL_NAME"))
+	if model == "" {
+		model = "whisper-1"
+	}
+	if err := writer.WriteField("model", model); err != nil {
+		return "", fmt.Errorf("ptt model field: %w", err)
+	}
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("ptt multipart close: %w", err)
 	}
 
-	endpoint := strings.TrimRight(strings.TrimSpace(whisperURL), "/") + "/inference"
+	baseURL := strings.TrimRight(strings.TrimSpace(sttURL), "/")
+	endpoint := baseURL
+	if !strings.Contains(baseURL, "/v1/audio/transcriptions") {
+		endpoint = baseURL + "/v1/audio/transcriptions"
+	}
 	client := &http.Client{Timeout: 90 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, endpoint, &body)
 	if err != nil {

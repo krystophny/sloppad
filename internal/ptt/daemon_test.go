@@ -66,7 +66,7 @@ func TestTranscribeAudioWithMockServer(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/inference" {
+		if r.URL.Path != "/v1/audio/transcriptions" {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -92,6 +92,10 @@ func TestTranscribeAudioWithMockServer(t *testing.T) {
 		format := r.FormValue("response_format")
 		if format != "json" {
 			http.Error(w, "only json format supported", http.StatusBadRequest)
+			return
+		}
+		if r.FormValue("model") != "whisper-1" {
+			http.Error(w, "missing model", http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -235,8 +239,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.KeyCode != 183 {
 		t.Fatalf("expected key code 183, got %d", cfg.KeyCode)
 	}
-	if cfg.WhisperURL != "http://127.0.0.1:8427" {
-		t.Fatalf("unexpected whisper URL: %s", cfg.WhisperURL)
+	if cfg.STTURL != "http://127.0.0.1:8427" {
+		t.Fatalf("unexpected stt URL: %s", cfg.STTURL)
 	}
 	if cfg.WebAPIURL != "http://127.0.0.1:8420" {
 		t.Fatalf("unexpected web API URL: %s", cfg.WebAPIURL)

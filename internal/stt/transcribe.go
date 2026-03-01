@@ -9,8 +9,8 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -28,8 +28,8 @@ var (
 	ErrSTTDisabled = errors.New("stt sidecar is not configured")
 )
 
-// whisperResponse is the JSON envelope returned by whisper-server /inference.
-type whisperResponse struct {
+// sttResponse is the JSON envelope returned by OpenAI-compatible STT servers.
+type sttResponse struct {
 	Text     string                   `json:"text"`
 	Language string                   `json:"language,omitempty"`
 	Segments []whisperResponseSegment `json:"segments,omitempty"`
@@ -46,17 +46,17 @@ type whisperResult struct {
 	Score    float64
 }
 
-// Transcribe sends audio data to a whisper.cpp server's /inference endpoint
-// and returns the transcript text. serverURL is the base URL of the whisper
-// sidecar (e.g. "http://127.0.0.1:8427").
+// Transcribe sends audio data to an OpenAI-compatible STT endpoint and returns
+// transcript text. serverURL is typically the base URL of the local STT sidecar
+// (e.g. "http://127.0.0.1:8427").
 // Privacy: audio is transmitted only via HTTP POST; no temp files are created.
 // See docs/meeting-notes-privacy.md.
 func Transcribe(serverURL, mimeType string, data []byte, replacements []Replacement) (string, error) {
 	return TranscribeWithOptions(serverURL, mimeType, data, replacements, TranscribeOptions{})
 }
 
-// TranscribeWithOptions sends audio data to whisper.cpp and optionally applies
-// constrained language selection and pre-VAD gating.
+// TranscribeWithOptions sends audio data to OpenAI-compatible STT servers with
+// optional language and prompt controls plus pre-VAD gating.
 func TranscribeWithOptions(serverURL, mimeType string, data []byte, replacements []Replacement, options TranscribeOptions) (string, error) {
 	if strings.TrimSpace(serverURL) == "" {
 		return "", ErrSTTDisabled
@@ -107,65 +107,13 @@ func TranscribeWithOptions(serverURL, mimeType string, data []byte, replacements
 		return ApplyReplacements(res.Text, replacements), nil
 	}
 
-	return transcribeWithConstrainedLanguages(serverURL, mimeType, data, allowed, prompt, options.Translate, replacements)
-}
-
-func transcribeWithConstrainedLanguages(serverURL, mimeType string, data []byte, allowed []string, prompt string, translate bool, replacements []Replacement) (string, error) {
-	type candidate struct {
-		lang string
-		res  whisperResult
-		err  error
-		idx  int
+	// Multi-language selection: defer to backend constrained auto-detection.
+	// Voxtype service constrains auto mode via its allowed-language config.
+	res, err := transcribeOnce(serverURL, mimeType, data, "auto", prompt, options.Translate, "json")
+	if err != nil {
+		return "", err
 	}
-
-	candidates := make([]candidate, len(allowed))
-	var wg sync.WaitGroup
-	wg.Add(len(allowed))
-	for i, lang := range allowed {
-		i := i
-		lang := lang
-		go func() {
-			defer wg.Done()
-			res, err := transcribeOnce(serverURL, mimeType, data, lang, prompt, translate, "verbose_json")
-			candidates[i] = candidate{lang: lang, res: res, err: err, idx: i}
-		}()
-	}
-	wg.Wait()
-
-	var best *candidate
-	var firstRetryable error
-	var firstErr error
-	for i := range candidates {
-		c := &candidates[i]
-		if c.err != nil {
-			if IsRetryableNoSpeechError(c.err) {
-				if firstRetryable == nil {
-					firstRetryable = c.err
-				}
-			} else if firstErr == nil {
-				firstErr = c.err
-			}
-			continue
-		}
-		if best == nil {
-			best = c
-			continue
-		}
-		if c.res.Score > best.res.Score {
-			best = c
-		}
-	}
-
-	if best != nil {
-		return ApplyReplacements(best.res.Text, replacements), nil
-	}
-	if firstRetryable != nil {
-		return "", firstRetryable
-	}
-	if firstErr != nil {
-		return "", firstErr
-	}
-	return "", ErrNoTranscriptOutput
+	return ApplyReplacements(res.Text, replacements), nil
 }
 
 func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt string, translate bool, responseFormat string) (whisperResult, error) {
@@ -186,6 +134,13 @@ func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt st
 	}
 	if err := writer.WriteField("response_format", format); err != nil {
 		return whisperResult{}, fmt.Errorf("stt multipart field: %w", err)
+	}
+	model := strings.TrimSpace(os.Getenv("TABURA_STT_MODEL_NAME"))
+	if model == "" {
+		model = "whisper-1"
+	}
+	if err := writer.WriteField("model", model); err != nil {
+		return whisperResult{}, fmt.Errorf("stt model field: %w", err)
 	}
 	if v := strings.TrimSpace(language); v != "" {
 		if err := writer.WriteField("language", v); err != nil {
@@ -209,7 +164,15 @@ func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt st
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	endpoint := strings.TrimRight(strings.TrimSpace(serverURL), "/") + "/inference"
+	baseURL := strings.TrimRight(strings.TrimSpace(serverURL), "/")
+	endpoint := baseURL
+	if !strings.Contains(baseURL, "/v1/audio/transcriptions") && !strings.Contains(baseURL, "/v1/audio/translations") {
+		if translate {
+			endpoint = baseURL + "/v1/audio/translations"
+		} else {
+			endpoint = baseURL + "/v1/audio/transcriptions"
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, &body)
 	if err != nil {
 		return whisperResult{}, fmt.Errorf("stt request: %w", err)
@@ -227,7 +190,7 @@ func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt st
 		return whisperResult{}, fmt.Errorf("stt HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 
-	var result whisperResponse
+	var result sttResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&result); err != nil {
 		return whisperResult{}, fmt.Errorf("stt response decode: %w", err)
 	}
@@ -235,6 +198,9 @@ func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt st
 	text := strings.TrimSpace(result.Text)
 	if text == "" {
 		return whisperResult{}, ErrNoTranscriptOutput
+	}
+	if IsPromptEcho(text, prompt) {
+		return whisperResult{}, ErrLikelyHallucination
 	}
 	if IsWhisperHallucination(text) {
 		return whisperResult{}, ErrLikelyHallucination
@@ -251,7 +217,7 @@ func transcribeOnce(serverURL, mimeType string, data []byte, language, prompt st
 	}, nil
 }
 
-func computeWhisperScore(result whisperResponse, text string) float64 {
+func computeWhisperScore(result sttResponse, text string) float64 {
 	var (
 		logprobSum  float64
 		logprobN    float64
@@ -293,12 +259,39 @@ func IsRetryableNoSpeechError(err error) bool {
 func IsWhisperHallucination(text string) bool {
 	t := strings.ToLower(strings.TrimSpace(text))
 	t = strings.TrimRight(t, ".!?,;: ")
+	if strings.HasPrefix(t, "the spoken language is one of:") {
+		return true
+	}
 	for _, h := range whisperHallucinations {
 		if t == h {
 			return true
 		}
 	}
 	return false
+}
+
+// IsPromptEcho returns true when Whisper appears to have echoed the prompt
+// rather than transcribing speech.
+func IsPromptEcho(text, prompt string) bool {
+	normText := normalizePromptCompare(text)
+	normPrompt := normalizePromptCompare(prompt)
+	if normText == "" || normPrompt == "" {
+		return false
+	}
+	if normText == normPrompt {
+		return true
+	}
+	if strings.Contains(normPrompt, "spoken language is one of:") && strings.HasPrefix(normText, "the spoken language is one of:") {
+		return true
+	}
+	return false
+}
+
+func normalizePromptCompare(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	s = strings.Trim(s, "\"'`“”‘’")
+	s = strings.TrimRight(s, ".!?,;: ")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // IsLikelyNoise returns true when the transcript looks like background noise

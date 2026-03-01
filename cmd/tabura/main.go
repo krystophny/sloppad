@@ -344,7 +344,7 @@ func cmdPTTDaemon(args []string) int {
 	cfg := ptt.DefaultConfig()
 	fs.StringVar(&cfg.DevicePath, "device", cfg.DevicePath, "evdev device path (auto-detected if empty)")
 	keyCode := fs.Int("key", int(cfg.KeyCode), "evdev key code to listen for (183=F13)")
-	fs.StringVar(&cfg.WhisperURL, "whisper-url", cfg.WhisperURL, "whisper.cpp sidecar URL")
+	fs.StringVar(&cfg.STTURL, "stt-url", cfg.STTURL, "STT sidecar URL")
 	fs.StringVar(&cfg.WebAPIURL, "web-api-url", cfg.WebAPIURL, "tabura web API URL for STT replacements")
 	fs.StringVar(&cfg.OutputMode, "output", cfg.OutputMode, "output mode: type (ydotool) or clipboard (wl-copy)")
 	if err := fs.Parse(args); err != nil {

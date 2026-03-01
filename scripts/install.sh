@@ -552,61 +552,49 @@ NOTICE
     fi
 }
 
-install_whisper_stt() {
+install_voxtype_stt() {
     if [ "$SKIP_STT" = "1" ]; then
-        log "skipping whisper STT setup due to TABURA_INSTALL_SKIP_STT=1"
+        log "skipping voxtype STT setup due to TABURA_INSTALL_SKIP_STT=1"
         return
     fi
     cat <<NOTICE
-=== Whisper STT (MIT, runs as HTTP sidecar) ===
-whisper.cpp provides local speech-to-text via an HTTP endpoint on port 8427.
+=== Voxtype STT (MIT, runs as HTTP sidecar) ===
+voxtype provides local OpenAI-compatible speech-to-text on port 8427.
 License: MIT (isolated sidecar process, does not affect Tabura MIT license)
-Model: ggml-large-v3-turbo (~1.5 GB download from Hugging Face)
+Model: large-v3-turbo (~1.5 GB download from Hugging Face via voxtype)
 NOTICE
-    if ! confirm_default_yes "Install whisper.cpp STT sidecar?"; then
-        log "skipping whisper STT setup"
+    if ! confirm_default_yes "Install voxtype STT sidecar?"; then
+        log "skipping voxtype STT setup"
         return
     fi
 
-    if have_cmd whisper-server; then
-        log "whisper-server already installed"
+    if have_cmd voxtype; then
+        log "voxtype already installed"
     elif [ "$TABURA_OS" = "linux" ] && have_cmd pacman; then
-        if confirm_default_yes "Install whisper.cpp-cuda via pacman/AUR? (falls back to whisper.cpp)"; then
+        if confirm_default_yes "Install voxtype via AUR (voxtype-bin, fallback voxtype)?"; then
             if have_cmd paru; then
-                run_cmd paru -S --noconfirm whisper.cpp-cuda || run_cmd paru -S --noconfirm whisper.cpp
+                run_cmd paru -S --noconfirm voxtype-bin || run_cmd paru -S --noconfirm voxtype
             elif have_cmd yay; then
-                run_cmd yay -S --noconfirm whisper.cpp-cuda || run_cmd yay -S --noconfirm whisper.cpp
+                run_cmd yay -S --noconfirm voxtype-bin || run_cmd yay -S --noconfirm voxtype
             else
-                log "no AUR helper found (paru/yay); install whisper.cpp manually"
+                log "no AUR helper found (paru/yay); install voxtype manually"
             fi
         fi
     elif [ "$TABURA_OS" = "darwin" ] && have_cmd brew; then
-        if confirm_default_yes "Install whisper.cpp via Homebrew?"; then
-            run_cmd brew install whisper-cpp
+        if confirm_default_yes "Install voxtype via Homebrew?"; then
+            run_cmd brew install voxtype
         fi
     else
-        log "whisper-server not found; install whisper.cpp and ensure whisper-server is on PATH"
+        log "voxtype not found; install voxtype and ensure it is on PATH"
     fi
 
-    if have_cmd whisper-server; then
-        local model_dir="${HOME}/.local/share/tabura-stt/models"
-        local model_file="ggml-large-v3-turbo.bin"
-        local model_path="${model_dir}/${model_file}"
-        if [ -f "$model_path" ]; then
-            log "whisper model already present: ${model_file}"
-        elif confirm_default_yes "Download whisper model ggml-large-v3-turbo (~1.5 GB)?"; then
-            run_cmd mkdir -p "$model_dir"
-            local model_url="https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${model_file}"
-            if [ "$DRY_RUN" = "1" ]; then
-                run_cmd curl -fL -o "$model_path" "$model_url"
-            else
-                curl -fL --retry 3 --retry-delay 2 -o "${model_path}.tmp" "$model_url"
-                mv "${model_path}.tmp" "$model_path"
-            fi
+    if have_cmd voxtype; then
+        if confirm_default_yes "Download voxtype model large-v3-turbo (~1.5 GB)?"; then
+            run_cmd voxtype setup --download --model large-v3-turbo --no-post-install
         fi
         return
     fi
-    log "whisper-server was not installed; speech-to-text remains unavailable"
+    log "voxtype was not installed; speech-to-text remains unavailable"
 }
 
 write_systemd_units() {
@@ -945,7 +933,7 @@ install_flow() {
     setup_piper_tts
     setup_intent_classifier "$tmpdir"
     setup_local_llm "$tmpdir"
-    install_whisper_stt
+    install_voxtype_stt
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos
     else
