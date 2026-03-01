@@ -20,6 +20,9 @@ const (
 	HookChatPreUserMessage     = "chat.pre_user_message"
 	HookChatPreAssistantPrompt = "chat.pre_assistant_prompt"
 	HookChatPostAssistantReply = "chat.post_assistant_response"
+	HookMeetingPartnerSession  = "meeting_partner.session_state"
+	HookMeetingPartnerSegment  = "meeting_partner.segment_finalized"
+	HookMeetingPartnerDecide   = "meeting_partner.decide"
 )
 
 const (
@@ -47,6 +50,16 @@ type HookResult struct {
 	Reason  string
 }
 
+type MeetingPartnerDecision struct {
+	Decision     string                 `json:"decision"`
+	ResponseText string                 `json:"response_text,omitempty"`
+	Channel      string                 `json:"channel,omitempty"`
+	Urgency      string                 `json:"urgency,omitempty"`
+	Action       map[string]interface{} `json:"action,omitempty"`
+	Reason       string                 `json:"reason,omitempty"`
+	PluginID     string                 `json:"plugin_id,omitempty"`
+}
+
 type PluginInfo struct {
 	ID        string   `json:"id"`
 	Kind      string   `json:"kind"`
@@ -67,9 +80,15 @@ type manifest struct {
 }
 
 type hookResponse struct {
-	Text    *string `json:"text"`
-	Blocked bool    `json:"blocked,omitempty"`
-	Reason  string  `json:"reason,omitempty"`
+	Text           *string                 `json:"text"`
+	Blocked        bool                    `json:"blocked,omitempty"`
+	Reason         string                  `json:"reason,omitempty"`
+	Decision       string                  `json:"decision,omitempty"`
+	ResponseText   string                  `json:"response_text,omitempty"`
+	Channel        string                  `json:"channel,omitempty"`
+	Urgency        string                  `json:"urgency,omitempty"`
+	Action         map[string]interface{}  `json:"action,omitempty"`
+	MeetingPartner *MeetingPartnerDecision `json:"meeting_partner,omitempty"`
 }
 
 type runtimePlugin struct {
@@ -181,6 +200,32 @@ func (m *Manager) Apply(ctx context.Context, req HookRequest) HookResult {
 		}
 	}
 	return HookResult{Text: text}
+}
+
+func (m *Manager) DecideMeetingPartner(ctx context.Context, req HookRequest) (MeetingPartnerDecision, bool) {
+	if m == nil || len(m.plugins) == 0 {
+		return MeetingPartnerDecision{}, false
+	}
+	hook := strings.TrimSpace(req.Hook)
+	if hook == "" {
+		hook = HookMeetingPartnerDecide
+	}
+	req.Hook = hook
+	for _, plug := range m.plugins {
+		if _, ok := plug.hookSet[hook]; !ok {
+			continue
+		}
+		resp, err := m.call(ctx, plug, req)
+		if err != nil {
+			m.logf("plugin %q hook %q failed: %v", plug.info.ID, hook, err)
+			continue
+		}
+		if decision, ok := decodeMeetingPartnerDecision(resp); ok {
+			decision.PluginID = plug.info.ID
+			return decision, true
+		}
+	}
+	return MeetingPartnerDecision{}, false
 }
 
 func (m *Manager) call(parent context.Context, plug runtimePlugin, req HookRequest) (hookResponse, error) {
@@ -312,4 +357,52 @@ func normalizeHooks(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func decodeMeetingPartnerDecision(resp hookResponse) (MeetingPartnerDecision, bool) {
+	if resp.MeetingPartner != nil {
+		decision := normalizeMeetingPartnerDecision(*resp.MeetingPartner)
+		if decision.Decision != "" {
+			return decision, true
+		}
+	}
+	decision := normalizeMeetingPartnerDecision(MeetingPartnerDecision{
+		Decision:     resp.Decision,
+		ResponseText: resp.ResponseText,
+		Channel:      resp.Channel,
+		Urgency:      resp.Urgency,
+		Action:       resp.Action,
+		Reason:       resp.Reason,
+	})
+	if decision.Decision == "" {
+		return MeetingPartnerDecision{}, false
+	}
+	return decision, true
+}
+
+func normalizeMeetingPartnerDecision(in MeetingPartnerDecision) MeetingPartnerDecision {
+	in.Decision = strings.ToLower(strings.TrimSpace(in.Decision))
+	in.ResponseText = strings.TrimSpace(in.ResponseText)
+	in.Channel = strings.ToLower(strings.TrimSpace(in.Channel))
+	in.Urgency = strings.ToLower(strings.TrimSpace(in.Urgency))
+	in.Reason = strings.TrimSpace(in.Reason)
+	switch in.Decision {
+	case "noop":
+		return in
+	case "respond":
+		if in.Channel == "" {
+			in.Channel = "voice"
+		}
+		if in.Urgency == "" {
+			in.Urgency = "normal"
+		}
+		return in
+	case "action":
+		if in.Action == nil {
+			in.Action = map[string]interface{}{}
+		}
+		return in
+	default:
+		return MeetingPartnerDecision{}
+	}
 }

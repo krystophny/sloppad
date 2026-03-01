@@ -266,3 +266,61 @@ func TestApplyPreAssistantPromptHookBlocked(t *testing.T) {
 		t.Fatalf("error=%q, want contains %q", err.Error(), "prompt blocked")
 	}
 }
+
+func TestMeetingPartnerDecideEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"meeting_partner":{"decision":"respond","response_text":"Let me summarize.","channel":"voice","urgency":"normal"}}`))
+	}))
+	defer server.Close()
+
+	pluginDir := t.TempDir()
+	writePluginManifest(t, pluginDir, "meeting.json", map[string]any{
+		"id":       "meeting-partner",
+		"kind":     "webhook",
+		"endpoint": server.URL,
+		"hooks":    []string{"meeting_partner.decide"},
+		"enabled":  true,
+	})
+	app := newAuthedTestAppWithPluginDir(t, pluginDir)
+	rr := doAuthedJSONRequest(
+		t,
+		app.Router(),
+		http.MethodPost,
+		"/api/plugins/meeting-partner/decide",
+		map[string]any{
+			"session_id":  "s1",
+			"project_key": "p1",
+			"text":        "Could you summarize that?",
+			"metadata": map[string]any{
+				"source": "meeting_notes",
+			},
+		},
+	)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		OK       bool `json:"ok"`
+		Matched  bool `json:"matched"`
+		Decision struct {
+			Decision     string `json:"decision"`
+			ResponseText string `json:"response_text"`
+			PluginID     string `json:"plugin_id"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.OK || !payload.Matched {
+		t.Fatalf("expected ok+matched true, got %+v", payload)
+	}
+	if payload.Decision.Decision != "respond" {
+		t.Fatalf("decision=%q, want %q", payload.Decision.Decision, "respond")
+	}
+	if payload.Decision.ResponseText != "Let me summarize." {
+		t.Fatalf("response_text=%q, want %q", payload.Decision.ResponseText, "Let me summarize.")
+	}
+	if payload.Decision.PluginID != "meeting-partner" {
+		t.Fatalf("plugin_id=%q, want %q", payload.Decision.PluginID, "meeting-partner")
+	}
+}

@@ -308,6 +308,7 @@ func (a *App) Router() http.Handler {
 	// runtime
 	r.Get("/api/runtime", a.handleRuntime)
 	r.Get("/api/plugins", a.handlePlugins)
+	r.Post("/api/plugins/meeting-partner/decide", a.handleMeetingPartnerDecide)
 	r.Get("/api/projects", a.handleProjectsList)
 	r.Post("/api/projects", a.handleProjectCreate)
 	r.Post("/api/projects/{project_id}/activate", a.handleProjectActivate)
@@ -508,6 +509,37 @@ func (a *App) loadedPluginCount() int {
 		return 0
 	}
 	return a.pluginManager.Count()
+}
+
+func (a *App) handleMeetingPartnerDecide(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var req struct {
+		SessionID  string                 `json:"session_id"`
+		ProjectKey string                 `json:"project_key"`
+		Text       string                 `json:"text"`
+		Metadata   map[string]interface{} `json:"metadata"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	decision, matched := a.pluginManager.DecideMeetingPartner(r.Context(), plugins.HookRequest{
+		Hook:       plugins.HookMeetingPartnerDecide,
+		SessionID:  strings.TrimSpace(req.SessionID),
+		ProjectKey: strings.TrimSpace(req.ProjectKey),
+		Text:       strings.TrimSpace(req.Text),
+		Metadata:   req.Metadata,
+	})
+	if !matched {
+		decision = plugins.MeetingPartnerDecision{Decision: "noop"}
+	}
+	writeJSON(w, map[string]interface{}{
+		"ok":       true,
+		"matched":  matched,
+		"decision": decision,
+	})
 }
 
 func enforceSparkModel(rawModel string) string {
