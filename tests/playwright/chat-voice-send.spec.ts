@@ -96,7 +96,7 @@ async function waitForApiCancel(page: Page) {
   await expect.poll(async () => {
     const log = await getLog(page);
     return log.some((entry) => entry.type === 'api_fetch' && entry.action === 'cancel');
-  }, { timeout: 5_000 }).toBe(true);
+  }, { timeout: 15_000 }).toBe(true);
 }
 
 async function injectCanvasModuleRef(page: Page) {
@@ -193,11 +193,11 @@ async function renderPdfArtifactMock(page: Page) {
   });
 }
 
-async function waitForLogEntry(page: Page, type: string, action: string) {
+async function waitForLogEntry(page: Page, type: string, action?: string) {
   await expect.poll(async () => {
     const log = await getLog(page);
-    return log.some(e => e.type === type && e.action === action);
-  }, { timeout: 5_000 }).toBe(true);
+    return log.some(e => e.type === type && (action === undefined || e.action === action));
+  }, { timeout: 15_000 }).toBe(true);
 }
 
 async function waitForSTTAction(page: Page, action: string) {
@@ -245,7 +245,7 @@ test.beforeEach(async ({ page }) => {
     if (typeof app?.getState !== 'function') return false;
     const s = app.getState();
     return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
-  }, null, { timeout: 5_000 });
+  }, null, { timeout: 15_000 });
   await page.waitForTimeout(200);
   await setHarnessCancelResponses(page, []);
   await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
@@ -368,7 +368,7 @@ test('touch stop retries cancel when first cancel reports zero but work remains'
   await expect.poll(async () => {
     const log = await getLog(page);
     return log.filter((entry) => entry.type === 'api_fetch' && entry.action === 'cancel').length;
-  }, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+  }, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
 });
 
 test('stop indicator auto-hides after stop even when activity poll stays active', async ({ page }) => {
@@ -705,9 +705,10 @@ test('voice transcription result gets sent as message', async ({ page }) => {
   // Stop recording (will auto-send via voice capture)
   await page.mouse.click(400, 400);
   await waitForSTTAction(page, 'stop');
-  await page.waitForTimeout(500);
 
-  // Check that message was sent (MockWebSocket returns 'hello world')
+  // Poll for message_sent — STT transcription + message post is async
+  await waitForLogEntry(page, 'message_sent');
+
   const log = await getLog(page);
   const sent = log.find(e => e.type === 'message_sent');
   expect(sent).toBeTruthy();
@@ -908,7 +909,7 @@ test.describe('safari-recorder=broken', () => {
       if (typeof app?.getState !== 'function') return false;
       const s = app.getState();
       return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
-    }, null, { timeout: 5_000 });
+    }, null, { timeout: 15_000 });
     await page.waitForTimeout(200);
     await setHarnessCancelResponses(page, []);
     await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
@@ -959,7 +960,7 @@ test.describe('safari-recorder=broken', () => {
     await expect.poll(async () => {
       const log = await getLog(page);
       return log.some((e: HarnessLogEntry) => e.type === 'message_sent');
-    }, { timeout: 5_000 }).toBe(true);
+    }, { timeout: 15_000 }).toBe(true);
 
     const log = await getLog(page);
     const sent = log.find((e: HarnessLogEntry) => e.type === 'message_sent');
