@@ -114,6 +114,7 @@
     window.__setSTTTranscribeResponse({ text: 'hello world' }, 200);
     const harnessParams = new URL(window.location.href).searchParams;
     let hotwordInitEnabled = harnessParams.get('hotword') !== 'fail';
+    const safariRecorderBroken = harnessParams.get('safari-recorder') === 'broken';
     let ttsPlaybackDelayMs = 10;
     let hotwordStatus = {
       ok: true,
@@ -892,17 +893,25 @@
         }
         this.state = 'inactive';
         window.__harnessLog.push({ type: 'recorder', action: 'stop' });
-        const bytes = Array.isArray(window.__mediaRecorderChunkBytes)
-          ? window.__mediaRecorderChunkBytes
-          : [1, 2, 3, 4, 5];
-        const chunkMime = typeof window.__mediaRecorderChunkMimeType === 'string'
-          ? window.__mediaRecorderChunkMimeType
-          : this.mimeType;
-        const blob = new Blob([new Uint8Array(bytes)], chunkMime ? { type: chunkMime } : undefined);
-        setTimeout(() => {
-          this._emit('dataavailable', { data: blob });
-          this._emit('stop', {});
-        }, 10);
+        if (safariRecorderBroken) {
+          // Safari fires stop before dataavailable with empty blob data.
+          setTimeout(() => {
+            this._emit('stop', {});
+            this._emit('dataavailable', { data: new Blob([], { type: this.mimeType }) });
+          }, 10);
+        } else {
+          const bytes = Array.isArray(window.__mediaRecorderChunkBytes)
+            ? window.__mediaRecorderChunkBytes
+            : [1, 2, 3, 4, 5];
+          const chunkMime = typeof window.__mediaRecorderChunkMimeType === 'string'
+            ? window.__mediaRecorderChunkMimeType
+            : this.mimeType;
+          const blob = new Blob([new Uint8Array(bytes)], chunkMime ? { type: chunkMime } : undefined);
+          setTimeout(() => {
+            this._emit('dataavailable', { data: blob });
+            this._emit('stop', {});
+          }, 10);
+        }
       }
       requestData() {
         if (!window.__mediaRecorderRequestDataEnabled) return;

@@ -893,3 +893,77 @@ test('ended mic track invalidates cached stream before next recording', async ({
   const log = await getLog(page);
   expect(countGetUserMediaCalls(log)).toBe(1);
 });
+
+// Safari broken MediaRecorder: stop fires before dataavailable, blob is empty.
+// These tests verify the _vadAudioBlob codepath handles this correctly.
+test.describe('safari-recorder=broken', () => {
+  test.beforeEach(async ({ page }) => {
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') console.log(`BROWSER [error]: ${msg.text()}`);
+    });
+    page.on('pageerror', (err) => console.log(`PAGE ERROR: ${err.message}`));
+    await page.goto('/tests/playwright/harness.html?safari-recorder=broken');
+    await page.waitForFunction(() => {
+      const app = (window as any)._taburaApp;
+      if (typeof app?.getState !== 'function') return false;
+      const s = app.getState();
+      return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
+    }, null, { timeout: 5_000 });
+    await page.waitForTimeout(200);
+    await setHarnessCancelResponses(page, []);
+    await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
+    await setHarnessMessagePostDelay(page, 0);
+    await setHarnessSTTTranscribeResponse(page, { text: 'hello world' }, 200);
+  });
+
+  test('VAD auto-stop sends transcript via _vadAudioBlob despite broken recorder', async ({ page }) => {
+    await clearLog(page);
+    await page.evaluate(() => {
+      (window as any).__setVadDbFrames([
+        ...Array.from({ length: 8 }, () => -80),
+        ...Array.from({ length: 10 }, () => -12),
+        ...Array.from({ length: 40 }, () => -80),
+      ]);
+    });
+
+    await page.mouse.click(400, 400);
+    await waitForLogEntry(page, 'recorder', 'start');
+    await waitForSTTAction(page, 'stop');
+    await page.waitForTimeout(250);
+
+    const log = await getLog(page);
+    const sttStart = log.find((e: HarnessLogEntry) => e.type === 'stt' && e.action === 'start');
+    expect(sttStart).toBeTruthy();
+    expect(sttStart!.mime_type).toBe('audio/wav');
+
+    const sttAppends = log.filter((e: HarnessLogEntry) => e.type === 'stt' && e.action === 'append');
+    expect(sttAppends.length).toBeGreaterThan(0);
+    const totalBytes = sttAppends.reduce((sum: number, e: HarnessLogEntry) => sum + Number(e.bytes || 0), 0);
+    expect(totalBytes).toBeGreaterThan(0);
+
+    const sent = log.find((e: HarnessLogEntry) => e.type === 'message_sent');
+    expect(sent).toBeTruthy();
+    expect(sent!.text).toBe('hello world');
+  });
+
+  test('manual tap-stop still works with broken recorder via accumulated chunks', async ({ page }) => {
+    await clearLog(page);
+
+    await page.mouse.click(400, 400);
+    await page.waitForTimeout(500);
+    await waitForLogEntry(page, 'recorder', 'start');
+
+    await page.mouse.click(400, 400);
+    await waitForSTTAction(page, 'stop');
+
+    await expect.poll(async () => {
+      const log = await getLog(page);
+      return log.some((e: HarnessLogEntry) => e.type === 'message_sent');
+    }, { timeout: 5_000 }).toBe(true);
+
+    const log = await getLog(page);
+    const sent = log.find((e: HarnessLogEntry) => e.type === 'message_sent');
+    expect(sent).toBeTruthy();
+    expect(sent!.text).toBe('hello world');
+  });
+});
