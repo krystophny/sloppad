@@ -90,7 +90,7 @@ printf '\n[reports] Running Playwright E2E suite...\n'
 (
   cd "${ROOT_DIR}"
   PLAYWRIGHT_HTML_REPORT="${PLAY_REPORT_DIR}" \
-    npx playwright test --config=playwright.config.ts --output="${PLAY_RESULTS_DIR}" --reporter=json \
+    ./scripts/playwright.sh --config=playwright.config.ts --output="${PLAY_RESULTS_DIR}" --reporter=json \
     > "${PLAY_JSON}" 2> "${PLAY_LOG}"
 )
 
