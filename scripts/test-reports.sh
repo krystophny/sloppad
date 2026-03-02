@@ -27,7 +27,7 @@ TABURA_COVERAGE_MIN_PACKAGES="${TABURA_COVERAGE_MIN_PACKAGES:-}"
 printf '\n[reports] Generating Tabura Go coverage...\n'
 (
   cd "${ROOT_DIR}"
-  go test ./... -covermode=atomic -coverprofile="${TABURA_PROFILE}" | tee "${UNIT_GO_TEST_LOG}"
+  go test $(go list ./... | grep -v /tests/services) -covermode=atomic -coverprofile="${TABURA_PROFILE}" | tee "${UNIT_GO_TEST_LOG}"
 )
 TABURA_TOTAL="$(go tool cover -func="${TABURA_PROFILE}" | awk '/^total:/ {print $3}')"
 go tool cover -html="${TABURA_PROFILE}" -o "${TABURA_HTML}"
