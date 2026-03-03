@@ -416,3 +416,98 @@ func TestClassifyAndExecuteSystemActionHandlesMalformedQwenJSON(t *testing.T) {
 		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)
 	}
 }
+
+func TestClassifyIntentPlanWithLLMRepairsMissingOpenAction(t *testing.T) {
+	callCount := 0
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.TrimSpace(r.URL.Path) != "/v1/chat/completions" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		callCount++
+		content := `{"actions":[{"action":"shell","command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"}]}`
+		if callCount >= 2 {
+			content = `{"actions":[{"action":"shell","command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"},{"action":"open_file_canvas","path":"$last_shell_path"}]}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": content,
+					},
+				},
+			},
+		})
+	}))
+	defer llm.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentClassifierURL = ""
+	app.intentLLMURL = llm.URL
+
+	actions, err := app.classifyIntentPlanWithLLM(context.Background(), "Open README")
+	if err != nil {
+		t.Fatalf("classifyIntentPlanWithLLM returned error: %v", err)
+	}
+	if callCount < 2 {
+		t.Fatalf("expected retry call for missing open action, got %d calls", callCount)
+	}
+	if len(actions) < 2 {
+		t.Fatalf("actions length = %d, want >= 2", len(actions))
+	}
+	if !planContainsAction(actions, "open_file_canvas") {
+		t.Fatalf("expected repaired plan with open_file_canvas, got %#v", actions)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionOpenRequestReturnsExplicitFailureWhenPlanInvalid(t *testing.T) {
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.TrimSpace(r.URL.Path) != "/v1/chat/completions" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": `{"action":"chat"}`,
+					},
+				},
+			},
+		})
+	}))
+	defer llm.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentClassifierURL = ""
+	app.intentLLMURL = llm.URL
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Open README")
+	if !handled {
+		t.Fatal("expected explicit handled failure for invalid open-file plan")
+	}
+	if len(payloads) != 0 {
+		t.Fatalf("payloads length = %d, want 0", len(payloads))
+	}
+	if !strings.Contains(strings.ToLower(message), "couldn't open") {
+		t.Fatalf("unexpected failure message: %q", message)
+	}
+}

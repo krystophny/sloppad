@@ -509,6 +509,36 @@ func normalizeSystemActionForExecution(action *SystemAction, fallbackText string
 	return action
 }
 
+func requestRequiresOpenCanvasAction(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	prefixes := []string{"open ", "show ", "display "}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func planContainsAction(actions []*SystemAction, actionName string) bool {
+	needle := strings.ToLower(strings.TrimSpace(actionName))
+	if needle == "" {
+		return false
+	}
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(action.Action), needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*SystemAction, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(a.intentLLMURL), "/")
 	if baseURL == "" {
@@ -535,72 +565,88 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 			},
 		}}, nil
 	}
+	requestPlan := func(systemPrompt string, userPrompt string) ([]*SystemAction, error) {
+		requestBody, _ := json.Marshal(map[string]interface{}{
+			"model":       a.localIntentLLMModel(),
+			"temperature": 0,
+			"max_tokens":  256,
+			"response_format": map[string]interface{}{
+				"type": "json_object",
+			},
+			"chat_template_kwargs": map[string]interface{}{
+				"enable_thinking": false,
+			},
+			"messages": []map[string]string{
+				{"role": "system", "content": systemPrompt},
+				{"role": "user", "content": userPrompt},
+			},
+		})
+		requestCtx, cancel := context.WithTimeout(ctx, intentLLMRequestTimeout)
+		defer cancel()
+		req, err := http.NewRequestWithContext(
+			requestCtx,
+			http.MethodPost,
+			baseURL+"/v1/chat/completions",
+			bytes.NewReader(requestBody),
+		)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, intentLLMResponseLimit))
+			return nil, fmt.Errorf("intent llm HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var payload localIntentLLMChatCompletionResponse
+		if err := json.NewDecoder(io.LimitReader(resp.Body, intentLLMResponseLimit)).Decode(&payload); err != nil {
+			return nil, err
+		}
+		if len(payload.Choices) == 0 {
+			return nil, nil
+		}
+		content := strings.TrimSpace(payload.Choices[0].Message.Content)
+		if content == "" {
+			return nil, nil
+		}
+		actions, parseErr := parseSystemActionsJSON(stripCodeFence(content))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if len(actions) == 0 {
+			return nil, nil
+		}
+		normalized := make([]*SystemAction, 0, len(actions))
+		for _, action := range actions {
+			if normalizedAction := normalizeSystemActionForExecution(action, trimmedText); normalizedAction != nil {
+				normalized = append(normalized, normalizedAction)
+			}
+		}
+		if len(normalized) == 0 {
+			return nil, nil
+		}
+		return normalized, nil
+	}
 
-	requestBody, _ := json.Marshal(map[string]interface{}{
-		"model":       a.localIntentLLMModel(),
-		"temperature": 0,
-		"max_tokens":  256,
-		"response_format": map[string]interface{}{
-			"type": "json_object",
-		},
-		"chat_template_kwargs": map[string]interface{}{
-			"enable_thinking": false,
-		},
-		"messages": []map[string]string{
-			{"role": "system", "content": intentLLMSystemPrompt},
-			{"role": "user", "content": trimmedText},
-		},
-	})
-	requestCtx, cancel := context.WithTimeout(ctx, intentLLMRequestTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(
-		requestCtx,
-		http.MethodPost,
-		baseURL+"/v1/chat/completions",
-		bytes.NewReader(requestBody),
-	)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, intentLLMResponseLimit))
-		return nil, fmt.Errorf("intent llm HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	actions, err := requestPlan(intentLLMSystemPrompt, trimmedText)
+	if err != nil || len(actions) == 0 {
+		return actions, err
 	}
 
-	var payload localIntentLLMChatCompletionResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, intentLLMResponseLimit)).Decode(&payload); err != nil {
-		return nil, err
-	}
-	if len(payload.Choices) == 0 {
-		return nil, nil
-	}
-	content := strings.TrimSpace(payload.Choices[0].Message.Content)
-	if content == "" {
-		return nil, nil
-	}
-	actions, parseErr := parseSystemActionsJSON(stripCodeFence(content))
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	if len(actions) == 0 {
-		return nil, nil
-	}
-	normalized := make([]*SystemAction, 0, len(actions))
-	for _, action := range actions {
-		if normalizedAction := normalizeSystemActionForExecution(action, trimmedText); normalizedAction != nil {
-			normalized = append(normalized, normalizedAction)
+	if requestRequiresOpenCanvasAction(trimmedText) && !planContainsAction(actions, "open_file_canvas") {
+		previousPlanJSON, _ := json.Marshal(actions)
+		retrySystemPrompt := intentLLMSystemPrompt + "\n\nConstraint: for explicit open/show/display file requests, final step MUST be open_file_canvas."
+		retryUserPrompt := "User request:\n" + trimmedText + "\n\nPrevious invalid plan (missing open_file_canvas):\n" + string(previousPlanJSON)
+		if repaired, repairErr := requestPlan(retrySystemPrompt, retryUserPrompt); repairErr == nil && len(repaired) > 0 {
+			actions = repaired
 		}
 	}
-	if len(normalized) == 0 {
-		return nil, nil
-	}
-	return normalized, nil
+
+	return actions, nil
 }
 
 func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAction, error) {
@@ -636,6 +682,9 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 			if message, payloads, ok := tryExecutePlan(llmActions); ok {
 				return message, payloads, true
 			}
+		}
+		if requestRequiresOpenCanvasAction(trimmedText) {
+			return "I couldn't open that file on canvas. Please provide an exact relative path (for example: README.md).", nil, true
 		}
 		return "", nil, false
 	}
