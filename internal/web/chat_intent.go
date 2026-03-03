@@ -58,6 +58,7 @@ Policy:
 - For multi-step tasks, return {"actions":[{"action":"..."}, {"action":"..."}]}.
 - For open/show file requests where the exact path is uncertain, prefer a two-step plan: shell find/list first, then open_file_canvas.
 - For open/show file requests with partial names, search similar filenames (for example markdown/text variants) via shell before open_file_canvas.
+- For filename search, prefer case-insensitive matching (for example: find ... -iname ...).
 - When chaining shell -> open_file_canvas, set path="$last_shell_path".
 - In JSON command strings, prefer single quotes inside shell command arguments.
 
@@ -543,6 +544,38 @@ func planContainsAction(actions []*SystemAction, actionName string) bool {
 	return false
 }
 
+func ensureOpenCanvasTerminalAction(actions []*SystemAction) []*SystemAction {
+	if len(actions) == 0 || planContainsAction(actions, "open_file_canvas") {
+		return actions
+	}
+	hasShell := false
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(action.Action), "shell") {
+			continue
+		}
+		if strings.TrimSpace(systemActionShellCommand(action.Params)) == "" {
+			continue
+		}
+		hasShell = true
+		break
+	}
+	if !hasShell {
+		return actions
+	}
+	repaired := make([]*SystemAction, 0, len(actions)+1)
+	repaired = append(repaired, actions...)
+	repaired = append(repaired, &SystemAction{
+		Action: "open_file_canvas",
+		Params: map[string]interface{}{
+			"path": systemActionLastShellPathPlaceholder,
+		},
+	})
+	return repaired
+}
+
 func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*SystemAction, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(a.intentLLMURL), "/")
 	if baseURL == "" {
@@ -637,7 +670,11 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		return normalized, nil
 	}
 
-	actions, err := requestPlan(intentLLMSystemPrompt, trimmedText)
+	initialSystemPrompt := intentLLMSystemPrompt
+	if requiresOpenCanvas {
+		initialSystemPrompt += "\n\nConstraint: for explicit open/show/display file requests you MUST return an actions array whose final step is open_file_canvas. If path is uncertain, include a shell search step first and then use path=\"$last_shell_path\"."
+	}
+	actions, err := requestPlan(initialSystemPrompt, trimmedText)
 	if err != nil {
 		return nil, err
 	}
@@ -658,6 +695,9 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		retryUserPrompt := "User request:\n" + trimmedText + "\n\nExtracted filename hints:\n" + hintText + "\n\nPrevious invalid plan (missing open_file_canvas or empty):\n" + previousPlanJSON
 		if repaired, repairErr := requestPlan(retrySystemPrompt, retryUserPrompt); repairErr == nil && len(repaired) > 0 {
 			actions = repaired
+		}
+		if !planContainsAction(actions, "open_file_canvas") {
+			actions = ensureOpenCanvasTerminalAction(actions)
 		}
 		if !planContainsAction(actions, "open_file_canvas") {
 			return nil, nil

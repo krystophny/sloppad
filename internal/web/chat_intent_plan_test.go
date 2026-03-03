@@ -584,7 +584,7 @@ func TestClassifyIntentPlanWithLLMRepairsChatResponseForOpenRequest(t *testing.T
 	}
 }
 
-func TestClassifyIntentPlanWithLLMRejectsOpenRequestWithoutOpenActionAfterRetry(t *testing.T) {
+func TestClassifyIntentPlanWithLLMAppendsOpenActionAfterRetryForShellOnlyPlan(t *testing.T) {
 	callCount := 0
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -602,6 +602,50 @@ func TestClassifyIntentPlanWithLLMRejectsOpenRequestWithoutOpenActionAfterRetry(
 				{
 					"message": map[string]interface{}{
 						"content": `{"actions":[{"action":"shell","command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"}]}`,
+					},
+				},
+			},
+		})
+	}))
+	defer llm.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentClassifierURL = ""
+	app.intentLLMURL = llm.URL
+
+	actions, err := app.classifyIntentPlanWithLLM(context.Background(), "Open README")
+	if err != nil {
+		t.Fatalf("classifyIntentPlanWithLLM returned error: %v", err)
+	}
+	if callCount < 2 {
+		t.Fatalf("expected retry call, got %d", callCount)
+	}
+	if len(actions) < 2 {
+		t.Fatalf("actions length = %d, want >= 2", len(actions))
+	}
+	if !planContainsAction(actions, "open_file_canvas") {
+		t.Fatalf("expected appended open_file_canvas action, got %#v", actions)
+	}
+}
+
+func TestClassifyIntentPlanWithLLMRejectsOpenRequestWithoutShellOrOpenActionAfterRetry(t *testing.T) {
+	callCount := 0
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.TrimSpace(r.URL.Path) != "/v1/chat/completions" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": `{"action":"chat"}`,
 					},
 				},
 			},
