@@ -38,8 +38,8 @@ func TestInterfacesMarkdownIncludesKnownRoutesAndTools(t *testing.T) {
 	if !strings.Contains(doc, "GET /api/runtime") {
 		t.Fatalf("InterfacesMarkdown missing runtime route")
 	}
-	if !strings.Contains(doc, "`delegate_to_model`") {
-		t.Fatalf("InterfacesMarkdown missing delegate_to_model tool")
+	if strings.Contains(doc, "cancel-delegates") {
+		t.Fatalf("InterfacesMarkdown should not list removed cancel-delegates route")
 	}
 }
 
@@ -48,7 +48,7 @@ func TestMCPToolNamesCSVIncludesBacktickedNames(t *testing.T) {
 	if !strings.Contains(csv, "`canvas_session_open`") {
 		t.Fatalf("MCPToolNamesCSV missing canvas_session_open")
 	}
-	if !strings.Contains(csv, "`delegate_to_model_cancel_all`") {
-		t.Fatalf("MCPToolNamesCSV missing delegate_to_model_cancel_all")
+	if strings.Contains(csv, "cancel-delegates") {
+		t.Fatalf("MCPToolNamesCSV should not include removed route names")
 	}
 }

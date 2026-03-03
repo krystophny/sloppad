@@ -209,9 +209,6 @@ func TestBuildPromptFromHistoryForMode_SilentUsesToolOnlyPreamble(t *testing.T) 
 	if strings.Contains(prompt, "Use [lang:de]") {
 		t.Error("silent prompt should not include voice language tag guidance")
 	}
-	if strings.Contains(prompt, "delegate_to_model") {
-		t.Error("silent prompt should not include explicit delegation policy")
-	}
 	if strings.Contains(prompt, "Reply as ASSISTANT.") {
 		t.Error("silent prompt should not include assistant-style reply directive")
 	}
@@ -220,7 +217,7 @@ func TestBuildPromptFromHistoryForMode_SilentUsesToolOnlyPreamble(t *testing.T) 
 func TestBuildPromptFromHistoryForMode_SparkOmitsModelSpecificHints(t *testing.T) {
 	prompt := buildPromptFromHistoryForMode("chat", nil, nil, turnOutputModeVoice, "spark")
 	if strings.Contains(prompt, "merge conflicts") {
-		t.Error("spark prompt should not include model-specific delegation hints")
+		t.Error("spark prompt should not include stale model-specific hints")
 	}
 }
 
@@ -237,7 +234,7 @@ func TestBuildTurnPromptForMode_SparkOmitsModelSpecificHints(t *testing.T) {
 		ContentPlain: "fix the merge",
 	}}, nil, turnOutputModeSilent, "spark")
 	if strings.Contains(prompt, "merge conflicts") {
-		t.Error("spark turn prompt should not include model-specific delegation hints")
+		t.Error("spark turn prompt should not include stale model-specific hints")
 	}
 }
 
@@ -377,9 +374,6 @@ func TestBuildTurnPromptForMode_SilentUsesToolOnlyPreamble(t *testing.T) {
 	}}, nil, turnOutputModeSilent, "")
 	if strings.Contains(prompt, "Reply as ASSISTANT.") {
 		t.Error("silent turn prompt should not include assistant reply style")
-	}
-	if strings.Contains(prompt, "delegate_to_model") {
-		t.Error("silent turn prompt should not include explicit delegation policy")
 	}
 	if strings.Contains(prompt, "Spoken chat must be one paragraph max.") {
 		t.Error("silent turn prompt should not include spoken paragraph limits")

@@ -22,6 +22,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 		a.broadcastChatEvent(sessionID, map[string]interface{}{"type": "error", "error": err.Error()})
 		return
 	}
+	userText := latestUserMessage(messages)
 	if project, projectErr := a.store.GetProjectByProjectKey(session.ProjectKey); projectErr == nil && isHubProject(project) {
 		a.runHubTurn(sessionID, session, messages, outputMode, localOnly)
 		return
@@ -38,6 +39,13 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 
 	cwd := a.cwdForProjectKey(session.ProjectKey)
 	profile := a.appServerModelProfileForProjectKey(session.ProjectKey)
+	if strings.TrimSpace(userText) != "" {
+		profile = routeProfileForRouting(
+			classifyRoutingRoute(userText),
+			profile,
+			a.appServerSparkReasoningEffort,
+		)
+	}
 	appSess, resumed, sessErr := a.getOrCreateAppSession(sessionID, cwd, profile)
 	if sessErr != nil {
 		a.runAssistantTurnLegacy(sessionID, session, messages, outputMode, profile)
@@ -68,7 +76,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), assistantTurnTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	runID := randomToken()
 	a.registerActiveChatTurn(sessionID, runID, cancel)
 	defer func() {
@@ -129,7 +137,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 		persistedAssistantFormat = candidateFormat
 	}
 
-	appResp, err := appSess.SendTurnWithParams(ctx, prompt, "", profile.TurnParams, func(ev appserver.StreamEvent) {
+	appResp, err := appSess.SendTurnWithParams(ctx, prompt, profile.Model, profile.TurnParams, func(ev appserver.StreamEvent) {
 		payload := map[string]interface{}{
 			"type":        ev.Type,
 			"thread_id":   ev.ThreadID,
@@ -313,7 +321,7 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), assistantTurnTimeout)
+	ctx, cancel := context.WithCancel(context.Background())
 	runID := randomToken()
 	a.registerActiveChatTurn(sessionID, runID, cancel)
 	defer func() {
@@ -377,9 +385,9 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 		CWD:          a.cwdForProjectKey(session.ProjectKey),
 		Prompt:       prompt,
 		Model:        profile.Model,
+		TurnModel:    profile.Model,
 		ThreadParams: profile.ThreadParams,
 		TurnParams:   profile.TurnParams,
-		Timeout:      assistantTurnTimeout,
 	}, func(ev appserver.StreamEvent) {
 		payload := map[string]interface{}{
 			"type":        ev.Type,

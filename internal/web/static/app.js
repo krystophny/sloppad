@@ -68,7 +68,6 @@ const state = {
   assistantUnknownTurns: 0,
   assistantRemoteActiveCount: 0,
   assistantRemoteQueuedCount: 0,
-  assistantRemoteDelegateActiveCount: 0,
   assistantLastStartedAt: 0,
   assistantCancelInFlight: false,
   assistantLastError: '',
@@ -2220,8 +2219,7 @@ function hasLocalAssistantWork() {
 
 function hasRemoteAssistantWork() {
   return state.assistantRemoteActiveCount > 0
-    || state.assistantRemoteQueuedCount > 0
-    || state.assistantRemoteDelegateActiveCount > 0;
+    || state.assistantRemoteQueuedCount > 0;
 }
 
 function hasLocalStopCapableWork() {
@@ -2246,12 +2244,8 @@ function isDirectAssistantWorking() {
     || state.assistantRemoteQueuedCount > 0;
 }
 
-function isDelegateAssistantWorking() {
-  return state.assistantRemoteDelegateActiveCount > 0;
-}
-
 function isAssistantWorking() {
-  return isDirectAssistantWorking() || isDelegateAssistantWorking();
+  return isDirectAssistantWorking();
 }
 
 function isTTSSpeaking() {
@@ -3213,7 +3207,6 @@ function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.assistantUnknownTurns = 0;
   state.assistantRemoteActiveCount = 0;
   state.assistantRemoteQueuedCount = 0;
-  state.assistantRemoteDelegateActiveCount = 0;
   state.assistantCancelInFlight = false;
   state.voiceTranscriptSubmitInFlight = false;
   state.voiceAwaitingTurn = false;
@@ -3492,7 +3485,6 @@ async function refreshAssistantActivity() {
       if (!hasLocalAssistantWork() && !state.assistantCancelInFlight) {
         state.assistantRemoteActiveCount = 0;
         state.assistantRemoteQueuedCount = 0;
-        state.assistantRemoteDelegateActiveCount = 0;
         updateAssistantActivityIndicator();
       }
       return;
@@ -3501,17 +3493,13 @@ async function refreshAssistantActivity() {
     const payload = await resp.json();
     const activeTurns = Number(payload?.active_turns || 0);
     const queuedTurns = Number(payload?.queued_turns || 0);
-    const delegateActive = Number(payload?.delegate_active || 0);
     if (!Number.isFinite(activeTurns) || activeTurns < 0) return;
     if (!Number.isFinite(queuedTurns) || queuedTurns < 0) return;
-    if (!Number.isFinite(delegateActive) || delegateActive < 0) return;
     state.assistantRemoteActiveCount = activeTurns;
     state.assistantRemoteQueuedCount = queuedTurns;
-    state.assistantRemoteDelegateActiveCount = delegateActive;
     const recentlyStarted = (Date.now() - state.assistantLastStartedAt) < ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS;
     if (activeTurns <= 0
       && queuedTurns <= 0
-      && delegateActive <= 0
       && !state.assistantCancelInFlight
       && !state.voiceAwaitingTurn
       && !state.voiceTranscriptSubmitInFlight
@@ -3525,7 +3513,6 @@ async function refreshAssistantActivity() {
     if (!hasLocalAssistantWork() && !state.assistantCancelInFlight) {
       state.assistantRemoteActiveCount = 0;
       state.assistantRemoteQueuedCount = 0;
-      state.assistantRemoteDelegateActiveCount = 0;
       updateAssistantActivityIndicator();
     }
   } finally {

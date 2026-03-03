@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,7 +206,6 @@ func (a *App) cancelChatWork(sessionID string) (int, int) {
 type clearAllReport struct {
 	ActiveCanceled   int
 	QueuedCanceled   int
-	DelegateCanceled int
 	SessionsClosed   int
 	TempFilesCleared int
 }
@@ -257,7 +255,6 @@ func (a *App) clearAllAgentsAndContexts(currentSessionID string) (clearAllReport
 		activeCanceled, queuedCanceled := a.cancelChatWork(session.ID)
 		report.ActiveCanceled += activeCanceled
 		report.QueuedCanceled += queuedCanceled
-		report.DelegateCanceled += a.cancelDelegatedJobsForProject(session.ProjectKey)
 		report.TempFilesCleared += a.clearProjectTempCanvasFiles(session.ProjectKey)
 		a.clearCanvasForProject(session.ProjectKey)
 		a.broadcastChatEvent(session.ID, map[string]interface{}{
@@ -290,48 +287,6 @@ func (a *App) clearAllAgentsAndContexts(currentSessionID string) (clearAllReport
 		a.closeAppSession(currentSessionID)
 	}
 	return report, nil
-}
-
-func (a *App) delegateActiveJobsForProject(projectKey string) int {
-	cwd := strings.TrimSpace(a.cwdForProjectKey(projectKey))
-	if cwd == "" {
-		return 0
-	}
-	canvasSessionID := strings.TrimSpace(a.resolveCanvasSessionID(projectKey))
-	if canvasSessionID == "" {
-		return 0
-	}
-	port, ok := a.tunnels.getPort(canvasSessionID)
-	if !ok {
-		return 0
-	}
-	status, err := a.mcpToolsCall(port, "delegate_to_model_active_count", map[string]interface{}{"cwd_prefix": cwd})
-	if err != nil {
-		log.Printf("delegate activity probe failed for project=%q cwd=%q: %v", projectKey, cwd, err)
-		return 0
-	}
-	return intFromAny(status["active"], 0)
-}
-
-func (a *App) cancelDelegatedJobsForProject(projectKey string) int {
-	cwd := strings.TrimSpace(a.cwdForProjectKey(projectKey))
-	if cwd == "" {
-		return 0
-	}
-	canvasSessionID := strings.TrimSpace(a.resolveCanvasSessionID(projectKey))
-	if canvasSessionID == "" {
-		return 0
-	}
-	port, ok := a.tunnels.getPort(canvasSessionID)
-	if !ok {
-		return 0
-	}
-	status, err := a.mcpToolsCall(port, "delegate_to_model_cancel_all", map[string]interface{}{"cwd_prefix": cwd})
-	if err != nil {
-		log.Printf("delegate cancel-all failed for project=%q cwd=%q: %v", projectKey, cwd, err)
-		return 0
-	}
-	return intFromAny(status["canceled"], 0)
 }
 
 func (a *App) activeChatTurnCount(sessionID string) int {

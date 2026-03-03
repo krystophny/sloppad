@@ -36,11 +36,9 @@ const (
 )
 
 const intentLLMSystemPrompt = `You are Tabura's local router. Output JSON only.
-Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, delegate, shell, open_file_canvas, chat.
+Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, shell, open_file_canvas, chat.
 Use {"action":"chat"} unless user clearly requests a system action.
-For explicit delegation or clearly long coding tasks use {"action":"delegate","model":"codex|gpt|spark","reasoning_effort":"low|medium|high|xhigh","task":"..."}.
-For current-information requests (weather, web search, news, prices, schedules, latest/current updates), MUST use delegate and MUST NOT use shell.
-Routing policy: simple current-info -> spark low; complex general -> gpt high; complex coding/technical -> codex high; simple coding -> codex low; simple general -> gpt low.
+For current-information requests (weather, web search, news, prices, schedules, latest/current updates), use {"action":"chat"} and MUST NOT use shell.
 For shell-like requests use {"action":"shell","command":"..."}.
 For open/show/display file requests, end with {"action":"open_file_canvas","path":"..."}.
 If exact path is uncertain, use multi-step {"actions":[...]}: shell search first, then open_file_canvas with path="$last_shell_path".
@@ -322,47 +320,11 @@ func systemActionStringParam(params map[string]interface{}, key string) string {
 
 func normalizeSystemActionName(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "delegate", "shell", "open_file_canvas":
+	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "shell", "open_file_canvas":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
 	}
-}
-
-func normalizeDelegateModel(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "codex":
-		return "codex"
-	case "gpt", "spark":
-		return strings.ToLower(strings.TrimSpace(raw))
-	default:
-		return ""
-	}
-}
-
-func copyRouteMetadata(payload map[string]interface{}, params map[string]interface{}) {
-	for _, key := range []string{
-		"route_domain",
-		"route_complexity",
-		"route_reason",
-		"policy_version",
-	} {
-		value := strings.TrimSpace(systemActionStringParam(params, key))
-		if value == "" || value == "<nil>" {
-			continue
-		}
-		payload[key] = value
-	}
-}
-
-func systemActionDelegateTask(params map[string]interface{}) string {
-	for _, key := range []string{"task", "prompt", "text"} {
-		value := strings.TrimSpace(fmt.Sprint(params[key]))
-		if value != "" && value != "<nil>" {
-			return value
-		}
-	}
-	return ""
 }
 
 func systemActionShellCommand(params map[string]interface{}) string {
@@ -474,19 +436,6 @@ func (a *App) classifyIntentLocally(ctx context.Context, text string) (*SystemAc
 	if actionName == "switch_model" && strings.TrimSpace(payload.Effort) != "" {
 		params["effort"] = strings.TrimSpace(payload.Effort)
 	}
-	if actionName == "delegate" && strings.TrimSpace(payload.ReasoningEffort) != "" {
-		params["reasoning_effort"] = strings.TrimSpace(payload.ReasoningEffort)
-	}
-	if actionName == "delegate" {
-		model := normalizeDelegateModel(systemActionStringParam(params, "model"))
-		if model == "" {
-			model = "codex"
-		}
-		params["model"] = model
-		if systemActionDelegateTask(params) == "" {
-			params["task"] = trimmedText
-		}
-	}
 	return &SystemAction{Action: actionName, Params: params}, payload.Confidence, nil
 }
 
@@ -500,21 +449,7 @@ func normalizeSystemActionForExecution(action *SystemAction, fallbackText string
 	if action.Params == nil {
 		action.Params = map[string]interface{}{}
 	}
-	switch action.Action {
-	case "delegate":
-		model := normalizeDelegateModel(systemActionStringParam(action.Params, "model"))
-		if model == "" {
-			model = "codex"
-		}
-		action.Params["model"] = model
-		effort := normalizeDelegateEffort(model, systemActionDelegateEffort(action.Params))
-		if effort != "" {
-			action.Params["reasoning_effort"] = effort
-		}
-		if systemActionDelegateTask(action.Params) == "" {
-			action.Params["task"] = fallbackText
-		}
-	}
+	_ = fallbackText
 	return action
 }
 
@@ -666,25 +601,6 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		return nil, nil
 	}
 	requiresOpenCanvas := requestRequiresOpenCanvasAction(trimmedText)
-	if hint := detectDelegationHint(trimmedText); hint.Detected {
-		model := normalizeDelegateModel(hint.Model)
-		if model == "" {
-			model = "codex"
-		}
-		task := strings.TrimSpace(hint.Task)
-		if task == "" {
-			task = trimmedText
-		}
-		action := &SystemAction{
-			Action: "delegate",
-			Params: map[string]interface{}{
-				"model": model,
-				"task":  task,
-			},
-		}
-		route := classifyDelegationRoute(task)
-		return []*SystemAction{applyRouteToDelegateAction(action, route, task)}, nil
-	}
 	requestPlan := func(systemPrompt string, userPrompt string) ([]*SystemAction, error) {
 		requestBody, _ := json.Marshal(map[string]interface{}{
 			"model":       a.localIntentLLMModel(),
@@ -808,9 +724,8 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 	if trimmedText == "" {
 		return "", nil, false
 	}
-	route := classifyDelegationRoute(trimmedText)
 	tryExecutePlan := func(actions []*SystemAction) (string, []map[string]interface{}, bool) {
-		enforced := enforceDelegationPolicy(trimmedText, actions)
+		enforced := enforceRoutingPolicy(trimmedText, actions)
 		if len(enforced) == 0 {
 			return "", nil, false
 		}
@@ -840,11 +755,6 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 		llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
 		if llmErr == nil {
 			if message, payloads, ok := tryExecutePlan(llmActions); ok {
-				return message, payloads, true
-			}
-		}
-		if route.ForceDelegate {
-			if message, payloads, ok := tryExecutePlan(nil); ok {
 				return message, payloads, true
 			}
 		}
@@ -1175,7 +1085,7 @@ func preferTopLevelSiblingPath(cwd, candidate string) string {
 }
 
 func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSession, userText string, actions []*SystemAction) (string, []map[string]interface{}, error) {
-	actions = enforceDelegationPolicy(userText, actions)
+	actions = enforceRoutingPolicy(userText, actions)
 	if len(actions) == 0 {
 		return "", nil, errors.New("action plan is empty")
 	}
@@ -1401,8 +1311,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		return "Toggled conversation mode.", map[string]interface{}{"type": "toggle_conversation"}, nil
 	case "cancel_work":
 		activeCanceled, queuedCanceled := a.cancelChatWork(sessionID)
-		delegateCanceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
-		total := activeCanceled + queuedCanceled + delegateCanceled
+		total := activeCanceled + queuedCanceled
 		return fmt.Sprintf("Canceled %d running task(s).", total), nil, nil
 	case "show_status":
 		status, err := a.fetchCodexStatusMessage(session.ProjectKey)
@@ -1532,68 +1441,6 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 			"path":       canvasTitle,
 			"project_id": targetProject.ID,
 		}, nil
-	case "delegate":
-		targetProject, err := a.systemActionTargetProject(session)
-		if err != nil {
-			return "", nil, err
-		}
-		model := normalizeDelegateModel(
-			firstNonEmptyPrompt(
-				systemActionStringParam(action.Params, "model"),
-				systemActionStringParam(action.Params, "alias"),
-			),
-		)
-		if model == "" {
-			return "", nil, errors.New("delegate model must be codex, gpt, or spark")
-		}
-		task := systemActionDelegateTask(action.Params)
-		if task == "" {
-			return "", nil, errors.New("delegate task is required")
-		}
-		effort := normalizeDelegateEffort(model, systemActionDelegateEffort(action.Params))
-		cwd := strings.TrimSpace(targetProject.RootPath)
-		if cwd == "" {
-			cwd = strings.TrimSpace(a.cwdForProjectKey(targetProject.ProjectKey))
-		}
-		if cwd == "" {
-			return "", nil, errors.New("delegate cwd is not available")
-		}
-		canvasSessionID := strings.TrimSpace(a.canvasSessionIDForProject(targetProject))
-		if canvasSessionID == "" {
-			return "", nil, errors.New("delegate canvas session is not available")
-		}
-		port, ok := a.tunnels.getPort(canvasSessionID)
-		if !ok {
-			return "", nil, fmt.Errorf("no active MCP tunnel for project %q", targetProject.Name)
-		}
-		delegateArgs := map[string]interface{}{
-			"model":  model,
-			"prompt": task,
-			"cwd":    cwd,
-		}
-		if effort != "" {
-			delegateArgs["reasoning_effort"] = effort
-		}
-		status, err := a.mcpToolsCall(port, "delegate_to_model", delegateArgs)
-		if err != nil {
-			return "", nil, err
-		}
-		jobID := strings.TrimSpace(fmt.Sprint(status["job_id"]))
-		if jobID == "" || jobID == "<nil>" {
-			return "", nil, errors.New("delegate_to_model did not return job_id")
-		}
-		payload := map[string]interface{}{
-			"type":       "delegate",
-			"job_id":     jobID,
-			"model":      model,
-			"project_id": targetProject.ID,
-		}
-		if effort != "" {
-			payload["reasoning_effort"] = effort
-		}
-		copyRouteMetadata(payload, action.Params)
-		a.startDelegateStatusWatcher(sessionID, canvasSessionID, jobID, model)
-		return fmt.Sprintf("Delegated to %s as job %s.", model, jobID), payload, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported action: %s", action.Action)
 	}

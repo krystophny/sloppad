@@ -132,9 +132,9 @@
 
     // Harness log for test assertions
     window.__harnessLog = [];
-    const DEFAULT_CANCEL_RESPONSE = { ok: true, canceled: 3, active_canceled: 1, queued_canceled: 1, delegate_canceled: 1 };
+    const DEFAULT_CANCEL_RESPONSE = { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1 };
     let cancelResponsesQueue = [];
-    let activityResponse = { ok: true, active_turns: 0, queued_turns: 0, delegate_active: 0 };
+    let activityResponse = { ok: true, active_turns: 0, queued_turns: 0 };
     let messagePostDelayMs = 0;
     let sttTranscribeStatus = 200;
     let sttTranscribePayload = { text: 'hello world' };
@@ -146,7 +146,6 @@
         ok: true,
         active_turns: Number(response?.active_turns || 0),
         queued_turns: Number(response?.queued_turns || 0),
-        delegate_active: Number(response?.delegate_active || 0),
       };
     };
     window.__setMessagePostDelay = (ms) => {
@@ -159,7 +158,7 @@
       sttTranscribeStatus = Number.isFinite(n) ? Math.max(100, Math.min(599, Math.floor(n))) : 200;
     };
     window.__setCancelResponses([]);
-    window.__setActivityResponse({ active_turns: 0, queued_turns: 0, delegate_active: 0 });
+    window.__setActivityResponse({ active_turns: 0, queued_turns: 0 });
     window.__setMessagePostDelay(0);
     window.__setSTTTranscribeResponse({ text: 'hello world' }, 200);
     const harnessParams = new URL(window.location.href).searchParams;
@@ -502,17 +501,7 @@
       if (u.includes('/api/participant/sessions')) {
         return new Response(JSON.stringify({ ok: true, sessions: [] }), { status: 200 });
       }
-      if (u.includes('/api/chat/sessions') && u.includes('/cancel-delegates')) {
-        window.__harnessLog.push({
-          type: 'api_fetch',
-          action: 'cancel-delegates',
-          method: opts?.method || 'GET',
-          url: u,
-          payload: { ok: true, canceled: 0 },
-        });
-        return new Response(JSON.stringify({ ok: true, canceled: 0 }), { status: 200 });
-      }
-      if (u.includes('/api/chat/sessions') && u.includes('/cancel') && !u.includes('/cancel-delegates')) {
+      if (u.includes('/api/chat/sessions') && u.includes('/cancel')) {
         const response = cancelResponsesQueue.length > 0
           ? { ...DEFAULT_CANCEL_RESPONSE, ...cancelResponsesQueue.shift() }
           : { ...DEFAULT_CANCEL_RESPONSE };

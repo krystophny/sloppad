@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/krystophny/tabura/internal/modelprofile"
 )
@@ -75,75 +72,6 @@ func setupMockIntentLLMServer(t *testing.T, status int, content string) *httptes
 				},
 			},
 		})
-	}))
-}
-
-func setupMockDelegateStartServer(t *testing.T, jobID string, seen *int, observed *map[string]interface{}) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		params, _ := payload["params"].(map[string]interface{})
-		toolName := strings.TrimSpace(strFromAny(params["name"]))
-		switch toolName {
-		case "delegate_to_model":
-			args, _ := params["arguments"].(map[string]interface{})
-			if args == nil {
-				http.Error(w, "missing arguments", http.StatusBadRequest)
-				return
-			}
-			if strings.TrimSpace(strFromAny(args["prompt"])) == "" {
-				http.Error(w, "missing prompt", http.StatusBadRequest)
-				return
-			}
-			if strings.TrimSpace(strFromAny(args["cwd"])) == "" {
-				http.Error(w, "missing cwd", http.StatusBadRequest)
-				return
-			}
-			if seen != nil {
-				*seen += 1
-			}
-			if observed != nil {
-				copied := map[string]interface{}{}
-				for key, value := range args {
-					copied[key] = value
-				}
-				*observed = copied
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": map[string]interface{}{
-					"structuredContent": map[string]interface{}{
-						"job_id": jobID,
-					},
-				},
-			})
-		case "delegate_to_model_status":
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": map[string]interface{}{
-					"structuredContent": map[string]interface{}{
-						"ok":        true,
-						"job_id":    jobID,
-						"status":    "completed",
-						"done":      true,
-						"events":    []interface{}{},
-						"after_seq": 0,
-						"message":   "",
-					},
-				},
-			})
-		default:
-			http.Error(w, "unexpected tool", http.StatusBadRequest)
-			return
-		}
 	}))
 }
 
@@ -224,7 +152,6 @@ func TestParseSystemAction(t *testing.T) {
 		{name: "toggle conversation", raw: `{"action":"toggle_conversation"}`, wantAction: "toggle_conversation"},
 		{name: "cancel work", raw: `{"action":"cancel_work"}`, wantAction: "cancel_work"},
 		{name: "show status", raw: `{"action":"show_status"}`, wantAction: "show_status"},
-		{name: "delegate", raw: `{"action":"delegate","model":"codex","task":"audit tests"}`, wantAction: "delegate"},
 		{name: "shell", raw: `{"action":"shell","command":"ls -1"}`, wantAction: "shell"},
 		{name: "open file canvas", raw: `{"action":"open_file_canvas","path":"README.md"}`, wantAction: "open_file_canvas"},
 		{name: "multi action array", raw: `{"actions":[{"action":"shell","command":"ls -1"},{"action":"open_file_canvas","path":"README.md"}]}`, wantAction: "shell"},
@@ -246,14 +173,11 @@ func TestParseSystemAction(t *testing.T) {
 	}
 }
 
-func TestClassifyIntentLocallyAcceptsDelegateAction(t *testing.T) {
+func TestClassifyIntentLocallyIgnoresUnsupportedIntent(t *testing.T) {
 	classifier := setupMockIntentClassifierServer(t, http.StatusOK, map[string]interface{}{
-		"intent":     "delegate",
+		"intent":     "unknown_action",
 		"confidence": 0.92,
-		"entities": map[string]interface{}{
-			"model": "gpt",
-			"task":  "review this repository",
-		},
+		"entities":   map[string]interface{}{},
 	})
 	defer classifier.Close()
 
@@ -266,228 +190,15 @@ func TestClassifyIntentLocallyAcceptsDelegateAction(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	action, confidence, err := app.classifyIntentLocally(context.Background(), "delegate repo review")
+	action, confidence, err := app.classifyIntentLocally(context.Background(), "route repo review")
 	if err != nil {
 		t.Fatalf("classify intent locally: %v", err)
 	}
-	if action == nil {
-		t.Fatalf("expected delegate action")
-	}
-	if action.Action != "delegate" {
-		t.Fatalf("action = %q, want delegate", action.Action)
+	if action != nil {
+		t.Fatalf("expected nil action for unsupported intent, got %#v", action)
 	}
 	if confidence != 0.92 {
 		t.Fatalf("confidence = %v, want 0.92", confidence)
-	}
-	if got := strings.TrimSpace(strFromAny(action.Params["model"])); got != "gpt" {
-		t.Fatalf("delegate model = %q, want gpt", got)
-	}
-	if got := strings.TrimSpace(strFromAny(action.Params["task"])); got != "review this repository" {
-		t.Fatalf("delegate task = %q, want review this repository", got)
-	}
-}
-
-func TestExecuteSystemActionDelegateStartsJob(t *testing.T) {
-	app := newAuthedTestApp(t)
-	defaultProject, err := app.ensureDefaultProjectRecord()
-	if err != nil {
-		t.Fatalf("ensure default project: %v", err)
-	}
-	hub, err := app.ensureHubProject()
-	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
-	}
-	session, err := app.store.GetOrCreateChatSession(hub.ProjectKey)
-	if err != nil {
-		t.Fatalf("hub session: %v", err)
-	}
-
-	delegateCalls := 0
-	var observed map[string]interface{}
-	server := setupMockDelegateStartServer(t, "job-123", &delegateCalls, &observed)
-	defer server.Close()
-
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse mock url: %v", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatalf("parse mock port: %v", err)
-	}
-	app.tunnels.setPort(app.canvasSessionIDForProject(defaultProject), port)
-
-	msg, payload, err := app.executeSystemAction(session.ID, session, &SystemAction{
-		Action: "delegate",
-		Params: map[string]interface{}{
-			"model": "gpt",
-			"task":  "review the current repository state",
-		},
-	})
-	if err != nil {
-		t.Fatalf("execute delegate: %v", err)
-	}
-	if !strings.Contains(msg, "job-123") {
-		t.Fatalf("delegate message = %q, want job id", msg)
-	}
-	if payload == nil {
-		t.Fatalf("expected delegate payload")
-	}
-	if got := strings.TrimSpace(strFromAny(payload["type"])); got != "delegate" {
-		t.Fatalf("payload type = %q, want delegate", got)
-	}
-	if got := strings.TrimSpace(strFromAny(payload["job_id"])); got != "job-123" {
-		t.Fatalf("payload job_id = %q, want job-123", got)
-	}
-	if got := strings.TrimSpace(strFromAny(payload["model"])); got != "gpt" {
-		t.Fatalf("payload model = %q, want gpt", got)
-	}
-	if got := strings.TrimSpace(strFromAny(payload["project_id"])); got != defaultProject.ID {
-		t.Fatalf("payload project_id = %q, want %q", got, defaultProject.ID)
-	}
-	if delegateCalls != 1 {
-		t.Fatalf("delegate tool calls = %d, want 1", delegateCalls)
-	}
-	if got := strings.TrimSpace(strFromAny(observed["model"])); got != "gpt" {
-		t.Fatalf("delegate model arg = %q, want gpt", got)
-	}
-	if got := strings.TrimSpace(strFromAny(observed["prompt"])); got != "review the current repository state" {
-		t.Fatalf("delegate prompt arg = %q, want expected task", got)
-	}
-	if got := strings.TrimSpace(strFromAny(observed["cwd"])); got != strings.TrimSpace(defaultProject.RootPath) {
-		t.Fatalf("delegate cwd arg = %q, want %q", got, defaultProject.RootPath)
-	}
-}
-
-func TestExecuteSystemActionDelegatePersistsAsyncResult(t *testing.T) {
-	app := newAuthedTestApp(t)
-	defaultProject, err := app.ensureDefaultProjectRecord()
-	if err != nil {
-		t.Fatalf("ensure default project: %v", err)
-	}
-	hub, err := app.ensureHubProject()
-	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
-	}
-	session, err := app.store.GetOrCreateChatSession(hub.ProjectKey)
-	if err != nil {
-		t.Fatalf("hub session: %v", err)
-	}
-
-	startCalls := 0
-	statusCalls := 0
-	const finalText = "Delegate final answer from async status."
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		params, _ := payload["params"].(map[string]interface{})
-		toolName := strings.TrimSpace(strFromAny(params["name"]))
-		w.Header().Set("Content-Type", "application/json")
-		switch toolName {
-		case "delegate_to_model":
-			startCalls++
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": map[string]interface{}{
-					"structuredContent": map[string]interface{}{
-						"job_id": "job-async-1",
-					},
-				},
-			})
-		case "delegate_to_model_status":
-			statusCalls++
-			status := map[string]interface{}{
-				"ok":        true,
-				"job_id":    "job-async-1",
-				"status":    "running",
-				"done":      false,
-				"events":    []interface{}{},
-				"after_seq": 0,
-				"message":   "",
-			}
-			if statusCalls >= 2 {
-				status["status"] = "completed"
-				status["done"] = true
-				status["message"] = finalText
-				status["after_seq"] = 1
-				status["events"] = []interface{}{
-					map[string]interface{}{
-						"type": "assistant_message",
-						"text": "final delta",
-					},
-				}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": map[string]interface{}{
-					"structuredContent": status,
-				},
-			})
-		default:
-			http.Error(w, "unexpected tool", http.StatusBadRequest)
-			return
-		}
-	}))
-	defer server.Close()
-
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse mock url: %v", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatalf("parse mock port: %v", err)
-	}
-	app.tunnels.setPort(app.canvasSessionIDForProject(defaultProject), port)
-
-	_, payload, err := app.executeSystemAction(session.ID, session, &SystemAction{
-		Action: "delegate",
-		Params: map[string]interface{}{
-			"model": "gpt",
-			"task":  "run async delegation",
-		},
-	})
-	if err != nil {
-		t.Fatalf("execute delegate: %v", err)
-	}
-	if payload == nil || strings.TrimSpace(strFromAny(payload["job_id"])) != "job-async-1" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	if startCalls != 1 {
-		t.Fatalf("start calls = %d, want 1", startCalls)
-	}
-
-	deadline := time.Now().Add(4 * time.Second)
-	found := false
-	for time.Now().Before(deadline) {
-		messages, listErr := app.store.ListChatMessages(session.ID, 100)
-		if listErr != nil {
-			t.Fatalf("list chat messages: %v", listErr)
-		}
-		for _, msg := range messages {
-			if !strings.EqualFold(strings.TrimSpace(msg.Role), "assistant") {
-				continue
-			}
-			if strings.Contains(strings.TrimSpace(msg.ContentPlain), finalText) {
-				found = true
-				break
-			}
-		}
-		if found {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !found {
-		t.Fatalf("delegate final answer was not persisted; start_calls=%d status_calls=%d", startCalls, statusCalls)
-	}
-	if statusCalls < 2 {
-		t.Fatalf("status calls = %d, want >= 2", statusCalls)
 	}
 }
 
