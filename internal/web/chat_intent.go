@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -644,6 +645,9 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		if repaired, repairErr := requestPlan(retrySystemPrompt, retryUserPrompt); repairErr == nil && len(repaired) > 0 {
 			actions = repaired
 		}
+		if !planContainsAction(actions, "open_file_canvas") {
+			return nil, nil
+		}
 	}
 
 	return actions, nil
@@ -726,6 +730,28 @@ func firstShellPathFromOutput(output string) string {
 	return ""
 }
 
+func preferTopLevelReadmePath(cwd, candidate string) string {
+	cleanCandidate := filepath.ToSlash(strings.TrimSpace(candidate))
+	if cleanCandidate == "" {
+		return cleanCandidate
+	}
+	base := strings.TrimSpace(filepath.Base(cleanCandidate))
+	baseLower := strings.ToLower(base)
+	if !strings.HasPrefix(baseLower, "readme") {
+		return cleanCandidate
+	}
+	root := strings.TrimSpace(cwd)
+	if root == "" {
+		return cleanCandidate
+	}
+	preferredAbs := filepath.Clean(filepath.Join(root, base))
+	info, err := os.Stat(preferredAbs)
+	if err != nil || info.IsDir() {
+		return cleanCandidate
+	}
+	return filepath.ToSlash(base)
+}
+
 func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSession, actions []*SystemAction) (string, []map[string]interface{}, error) {
 	if len(actions) == 0 {
 		return "", nil, errors.New("action plan is empty")
@@ -733,6 +759,14 @@ func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSessio
 	messages := make([]string, 0, len(actions))
 	payloads := make([]map[string]interface{}, 0, len(actions))
 	lastShellPath := ""
+	targetProject, targetErr := a.systemActionTargetProject(session)
+	targetCWD := ""
+	if targetErr == nil {
+		targetCWD = strings.TrimSpace(targetProject.RootPath)
+		if targetCWD == "" {
+			targetCWD = strings.TrimSpace(a.cwdForProjectKey(targetProject.ProjectKey))
+		}
+	}
 	for _, action := range actions {
 		if action == nil {
 			continue
@@ -750,7 +784,7 @@ func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSessio
 				if strings.TrimSpace(lastShellPath) == "" {
 					return "", nil, errors.New("open_file_canvas requires a resolved shell path")
 				}
-				resolved.Params["path"] = lastShellPath
+				resolved.Params["path"] = preferTopLevelReadmePath(targetCWD, lastShellPath)
 			}
 		}
 		message, payload, err := a.executeSystemAction(sessionID, session, resolved)

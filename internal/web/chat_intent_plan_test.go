@@ -465,6 +465,47 @@ func TestClassifyIntentPlanWithLLMRepairsMissingOpenAction(t *testing.T) {
 	}
 }
 
+func TestClassifyIntentPlanWithLLMRejectsOpenRequestWithoutOpenActionAfterRetry(t *testing.T) {
+	callCount := 0
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.TrimSpace(r.URL.Path) != "/v1/chat/completions" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": `{"actions":[{"action":"shell","command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"}]}`,
+					},
+				},
+			},
+		})
+	}))
+	defer llm.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentClassifierURL = ""
+	app.intentLLMURL = llm.URL
+
+	actions, err := app.classifyIntentPlanWithLLM(context.Background(), "Open README")
+	if err != nil {
+		t.Fatalf("classifyIntentPlanWithLLM returned error: %v", err)
+	}
+	if callCount < 2 {
+		t.Fatalf("expected retry call, got %d", callCount)
+	}
+	if len(actions) != 0 {
+		t.Fatalf("actions length = %d, want 0", len(actions))
+	}
+}
+
 func TestClassifyAndExecuteSystemActionOpenRequestReturnsExplicitFailureWhenPlanInvalid(t *testing.T) {
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -509,5 +550,66 @@ func TestClassifyAndExecuteSystemActionOpenRequestReturnsExplicitFailureWhenPlan
 	}
 	if !strings.Contains(strings.ToLower(message), "couldn't open") {
 		t.Fatalf("unexpected failure message: %q", message)
+	}
+}
+
+func TestExecuteSystemActionPlanPrefersTopLevelReadmeForPlaceholder(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(project.RootPath, "pr", "92613"), 0o755); err != nil {
+		t.Fatalf("mkdir nested path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "README.md"), []byte("root-readme"), 0o644); err != nil {
+		t.Fatalf("write root README.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "pr", "92613", "README.md"), []byte("nested-readme"), 0o644); err != nil {
+		t.Fatalf("write nested README.md: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	showCalls := 0
+	var observed map[string]interface{}
+	server := setupMockCanvasShowServer(t, &showCalls, &observed)
+	defer server.Close()
+	port, err := extractPort(server.URL)
+	if err != nil {
+		t.Fatalf("extract canvas port: %v", err)
+	}
+	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
+
+	_, payloads, err := app.executeSystemActionPlan(session.ID, session, []*SystemAction{
+		{
+			Action: "shell",
+			Params: map[string]interface{}{
+				"command": "printf './pr/92613/README.md\\n'",
+			},
+		},
+		{
+			Action: "open_file_canvas",
+			Params: map[string]interface{}{
+				"path": systemActionLastShellPathPlaceholder,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeSystemActionPlan returned error: %v", err)
+	}
+	if len(payloads) < 2 {
+		t.Fatalf("payloads length = %d, want >= 2", len(payloads))
+	}
+	if showCalls < 1 {
+		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["title"])); got != "README.md" {
+		t.Fatalf("canvas title = %q, want README.md", got)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["markdown_or_text"])); got != "root-readme" {
+		t.Fatalf("canvas content = %q, want root-readme", got)
 	}
 }
