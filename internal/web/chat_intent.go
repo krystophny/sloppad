@@ -1592,6 +1592,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 			payload["reasoning_effort"] = effort
 		}
 		copyRouteMetadata(payload, action.Params)
+		a.startDelegateStatusWatcher(sessionID, canvasSessionID, jobID, model)
 		return fmt.Sprintf("Delegated to %s as job %s.", model, jobID), payload, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported action: %s", action.Action)

@@ -93,6 +93,7 @@ type App struct {
 	tunnels         *tunnelRegistry
 	chatAppSessions map[string]*appserver.Session
 	pendingDanger   map[string]*pendingDangerousAction
+	delegateWatches map[string]struct{}
 	ghCommandRunner ghCommandRunner
 
 	bootID    string
@@ -254,6 +255,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		tunnels:                       newTunnelRegistry(),
 		chatAppSessions:               map[string]*appserver.Session{},
 		pendingDanger:                 map[string]*pendingDangerousAction{},
+		delegateWatches:               map[string]struct{}{},
 		ghCommandRunner:               runGitHubCLI,
 		bootID:                        strconv.FormatInt(time.Now().UnixNano(), 16),
 		startedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
