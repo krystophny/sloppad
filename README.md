@@ -7,7 +7,7 @@ Core paradigm:
 - Edge panels (hover/swipe to reveal) for project switching and chat panel access.
 
 License: MIT (`LICENSE`)
-Risk notice: see [`DISCLAIMER.md`](DISCLAIMER.md)
+Legal notice: Tabura is provided "as is" and "as available" without warranties, and to the maximum extent permitted by applicable law the authors/contributors accept no liability for damages, data loss, or misuse. You are solely responsible for backups, verification, and safe operation. See [`DISCLAIMER.md`](DISCLAIMER.md).
 
 ## Start Here
 

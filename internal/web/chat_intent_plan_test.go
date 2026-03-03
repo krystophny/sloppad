@@ -223,6 +223,128 @@ func TestExecuteSystemActionPlanResolvesLastShellPathPlaceholder(t *testing.T) {
 	}
 }
 
+func TestExecuteSystemActionPlanPrefersRootReadmeMarkdownOverNestedExtensionlessReadme(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "README.md"), []byte("root-readme"), 0o644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(project.RootPath, "gcc-build", "gcc", "include-fixed"), 0o755); err != nil {
+		t.Fatalf("mkdir nested path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "gcc-build", "gcc", "include-fixed", "README"), []byte("nested-readme"), 0o644); err != nil {
+		t.Fatalf("write nested README: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	showCalls := 0
+	var observed map[string]interface{}
+	server := setupMockCanvasShowServer(t, &showCalls, &observed)
+	defer server.Close()
+	port, err := extractPort(server.URL)
+	if err != nil {
+		t.Fatalf("extract canvas port: %v", err)
+	}
+	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
+
+	_, payloads, err := app.executeSystemActionPlan(session.ID, session, "Open readme", []*SystemAction{
+		{
+			Action: "shell",
+			Params: map[string]interface{}{
+				"command": "printf './gcc-build/gcc/include-fixed/README\\n'",
+			},
+		},
+		{
+			Action: "open_file_canvas",
+			Params: map[string]interface{}{
+				"path": systemActionLastShellPathPlaceholder,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeSystemActionPlan returned error: %v", err)
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("payloads length = %d, want 2", len(payloads))
+	}
+	if showCalls < 1 {
+		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["title"])); got != "README.md" {
+		t.Fatalf("canvas title = %q, want README.md", got)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["markdown_or_text"])); got != "root-readme" {
+		t.Fatalf("canvas content = %q, want root-readme", got)
+	}
+}
+
+func TestExecuteSystemActionPlanPrefersRootClaudeMarkdownCaseInsensitive(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "CLAUDE.md"), []byte("root-claude"), 0o644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(project.RootPath, "tmp", "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir nested path: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "tmp", "docs", "claude"), []byte("nested-claude"), 0o644); err != nil {
+		t.Fatalf("write nested claude: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	showCalls := 0
+	var observed map[string]interface{}
+	server := setupMockCanvasShowServer(t, &showCalls, &observed)
+	defer server.Close()
+	port, err := extractPort(server.URL)
+	if err != nil {
+		t.Fatalf("extract canvas port: %v", err)
+	}
+	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
+
+	_, payloads, err := app.executeSystemActionPlan(session.ID, session, "Open claude", []*SystemAction{
+		{
+			Action: "shell",
+			Params: map[string]interface{}{
+				"command": "printf './tmp/docs/claude\\n'",
+			},
+		},
+		{
+			Action: "open_file_canvas",
+			Params: map[string]interface{}{
+				"path": systemActionLastShellPathPlaceholder,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeSystemActionPlan returned error: %v", err)
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("payloads length = %d, want 2", len(payloads))
+	}
+	if showCalls < 1 {
+		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["title"])); got != "CLAUDE.md" {
+		t.Fatalf("canvas title = %q, want CLAUDE.md", got)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["markdown_or_text"])); got != "root-claude" {
+		t.Fatalf("canvas content = %q, want root-claude", got)
+	}
+}
+
 func TestClassifyAndExecuteSystemActionWithoutIntentLLMDoesNotAutoOpen(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.intentClassifierURL = ""

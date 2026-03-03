@@ -59,6 +59,9 @@ const state = {
   projectSwitchInFlight: false,
   projectModelSwitchInFlight: false,
   ttsSilent: false,
+  yoloMode: false,
+  disclaimerAckRequired: false,
+  disclaimerVersion: '',
   pendingByTurn: new Map(),
   pendingQueue: [],
   assistantActiveTurns: new Set(),
@@ -206,6 +209,7 @@ const PROJECT_CHAT_MODEL_REASONING_EFFORTS = {
   spark: ['low', 'medium', 'high', 'xhigh'],
 };
 const TTS_SILENT_STORAGE_KEY = 'tabura.ttsSilent';
+const YOLO_MODE_STORAGE_KEY = 'tabura.yoloMode';
 const SIDEBAR_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif']);
 const PANEL_MOTION_WATCH_QUERIES = [
   '(monochrome)',
@@ -457,6 +461,57 @@ function persistTTSSilentPreference(silent) {
   try {
     window.localStorage.setItem(TTS_SILENT_STORAGE_KEY, silent ? 'true' : 'false');
   } catch (_) {}
+}
+
+function readYoloModePreference() {
+  try {
+    const value = window.localStorage.getItem(YOLO_MODE_STORAGE_KEY);
+    const parsed = parseOptionalBoolean(value);
+    return parsed === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function persistYoloModePreference(enabled) {
+  try {
+    window.localStorage.setItem(YOLO_MODE_STORAGE_KEY, enabled ? 'true' : 'false');
+  } catch (_) {}
+}
+
+function setYoloModeLocal(enabled, { persist = true, render = true } = {}) {
+  const next = Boolean(enabled);
+  if (state.yoloMode === next) return;
+  state.yoloMode = next;
+  if (persist) persistYoloModePreference(next);
+  if (render) renderEdgeTopModelButtons();
+}
+
+async function setYoloMode(enabled) {
+  const next = Boolean(enabled);
+  const resp = await fetch('/api/runtime/yolo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: next }),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  setYoloModeLocal(next, { persist: true, render: true });
+}
+
+function toggleYoloMode() {
+  if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return;
+  const next = !Boolean(state.yoloMode);
+  setYoloMode(next)
+    .then(() => {
+      showStatus(next ? 'yolo mode on' : 'yolo mode off');
+    })
+    .catch((err) => {
+      showStatus(`yolo update failed: ${String(err?.message || err || 'unknown error')}`);
+      renderEdgeTopModelButtons();
+    });
 }
 
 function canSpeakTTS() {
@@ -972,6 +1027,76 @@ async function fetchRuntimeMeta() {
   return resp.json();
 }
 
+function applyRuntimePreferences(runtime) {
+  const runtimeYolo = parseOptionalBoolean(runtime?.safety_yolo_mode);
+  if (runtimeYolo !== null) {
+    setYoloModeLocal(runtimeYolo, { persist: true, render: false });
+  } else {
+    setYoloModeLocal(readYoloModePreference(), { persist: false, render: false });
+  }
+  state.disclaimerVersion = String(runtime?.disclaimer_version || '').trim();
+  state.disclaimerAckRequired = Boolean(runtime?.disclaimer_ack_required);
+}
+
+async function acknowledgeDisclaimer(version) {
+  const payload = {};
+  if (String(version || '').trim()) {
+    payload.version = String(version || '').trim();
+  }
+  const resp = await fetch('/api/runtime/disclaimer-ack', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+}
+
+function closeDisclaimerModal() {
+  const node = document.getElementById('liability-modal');
+  if (node && node.parentElement) node.parentElement.removeChild(node);
+}
+
+function showDisclaimerModal() {
+  if (!state.disclaimerAckRequired) return Promise.resolve();
+  closeDisclaimerModal();
+  return new Promise((resolve, reject) => {
+    const root = document.createElement('div');
+    root.id = 'liability-modal';
+    root.className = 'liability-modal';
+    root.innerHTML = `
+      <div class=\"liability-modal-card\" role=\"dialog\" aria-modal=\"true\" aria-label=\"Liability notice\">
+        <h2>Liability Notice</h2>
+        <p>Tabura is provided as-is. You are solely responsible for backups, verification, and safe operation.</p>
+        <p>No warranties or liability are assumed to the maximum extent permitted by applicable law.</p>
+        <button id=\"liability-ack-btn\" type=\"button\" class=\"edge-project-btn\">I understand</button>
+      </div>
+    `;
+    document.body.appendChild(root);
+    const btn = document.getElementById('liability-ack-btn');
+    if (!(btn instanceof HTMLButtonElement)) {
+      reject(new Error('liability acknowledgement button unavailable'));
+      return;
+    }
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      acknowledgeDisclaimer(state.disclaimerVersion)
+        .then(() => {
+          state.disclaimerAckRequired = false;
+          closeDisclaimerModal();
+          resolve();
+        })
+        .catch((err) => {
+          btn.disabled = false;
+          showStatus(`disclaimer acknowledgement failed: ${String(err?.message || err || 'unknown error')}`);
+          reject(err);
+        });
+    });
+  });
+}
+
 async function pollRuntimeForDevReload() {
   if (devReloadInFlight || devReloadRequested) return;
   devReloadInFlight = true;
@@ -1459,6 +1584,7 @@ function releaseMicStream({ force = false } = {}) {
 }
 
 function parseOptionalBoolean(value) {
+  if (typeof value === 'boolean') return value;
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) return null;
   if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') return true;
@@ -3238,6 +3364,20 @@ function renderEdgeTopModelButtons() {
   });
   host.appendChild(convButton);
 
+  const yoloButton = document.createElement('button');
+  yoloButton.type = 'button';
+  yoloButton.className = 'edge-project-btn edge-model-btn edge-yolo-btn';
+  yoloButton.textContent = 'yolo';
+  yoloButton.setAttribute('aria-pressed', state.yoloMode ? 'true' : 'false');
+  if (state.yoloMode) {
+    yoloButton.classList.add('is-active');
+  }
+  yoloButton.disabled = state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  yoloButton.addEventListener('click', () => {
+    toggleYoloMode();
+  });
+  host.appendChild(yoloButton);
+
   const silentButton = document.createElement('button');
   silentButton.type = 'button';
   silentButton.className = 'edge-project-btn edge-model-btn edge-silent-btn';
@@ -3637,6 +3777,16 @@ function handleChatEvent(payload) {
       renderEdgeTopModelButtons();
       updateAssistantActivityIndicator();
       showStatus(enabled ? 'conversation mode on' : 'conversation mode off');
+    }
+    return;
+  }
+
+  if (type === 'system_action_confirmation_required') {
+    const action = payload && typeof payload.action === 'object' ? payload.action : {};
+    const summary = String(action?.summary || '').trim();
+    if (summary) {
+      showStatus('confirmation required');
+      appendPlainMessage('system', `Confirmation required: ${summary}`);
     }
     return;
   }
@@ -5458,11 +5608,14 @@ async function init() {
   // Check TTS availability from runtime
   try {
     const runtime = await fetchRuntimeMeta();
+    applyRuntimePreferences(runtime);
     ttsEnabled = Boolean(runtime?.tts_enabled);
     applyRuntimeReasoningEffortOptions(runtime?.available_reasoning_efforts);
   } catch (_) {
     ttsEnabled = false;
+    setYoloModeLocal(readYoloModePreference(), { persist: false, render: false });
   }
+  await showDisclaimerModal().catch(() => {});
   setTTSSilentMode(readTTSSilentPreference(), { persist: false, pinPanel: false });
   await initHotwordLifecycle();
 

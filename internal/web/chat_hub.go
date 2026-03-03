@@ -25,27 +25,12 @@ const (
 	hubLLMRequestTimeout = 900 * time.Millisecond
 )
 
-const hubSystemPrompt = `You are Tabura Hub, a fast voice assistant coordinator.
-Respond concisely. For system actions, return JSON:
-{"action":"<action>", ...params}
-
-Available actions:
-- {"action":"switch_project","name":"..."}
-- {"action":"switch_model","alias":"codex|gpt|spark","effort":"low|medium|high|xhigh"}
-- {"action":"toggle_silent"}
-- {"action":"toggle_conversation"}
-- {"action":"delegate","model":"codex|gpt|spark","task":"..."}
-- {"action":"shell","command":"..."}
-- {"action":"open_file_canvas","path":"..."}
-- {"action":"cancel_work"}
-- {"action":"show_status"}
-
-For multi-step tasks, return {"actions":[{"action":"..."},{"action":"..."}]}.
-For open/show-file requests where path is uncertain (for example "Open the project manifest"), prefer shell find/list first, then open_file_canvas.
-When chaining shell -> open_file_canvas, set path="$last_shell_path".
-In JSON command strings, prefer single quotes inside shell command arguments.
-
-For conversational responses, reply with plain text.`
+const hubSystemPrompt = `You are Tabura Hub, a fast coordinator.
+For system actions output JSON only: {"action":"<action>", ...params}.
+Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, delegate, shell, open_file_canvas, cancel_work, show_status.
+You may return multi-step actions via {"actions":[...]}.
+For uncertain open/show-file requests: shell search first, then open_file_canvas with path="$last_shell_path".
+Use concise plain text only when the request is conversational.`
 
 func isHubProject(project store.Project) bool {
 	if strings.EqualFold(strings.TrimSpace(project.ProjectKey), HubProjectKey) {
@@ -231,8 +216,13 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 					if actionPayload == nil {
 						continue
 					}
+					eventType := "system_action"
+					actionType := strings.TrimSpace(fmt.Sprint(actionPayload["type"]))
+					if strings.EqualFold(actionType, "confirmation_required") {
+						eventType = "system_action_confirmation_required"
+					}
 					a.broadcastChatEvent(sessionID, map[string]interface{}{
-						"type":   "system_action",
+						"type":   eventType,
 						"action": actionPayload,
 					})
 				}
@@ -264,8 +254,13 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 			if actionPayload == nil {
 				continue
 			}
+			eventType := "system_action"
+			actionType := strings.TrimSpace(fmt.Sprint(actionPayload["type"]))
+			if strings.EqualFold(actionType, "confirmation_required") {
+				eventType = "system_action_confirmation_required"
+			}
 			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":   "system_action",
+				"type":   eventType,
 				"action": actionPayload,
 			})
 		}
@@ -292,8 +287,13 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 			if actionPayload == nil {
 				continue
 			}
+			eventType := "system_action"
+			actionType := strings.TrimSpace(fmt.Sprint(actionPayload["type"]))
+			if strings.EqualFold(actionType, "confirmation_required") {
+				eventType = "system_action_confirmation_required"
+			}
 			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":   "system_action",
+				"type":   eventType,
 				"action": actionPayload,
 			})
 		}

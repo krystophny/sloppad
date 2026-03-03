@@ -262,8 +262,13 @@ func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSe
 			if actionPayload == nil {
 				continue
 			}
+			eventType := "system_action"
+			actionType, _ := actionPayload["type"].(string)
+			if strings.EqualFold(strings.TrimSpace(actionType), "confirmation_required") {
+				eventType = "system_action_confirmation_required"
+			}
 			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":   "system_action",
+				"type":   eventType,
 				"action": actionPayload,
 			})
 		}

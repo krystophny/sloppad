@@ -44,6 +44,10 @@ const (
 	SparkModel                  = modelprofile.ModelSpark
 	mcpToolsCallTimeout         = 45 * time.Second
 	appStateDefaultChatModelKey = "default_chat_model"
+	appStateYoloModeKey         = "safety.yolo_mode"
+	appStateDisclaimerAckKey    = "safety.disclaimer_ack.version"
+	appStateDisclaimerAckAtKey  = "safety.disclaimer_ack.timestamp"
+	disclaimerVersionCurrent    = "2026-03-03-v1"
 )
 
 //go:embed static/* static/vendor/*
@@ -83,10 +87,12 @@ type App struct {
 	upgrader websocket.Upgrader
 
 	mu              sync.Mutex
+	confirmMu       sync.Mutex
 	hub             *wsHub
 	turns           *chatTurnTracker
 	tunnels         *tunnelRegistry
 	chatAppSessions map[string]*appserver.Session
+	pendingDanger   map[string]*pendingDangerousAction
 	ghCommandRunner ghCommandRunner
 
 	bootID    string
@@ -247,6 +253,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		turns:                         newChatTurnTracker(),
 		tunnels:                       newTunnelRegistry(),
 		chatAppSessions:               map[string]*appserver.Session{},
+		pendingDanger:                 map[string]*pendingDangerousAction{},
 		ghCommandRunner:               runGitHubCLI,
 		bootID:                        strconv.FormatInt(time.Now().UnixNano(), 16),
 		startedAt:                     time.Now().UTC().Format(time.RFC3339Nano),
@@ -326,6 +333,8 @@ func (a *App) Router() http.Handler {
 
 	// runtime
 	r.Get("/api/runtime", a.handleRuntime)
+	r.Post("/api/runtime/yolo", a.handleRuntimeYoloModeUpdate)
+	r.Post("/api/runtime/disclaimer-ack", a.handleRuntimeDisclaimerAck)
 	r.Get("/api/plugins", a.handlePlugins)
 	r.Post("/api/plugins/meeting-partner/decide", a.handleMeetingPartnerDecide)
 	r.Get("/api/extensions", a.handleExtensions)
@@ -519,6 +528,10 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		"available_reasoning_efforts": modelprofile.AvailableReasoningEffortsByAlias(),
 		"stt_url":                     a.sttURL,
 		"tts_enabled":                 a.ttsURL != "",
+		"safety_yolo_mode":            a.yoloModeEnabled(),
+		"disclaimer_version":          disclaimerVersionCurrent,
+		"disclaimer_ack_required":     a.disclaimerAckRequired(),
+		"disclaimer_ack_version":      a.disclaimerAckVersion(),
 		"plugins_dir":                 a.pluginsDir,
 		"plugins_loaded":              a.loadedPluginCount(),
 		"extensions_dir":              a.extensionsDir,

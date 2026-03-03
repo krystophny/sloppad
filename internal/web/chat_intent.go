@@ -35,35 +35,14 @@ const (
 	systemActionOpenFileSizeLimit  = 256 * 1024
 )
 
-const intentLLMSystemPrompt = `You are Tabura's local intent and delegation router. Return JSON only.
-Allowed actions:
-- switch_project (name)
-- switch_model (alias, effort)
-- toggle_silent
-- toggle_conversation
-- cancel_work
-- show_status
-- delegate
-- shell (command)
-- open_file_canvas (path)
-- chat
-
-Policy:
-- Prefer {"action":"chat"} unless the user clearly requests one of the allowed system actions.
-- Use {"action":"delegate"} only for explicit delegation requests (for example: "let codex ...", "ask gpt ...", "delegate ...") or clearly complex long-running coding tasks.
-- For delegate without an explicit model, set model="codex".
-- Keep delegated task text concise and faithful to user intent.
-- Use {"action":"shell","command":"..."} only for explicit shell-like requests (for example list/find/grep/read operations).
-- Use {"action":"open_file_canvas","path":"..."} when user asks to open/show a specific file on canvas.
-- For multi-step tasks, return {"actions":[{"action":"..."}, {"action":"..."}]}.
-- For open/show file requests where the exact path is uncertain, prefer a two-step plan: shell find/list first, then open_file_canvas.
-- For open/show file requests with partial names, search similar filenames (for example markdown/text variants) via shell before open_file_canvas.
-- For filename search, prefer case-insensitive matching (for example: find ... -iname ...).
-- When chaining shell -> open_file_canvas, set path="$last_shell_path".
-- In JSON command strings, prefer single quotes inside shell command arguments.
-
-For system actions, return {"action":"<action>", ...params}.
-For non-system conversation, return {"action":"chat"}.`
+const intentLLMSystemPrompt = `You are Tabura's local router. Output JSON only.
+Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, delegate, shell, open_file_canvas, chat.
+Use {"action":"chat"} unless user clearly requests a system action.
+For explicit delegation or clearly long coding tasks use {"action":"delegate","model":"codex|gpt|spark","task":"..."} (default model: codex).
+For shell-like requests use {"action":"shell","command":"..."}.
+For open/show/display file requests, end with {"action":"open_file_canvas","path":"..."}.
+If exact path is uncertain, use multi-step {"actions":[...]}: shell search first, then open_file_canvas with path="$last_shell_path".
+Prefer case-insensitive filename search (for example -iname) and use single quotes inside JSON command strings.`
 
 type localIntentClassifierResponse struct {
 	Action     string                 `json:"action"`
@@ -737,6 +716,21 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 		return message, payloads, true
 	}
 
+	if pending := a.popPendingDangerousAction(sessionID); pending != nil {
+		if isExplicitDangerConfirm(trimmedText) {
+			message, payloads, err := a.executeSystemActionPlanUnsafe(sessionID, session, pending.UserText, pending.Actions)
+			if err != nil {
+				return fmt.Sprintf("Confirmation failed: %v", err), nil, true
+			}
+			return message, payloads, true
+		}
+		if isExplicitDangerDecline(trimmedText) {
+			return "Canceled dangerous action.", []map[string]interface{}{{
+				"type": "confirmation_canceled",
+			}}, true
+		}
+	}
+
 	if strings.TrimSpace(a.intentLLMURL) != "" {
 		llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
 		if llmErr == nil && len(llmActions) > 0 {
@@ -791,6 +785,7 @@ type shellPathCandidate struct {
 	Title         string
 	HintScore     int
 	HiddenPenalty int
+	NoisyPenalty  int
 	Depth         int
 	Length        int
 }
@@ -911,6 +906,22 @@ func scoreShellPathCandidate(title string, hints []string) int {
 	return score
 }
 
+func shellPathNoisyPenalty(title string) int {
+	clean := filepath.ToSlash(strings.ToLower(strings.TrimSpace(title)))
+	if clean == "" {
+		return 0
+	}
+	penalty := 0
+	segments := strings.Split(clean, "/")
+	for _, segment := range segments {
+		switch strings.TrimSpace(segment) {
+		case "node_modules", ".venv", "vendor", "dist", "build", "target", "gcc-build", "__pycache__":
+			penalty += 2
+		}
+	}
+	return penalty
+}
+
 func selectBestShellPathFromOutput(cwd, output string, hints []string) string {
 	root := strings.TrimSpace(cwd)
 	if root == "" {
@@ -953,6 +964,7 @@ func selectBestShellPathFromOutput(cwd, output string, hints []string) string {
 			Title:         title,
 			HintScore:     scoreShellPathCandidate(title, hints),
 			HiddenPenalty: hiddenPenalty,
+			NoisyPenalty:  shellPathNoisyPenalty(title),
 			Depth:         depth,
 			Length:        len(title),
 		})
@@ -969,6 +981,9 @@ func selectBestShellPathFromOutput(cwd, output string, hints []string) string {
 		if left.HiddenPenalty != right.HiddenPenalty {
 			return left.HiddenPenalty < right.HiddenPenalty
 		}
+		if left.NoisyPenalty != right.NoisyPenalty {
+			return left.NoisyPenalty < right.NoisyPenalty
+		}
 		if left.Depth != right.Depth {
 			return left.Depth < right.Depth
 		}
@@ -977,12 +992,40 @@ func selectBestShellPathFromOutput(cwd, output string, hints []string) string {
 	return candidates[0].Title
 }
 
+func resolveRootTopLevelFile(root, rel string) (string, bool) {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(rel) == "" {
+		return "", false
+	}
+	cleanRel := strings.TrimSpace(filepath.Base(filepath.Clean(rel)))
+	if cleanRel == "" || cleanRel == "." || cleanRel == ".." {
+		return "", false
+	}
+	abs := filepath.Clean(filepath.Join(root, cleanRel))
+	if info, err := os.Stat(abs); err == nil && !info.IsDir() {
+		return filepath.ToSlash(cleanRel), true
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		if strings.EqualFold(name, cleanRel) {
+			return filepath.ToSlash(name), true
+		}
+	}
+	return "", false
+}
+
 func preferTopLevelSiblingPath(cwd, candidate string) string {
 	cleanCandidate := filepath.ToSlash(strings.TrimSpace(candidate))
 	if cleanCandidate == "" {
-		return cleanCandidate
-	}
-	if !strings.Contains(cleanCandidate, "/") {
 		return cleanCandidate
 	}
 	base := strings.TrimSpace(filepath.Base(cleanCandidate))
@@ -993,15 +1036,41 @@ func preferTopLevelSiblingPath(cwd, candidate string) string {
 	if root == "" {
 		return cleanCandidate
 	}
-	preferredAbs := filepath.Clean(filepath.Join(root, base))
-	info, err := os.Stat(preferredAbs)
-	if err != nil || info.IsDir() {
-		return cleanCandidate
+
+	if resolved, ok := resolveRootTopLevelFile(root, base); ok {
+		return resolved
 	}
-	return filepath.ToSlash(base)
+
+	ext := strings.TrimSpace(filepath.Ext(base))
+	if ext == "" {
+		stem := strings.TrimSpace(base)
+		variants := []string{
+			stem + ".md",
+			stem + ".markdown",
+			stem + ".txt",
+			stem + ".rst",
+			stem + ".adoc",
+		}
+		for _, variant := range variants {
+			if resolved, ok := resolveRootTopLevelFile(root, variant); ok {
+				return resolved
+			}
+		}
+	}
+	return cleanCandidate
 }
 
 func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSession, userText string, actions []*SystemAction) (string, []map[string]interface{}, error) {
+	if len(actions) == 0 {
+		return "", nil, errors.New("action plan is empty")
+	}
+	if guardMessage, guardPayloads, blocked := a.guardDangerousSystemActionPlan(sessionID, userText, actions); blocked {
+		return guardMessage, guardPayloads, nil
+	}
+	return a.executeSystemActionPlanUnsafe(sessionID, session, userText, actions)
+}
+
+func (a *App) executeSystemActionPlanUnsafe(sessionID string, session store.ChatSession, userText string, actions []*SystemAction) (string, []map[string]interface{}, error) {
 	if len(actions) == 0 {
 		return "", nil, errors.New("action plan is empty")
 	}
