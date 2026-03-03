@@ -57,6 +57,7 @@ Policy:
 - Use {"action":"open_file_canvas","path":"..."} when user asks to open/show a specific file on canvas.
 - For multi-step tasks, return {"actions":[{"action":"..."}, {"action":"..."}]}.
 - For open/show file requests where the exact path is uncertain, prefer a two-step plan: shell find/list first, then open_file_canvas.
+- For open/show file requests with partial names, search similar filenames (for example markdown/text variants) via shell before open_file_canvas.
 - When chaining shell -> open_file_canvas, set path="$last_shell_path".
 - In JSON command strings, prefer single quotes inside shell command arguments.
 
@@ -551,6 +552,7 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 	if trimmedText == "" {
 		return nil, nil
 	}
+	requiresOpenCanvas := requestRequiresOpenCanvasAction(trimmedText)
 	if hint := detectDelegationHint(trimmedText); hint.Detected {
 		model := normalizeDelegateModel(hint.Model)
 		if model == "" {
@@ -636,14 +638,24 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 	}
 
 	actions, err := requestPlan(intentLLMSystemPrompt, trimmedText)
-	if err != nil || len(actions) == 0 {
-		return actions, err
+	if err != nil {
+		return nil, err
 	}
 
-	if requestRequiresOpenCanvasAction(trimmedText) && !planContainsAction(actions, "open_file_canvas") {
-		previousPlanJSON, _ := json.Marshal(actions)
-		retrySystemPrompt := intentLLMSystemPrompt + "\n\nConstraint: for explicit open/show/display file requests, final step MUST be open_file_canvas."
-		retryUserPrompt := "User request:\n" + trimmedText + "\n\nPrevious invalid plan (missing open_file_canvas):\n" + string(previousPlanJSON)
+	if requiresOpenCanvas && !planContainsAction(actions, "open_file_canvas") {
+		previousPlanJSON := "null"
+		if len(actions) > 0 {
+			if encoded, marshalErr := json.Marshal(actions); marshalErr == nil {
+				previousPlanJSON = string(encoded)
+			}
+		}
+		hints := extractOpenRequestHints(trimmedText)
+		hintText := "(none)"
+		if len(hints) > 0 {
+			hintText = strings.Join(hints, ", ")
+		}
+		retrySystemPrompt := intentLLMSystemPrompt + "\n\nConstraint: for explicit open/show/display file requests you MUST return an actions array whose final step is open_file_canvas. If path is uncertain, include a shell search step first and then use path=\"$last_shell_path\"."
+		retryUserPrompt := "User request:\n" + trimmedText + "\n\nExtracted filename hints:\n" + hintText + "\n\nPrevious invalid plan (missing open_file_canvas or empty):\n" + previousPlanJSON
 		if repaired, repairErr := requestPlan(retrySystemPrompt, retryUserPrompt); repairErr == nil && len(repaired) > 0 {
 			actions = repaired
 		}
@@ -652,6 +664,9 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		}
 	}
 
+	if len(actions) == 0 {
+		return nil, nil
+	}
 	return actions, nil
 }
 
