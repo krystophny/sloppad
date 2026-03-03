@@ -143,6 +143,34 @@ func (a *App) localIntentLLMModel() string {
 	return clean
 }
 
+func extractEmbeddedJSON(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	start := -1
+	for idx, r := range trimmed {
+		if r == '{' || r == '[' {
+			start = idx
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	for idx := start; idx < len(trimmed); idx++ {
+		candidate := strings.TrimSpace(trimmed[start : idx+1])
+		if candidate == "" {
+			continue
+		}
+		var decoded interface{}
+		if err := json.Unmarshal([]byte(candidate), &decoded); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 func parseSystemAction(raw string) (*SystemAction, error) {
 	return parseSystemActionJSON(raw)
 }
@@ -190,7 +218,13 @@ func parseSystemActionsJSON(raw string) ([]*SystemAction, error) {
 	}
 	var decoded interface{}
 	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
-		return nil, nil
+		embedded := extractEmbeddedJSON(trimmed)
+		if embedded == "" {
+			return nil, nil
+		}
+		if err := json.Unmarshal([]byte(embedded), &decoded); err != nil {
+			return nil, nil
+		}
 	}
 	collect := func(values []interface{}) []*SystemAction {
 		actions := make([]*SystemAction, 0, len(values))
@@ -278,62 +312,6 @@ func systemActionOpenPath(params map[string]interface{}) string {
 		if value != "" && value != "<nil>" {
 			return value
 		}
-	}
-	return ""
-}
-
-func shellQuoteSingle(raw string) string {
-	return "'" + strings.ReplaceAll(raw, "'", `'"'"'`) + "'"
-}
-
-func buildFindCommandForToken(token string) string {
-	clean := strings.TrimSpace(token)
-	clean = strings.Trim(clean, "\"'`")
-	clean = strings.TrimSpace(clean)
-	if clean == "" {
-		clean = "README"
-	}
-	exact := shellQuoteSingle(clean)
-	prefix := shellQuoteSingle(clean + ".*")
-	contains := shellQuoteSingle("*" + clean + "*")
-	return fmt.Sprintf(
-		"find . -maxdepth 5 -type f \\( -iname %s -o -iname %s -o -iname %s \\) | head -n 1",
-		exact,
-		prefix,
-		contains,
-	)
-}
-
-func detectQuickOpenToken(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" {
-		return ""
-	}
-	lower := strings.ToLower(trimmed)
-	prefixes := []string{"open ", "show ", "display "}
-	for _, prefix := range prefixes {
-		if !strings.HasPrefix(lower, prefix) {
-			continue
-		}
-		token := strings.TrimSpace(trimmed[len(prefix):])
-		replacements := []string{" on canvas", " in canvas", " file", " please"}
-		for _, suffix := range replacements {
-			if strings.HasSuffix(strings.ToLower(token), suffix) {
-				token = strings.TrimSpace(token[:len(token)-len(suffix)])
-			}
-		}
-		token = strings.TrimSpace(strings.TrimRight(token, ".,;:!?"))
-		tokenLower := strings.ToLower(token)
-		if strings.HasPrefix(tokenLower, "the ") {
-			token = strings.TrimSpace(token[4:])
-		}
-		tokenLower = strings.ToLower(token)
-		if strings.HasSuffix(tokenLower, " file") {
-			token = strings.TrimSpace(token[:len(token)-5])
-		}
-		token = strings.TrimSpace(strings.TrimRight(token, ".,;:!?"))
-		token = strings.Trim(token, "\"'`")
-		return strings.TrimSpace(token)
 	}
 	return ""
 }
@@ -495,6 +473,9 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		"model":       a.localIntentLLMModel(),
 		"temperature": 0,
 		"max_tokens":  256,
+		"response_format": map[string]interface{}{
+			"type": "json_object",
+		},
 		"chat_template_kwargs": map[string]interface{}{
 			"enable_thinking": false,
 		},
@@ -582,6 +563,16 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 		return message, payloads, true
 	}
 
+	if strings.TrimSpace(a.intentLLMURL) != "" {
+		llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
+		if llmErr == nil && len(llmActions) > 0 {
+			if message, payloads, ok := tryExecutePlan(llmActions); ok {
+				return message, payloads, true
+			}
+		}
+		return "", nil, false
+	}
+
 	localAction, localConfidence, localErr := a.classifyIntentLocally(ctx, trimmedText)
 	if localErr == nil && localAction != nil && localConfidence >= intentClassifierMinConfidence {
 		if normalized := normalizeSystemActionForExecution(localAction, trimmedText); normalized != nil {
@@ -596,13 +587,6 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 	}
 	if localErr == nil && localAction == nil && localConfidence >= intentClassifierMinConfidence {
 		return "", nil, false
-	}
-
-	llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
-	if llmErr == nil && len(llmActions) > 0 {
-		if message, payloads, ok := tryExecutePlan(llmActions); ok {
-			return message, payloads, true
-		}
 	}
 	return "", nil, false
 }
