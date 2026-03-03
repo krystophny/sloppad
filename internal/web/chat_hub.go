@@ -35,8 +35,14 @@ Available actions:
 - {"action":"toggle_silent"}
 - {"action":"toggle_conversation"}
 - {"action":"delegate","model":"codex|gpt|spark","task":"..."}
+- {"action":"shell","command":"..."}
+- {"action":"open_file_canvas","path":"..."}
 - {"action":"cancel_work"}
 - {"action":"show_status"}
+
+For multi-step tasks, return {"actions":[{"action":"..."},{"action":"..."}]}.
+For open/show-file requests where path is uncertain (for example "Open README"), prefer shell find/list first, then open_file_canvas.
+When chaining shell -> open_file_canvas, set path="$last_shell_path".
 
 For conversational responses, reply with plain text.`
 
@@ -210,9 +216,9 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 		if assistantText == "" {
 			assistantText = "(assistant returned no content)"
 		}
-		action, _ := parseSystemAction(assistantText)
-		if action != nil {
-			actionMessage, actionPayload, actionErr := a.executeSystemAction(sessionID, session, action)
+		actions, _ := parseSystemActions(assistantText)
+		if len(actions) > 0 {
+			actionMessage, actionPayloads, actionErr := a.executeSystemActionPlan(sessionID, session, actions)
 			if actionErr != nil {
 				assistantText = fmt.Sprintf("Hub action failed: %s", actionErr.Error())
 			} else {
@@ -220,7 +226,10 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 				if assistantText == "" {
 					assistantText = "Done."
 				}
-				if actionPayload != nil {
+				for _, actionPayload := range actionPayloads {
+					if actionPayload == nil {
+						continue
+					}
 					a.broadcastChatEvent(sessionID, map[string]interface{}{
 						"type":   "system_action",
 						"action": actionPayload,
@@ -241,8 +250,8 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 			outputMode,
 		)
 	}
-	executeClassifiedAction := func(action *SystemAction) bool {
-		actionMessage, actionPayload, actionErr := a.executeSystemAction(sessionID, session, action)
+	executeClassifiedAction := func(actions []*SystemAction) bool {
+		actionMessage, actionPayloads, actionErr := a.executeSystemActionPlan(sessionID, session, actions)
 		if actionErr != nil {
 			return false
 		}
@@ -250,7 +259,10 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 		if assistantText == "" {
 			assistantText = "Done."
 		}
-		if actionPayload != nil {
+		for _, actionPayload := range actionPayloads {
+			if actionPayload == nil {
+				continue
+			}
 			a.broadcastChatEvent(sessionID, map[string]interface{}{
 				"type":   "system_action",
 				"action": actionPayload,
@@ -270,19 +282,32 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 		return true
 	}
 
-	localAction, localConfidence, localErr := a.classifyIntentLocally(ctx, userText)
-	if localErr == nil && localAction != nil && localConfidence >= intentClassifierMinConfidence {
-		if executeClassifiedAction(localAction) {
-			return
+	if actionMessage, actionPayloads, handled := a.classifyAndExecuteSystemAction(ctx, sessionID, session, userText); handled {
+		assistantText := strings.TrimSpace(actionMessage)
+		if assistantText == "" {
+			assistantText = "Done."
 		}
-	}
-	if localErr != nil || localAction == nil || localConfidence < intentClassifierMinConfidence {
-		llmAction, llmErr := a.classifyIntentWithLLM(ctx, userText)
-		if llmErr == nil && llmAction != nil {
-			if executeClassifiedAction(llmAction) {
-				return
+		for _, actionPayload := range actionPayloads {
+			if actionPayload == nil {
+				continue
 			}
+			a.broadcastChatEvent(sessionID, map[string]interface{}{
+				"type":   "system_action",
+				"action": actionPayload,
+			})
 		}
+		a.finalizeAssistantResponse(
+			sessionID,
+			session.ProjectKey,
+			assistantText,
+			&persistedAssistantID,
+			&persistedAssistantText,
+			"",
+			runID,
+			"",
+			outputMode,
+		)
+		return
 	}
 
 	if localOnly {
@@ -303,8 +328,8 @@ func (a *App) runHubTurn(sessionID string, session store.ChatSession, messages [
 
 	assistantText, localLLMErr := a.hubReplyWithLocalLLM(ctx, userText)
 	if localLLMErr == nil {
-		if action, _ := parseSystemAction(assistantText); action != nil {
-			if executeClassifiedAction(action) {
+		if actions, _ := parseSystemActions(assistantText); len(actions) > 0 {
+			if executeClassifiedAction(actions) {
 				return
 			}
 		} else {

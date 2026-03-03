@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -25,6 +27,9 @@ const (
 	intentClassifierResponseLimit  = 64 * 1024
 	intentLLMRequestTimeout        = 900 * time.Millisecond
 	intentLLMResponseLimit         = 128 * 1024
+	systemActionShellTimeout       = 8 * time.Second
+	systemActionShellOutputLimit   = 16 * 1024
+	systemActionOpenFileSizeLimit  = 256 * 1024
 )
 
 const intentLLMSystemPrompt = `You are Tabura's local intent and delegation router. Return JSON only.
@@ -36,6 +41,8 @@ Allowed actions:
 - cancel_work
 - show_status
 - delegate
+- shell (command)
+- open_file_canvas (path)
 - chat
 
 Policy:
@@ -43,6 +50,11 @@ Policy:
 - Use {"action":"delegate"} only for explicit delegation requests (for example: "let codex ...", "ask gpt ...", "delegate ...") or clearly complex long-running coding tasks.
 - For delegate without an explicit model, set model="codex".
 - Keep delegated task text concise and faithful to user intent.
+- Use {"action":"shell","command":"..."} only for explicit shell-like requests (for example list/find/grep/read operations).
+- Use {"action":"open_file_canvas","path":"..."} when user asks to open/show a specific file on canvas.
+- For multi-step tasks, return {"actions":[{"action":"..."}, {"action":"..."}]}.
+- For "open README"-style requests, prefer a two-step plan: shell find/list first, then open_file_canvas.
+- When chaining shell -> open_file_canvas, set path="$last_shell_path".
 
 For system actions, return {"action":"<action>", ...params}.
 For non-system conversation, return {"action":"chat"}.`
@@ -74,6 +86,8 @@ type SystemAction struct {
 	Action string                 `json:"action"`
 	Params map[string]interface{} `json:"-"`
 }
+
+const systemActionLastShellPathPlaceholder = "$last_shell_path"
 
 func parseIntentLLMProfileOptions(raw string) []string {
 	clean := strings.TrimSpace(raw)
@@ -133,21 +147,20 @@ func parseSystemAction(raw string) (*SystemAction, error) {
 	return parseSystemActionJSON(raw)
 }
 
-func parseSystemActionJSON(raw string) (*SystemAction, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil, nil
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &obj); err != nil {
-		return nil, nil
+func parseSystemActions(raw string) ([]*SystemAction, error) {
+	return parseSystemActionsJSON(raw)
+}
+
+func parseSystemActionObject(obj map[string]interface{}) *SystemAction {
+	if obj == nil {
+		return nil
 	}
 	action := normalizeSystemActionName(fmt.Sprint(obj["action"]))
 	if action == "" {
 		action = normalizeSystemActionName(fmt.Sprint(obj["intent"]))
 	}
 	if action == "" {
-		return nil, nil
+		return nil
 	}
 	params := make(map[string]interface{}, len(obj))
 	for key, value := range obj {
@@ -156,7 +169,63 @@ func parseSystemActionJSON(raw string) (*SystemAction, error) {
 		}
 		params[key] = value
 	}
-	return &SystemAction{Action: action, Params: params}, nil
+	return &SystemAction{Action: action, Params: params}
+}
+
+func parseSystemActionJSON(raw string) (*SystemAction, error) {
+	actions, err := parseSystemActionsJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	return actions[0], nil
+}
+
+func parseSystemActionsJSON(raw string) ([]*SystemAction, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var decoded interface{}
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return nil, nil
+	}
+	collect := func(values []interface{}) []*SystemAction {
+		actions := make([]*SystemAction, 0, len(values))
+		for _, value := range values {
+			obj, _ := value.(map[string]interface{})
+			if action := parseSystemActionObject(obj); action != nil {
+				actions = append(actions, action)
+			}
+		}
+		return actions
+	}
+	switch typed := decoded.(type) {
+	case map[string]interface{}:
+		if rawActions, ok := typed["actions"]; ok {
+			items, _ := rawActions.([]interface{})
+			actions := collect(items)
+			if len(actions) == 0 {
+				return nil, nil
+			}
+			return actions, nil
+		}
+		action := parseSystemActionObject(typed)
+		if action == nil {
+			return nil, nil
+		}
+		return []*SystemAction{action}, nil
+	case []interface{}:
+		actions := collect(typed)
+		if len(actions) == 0 {
+			return nil, nil
+		}
+		return actions, nil
+	default:
+		return nil, nil
+	}
 }
 
 func systemActionStringParam(params map[string]interface{}, key string) string {
@@ -165,7 +234,7 @@ func systemActionStringParam(params map[string]interface{}, key string) string {
 
 func normalizeSystemActionName(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "delegate":
+	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "delegate", "shell", "open_file_canvas":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
@@ -189,6 +258,72 @@ func systemActionDelegateTask(params map[string]interface{}) string {
 		if value != "" && value != "<nil>" {
 			return value
 		}
+	}
+	return ""
+}
+
+func systemActionShellCommand(params map[string]interface{}) string {
+	for _, key := range []string{"command", "cmd", "text"} {
+		value := strings.TrimSpace(fmt.Sprint(params[key]))
+		if value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
+}
+
+func systemActionOpenPath(params map[string]interface{}) string {
+	for _, key := range []string{"path", "file", "target"} {
+		value := strings.TrimSpace(fmt.Sprint(params[key]))
+		if value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
+}
+
+func shellQuoteSingle(raw string) string {
+	return "'" + strings.ReplaceAll(raw, "'", `'"'"'`) + "'"
+}
+
+func buildFindCommandForToken(token string) string {
+	clean := strings.TrimSpace(token)
+	clean = strings.Trim(clean, "\"'`")
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		clean = "README"
+	}
+	exact := shellQuoteSingle(clean)
+	prefix := shellQuoteSingle(clean + ".*")
+	contains := shellQuoteSingle("*" + clean + "*")
+	return fmt.Sprintf(
+		"find . -maxdepth 5 -type f \\( -iname %s -o -iname %s -o -iname %s \\) | head -n 1",
+		exact,
+		prefix,
+		contains,
+	)
+}
+
+func detectQuickOpenToken(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	prefixes := []string{"open ", "show ", "display "}
+	for _, prefix := range prefixes {
+		if !strings.HasPrefix(lower, prefix) {
+			continue
+		}
+		token := strings.TrimSpace(trimmed[len(prefix):])
+		replacements := []string{" on canvas", " in canvas", " file", " please"}
+		for _, suffix := range replacements {
+			if strings.HasSuffix(strings.ToLower(token), suffix) {
+				token = strings.TrimSpace(token[:len(token)-len(suffix)])
+			}
+		}
+		token = strings.Trim(token, "\"'`")
+		return strings.TrimSpace(token)
 	}
 	return ""
 }
@@ -295,7 +430,31 @@ func (a *App) classifyIntentLocally(ctx context.Context, text string) (*SystemAc
 	return &SystemAction{Action: actionName, Params: params}, payload.Confidence, nil
 }
 
-func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAction, error) {
+func normalizeSystemActionForExecution(action *SystemAction, fallbackText string) *SystemAction {
+	if action == nil {
+		return nil
+	}
+	if normalizeSystemActionName(action.Action) == "" {
+		return nil
+	}
+	if action.Params == nil {
+		action.Params = map[string]interface{}{}
+	}
+	switch action.Action {
+	case "delegate":
+		model := normalizeDelegateModel(systemActionStringParam(action.Params, "model"))
+		if model == "" {
+			model = "codex"
+		}
+		action.Params["model"] = model
+		if systemActionDelegateTask(action.Params) == "" {
+			action.Params["task"] = fallbackText
+		}
+	}
+	return action
+}
+
+func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*SystemAction, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(a.intentLLMURL), "/")
 	if baseURL == "" {
 		return nil, nil
@@ -313,19 +472,19 @@ func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAc
 		if task == "" {
 			task = trimmedText
 		}
-		return &SystemAction{
+		return []*SystemAction{{
 			Action: "delegate",
 			Params: map[string]interface{}{
 				"model": model,
 				"task":  task,
 			},
-		}, nil
+		}}, nil
 	}
 
 	requestBody, _ := json.Marshal(map[string]interface{}{
 		"model":       a.localIntentLLMModel(),
 		"temperature": 0,
-		"max_tokens":  128,
+		"max_tokens":  256,
 		"chat_template_kwargs": map[string]interface{}{
 			"enable_thinking": false,
 		},
@@ -367,30 +526,190 @@ func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAc
 	if content == "" {
 		return nil, nil
 	}
-	action, parseErr := parseSystemActionJSON(stripCodeFence(content))
+	actions, parseErr := parseSystemActionsJSON(stripCodeFence(content))
 	if parseErr != nil {
 		return nil, parseErr
 	}
-	if action == nil {
+	if len(actions) == 0 {
 		return nil, nil
 	}
-	if normalizeSystemActionName(action.Action) == "" {
+	normalized := make([]*SystemAction, 0, len(actions))
+	for _, action := range actions {
+		if normalizedAction := normalizeSystemActionForExecution(action, trimmedText); normalizedAction != nil {
+			normalized = append(normalized, normalizedAction)
+		}
+	}
+	if len(normalized) == 0 {
 		return nil, nil
 	}
-	if action.Action == "delegate" {
-		model := normalizeDelegateModel(systemActionStringParam(action.Params, "model"))
-		if model == "" {
-			model = "codex"
+	return normalized, nil
+}
+
+func (a *App) classifyIntentWithLLM(ctx context.Context, text string) (*SystemAction, error) {
+	actions, err := a.classifyIntentPlanWithLLM(ctx, text)
+	if err != nil {
+		return nil, err
+	}
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	return actions[0], nil
+}
+
+func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID string, session store.ChatSession, text string) (string, []map[string]interface{}, bool) {
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return "", nil, false
+	}
+	tryExecutePlan := func(actions []*SystemAction) (string, []map[string]interface{}, bool) {
+		if len(actions) == 0 {
+			return "", nil, false
 		}
-		if action.Params == nil {
-			action.Params = map[string]interface{}{}
+		message, payloads, err := a.executeSystemActionPlan(sessionID, session, actions)
+		if err != nil {
+			return "", nil, false
 		}
-		action.Params["model"] = model
-		if systemActionDelegateTask(action.Params) == "" {
-			action.Params["task"] = trimmedText
+		return message, payloads, true
+	}
+	if strings.TrimSpace(a.intentLLMURL) == "" {
+		if openToken := detectQuickOpenToken(trimmedText); openToken != "" {
+			quickPlan := []*SystemAction{
+				{
+					Action: "shell",
+					Params: map[string]interface{}{
+						"command": "ls -1",
+					},
+				},
+				{
+					Action: "shell",
+					Params: map[string]interface{}{
+						"command": buildFindCommandForToken(openToken),
+					},
+				},
+				{
+					Action: "open_file_canvas",
+					Params: map[string]interface{}{
+						"path": systemActionLastShellPathPlaceholder,
+					},
+				},
+			}
+			if message, payloads, ok := tryExecutePlan(quickPlan); ok {
+				return message, payloads, true
+			}
 		}
 	}
-	return action, nil
+
+	localAction, localConfidence, localErr := a.classifyIntentLocally(ctx, trimmedText)
+	if localErr == nil && localAction != nil && localConfidence >= intentClassifierMinConfidence {
+		if normalized := normalizeSystemActionForExecution(localAction, trimmedText); normalized != nil {
+			if message, payloads, ok := tryExecutePlan([]*SystemAction{normalized}); ok {
+				return message, payloads, true
+			}
+		}
+	}
+	if localErr == nil && localAction == nil && localConfidence >= intentClassifierMinConfidence {
+		return "", nil, false
+	}
+
+	llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
+	if llmErr == nil && len(llmActions) > 0 {
+		if message, payloads, ok := tryExecutePlan(llmActions); ok {
+			return message, payloads, true
+		}
+	}
+	return "", nil, false
+}
+
+func firstShellPathFromOutput(output string) string {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		candidate := strings.TrimSpace(line)
+		if candidate == "" {
+			continue
+		}
+		if candidate == "(no output)" {
+			continue
+		}
+		candidate = strings.TrimPrefix(candidate, "./")
+		if candidate == "." || candidate == ".." {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSession, actions []*SystemAction) (string, []map[string]interface{}, error) {
+	if len(actions) == 0 {
+		return "", nil, errors.New("action plan is empty")
+	}
+	messages := make([]string, 0, len(actions))
+	payloads := make([]map[string]interface{}, 0, len(actions))
+	lastShellPath := ""
+	for _, action := range actions {
+		if action == nil {
+			continue
+		}
+		resolved := &SystemAction{
+			Action: action.Action,
+			Params: map[string]interface{}{},
+		}
+		for key, value := range action.Params {
+			resolved.Params[key] = value
+		}
+		if resolved.Action == "open_file_canvas" {
+			path := systemActionOpenPath(resolved.Params)
+			if strings.EqualFold(strings.TrimSpace(path), systemActionLastShellPathPlaceholder) {
+				if strings.TrimSpace(lastShellPath) == "" {
+					return "", nil, errors.New("open_file_canvas requires a resolved shell path")
+				}
+				resolved.Params["path"] = lastShellPath
+			}
+		}
+		message, payload, err := a.executeSystemAction(sessionID, session, resolved)
+		if err != nil {
+			return "", nil, err
+		}
+		if strings.TrimSpace(message) != "" {
+			messages = append(messages, strings.TrimSpace(message))
+		}
+		if payload != nil {
+			payloads = append(payloads, payload)
+			payloadType := strings.TrimSpace(fmt.Sprint(payload["type"]))
+			payloadOutput := strings.TrimSpace(fmt.Sprint(payload["output"]))
+			if strings.EqualFold(payloadType, "shell") && payloadOutput != "" && payloadOutput != "<nil>" {
+				lastShellPath = firstShellPathFromOutput(payloadOutput)
+			}
+		}
+	}
+	if len(messages) == 0 {
+		messages = append(messages, "Done.")
+	}
+	return strings.Join(messages, "\n\n"), payloads, nil
+}
+
+func (a *App) systemActionTargetProject(session store.ChatSession) (store.Project, error) {
+	projectKey := strings.TrimSpace(session.ProjectKey)
+	if projectKey != "" {
+		project, err := a.store.GetProjectByProjectKey(projectKey)
+		if err == nil && !isHubProject(project) {
+			return project, nil
+		}
+	}
+	return a.hubPrimaryProject()
+}
+
+func truncateSystemActionOutput(text string, maxBytes int) string {
+	if maxBytes <= 0 {
+		maxBytes = systemActionShellOutputLimit
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	if maxBytes <= 24 {
+		return text[:maxBytes]
+	}
+	return text[:maxBytes] + "\n...(truncated)"
 }
 
 func (a *App) executeSystemAction(sessionID string, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
@@ -413,7 +732,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 			"project_id": activated.ID,
 		}, nil
 	case "switch_model":
-		targetProject, err := a.hubPrimaryProject()
+		targetProject, err := a.systemActionTargetProject(session)
 		if err != nil {
 			return "", nil, err
 		}
@@ -451,8 +770,128 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 			return "", nil, err
 		}
 		return status, nil, nil
+	case "shell":
+		targetProject, err := a.systemActionTargetProject(session)
+		if err != nil {
+			return "", nil, err
+		}
+		command := systemActionShellCommand(action.Params)
+		if command == "" {
+			return "", nil, errors.New("shell command is required")
+		}
+		cwd := strings.TrimSpace(targetProject.RootPath)
+		if cwd == "" {
+			cwd = strings.TrimSpace(a.cwdForProjectKey(targetProject.ProjectKey))
+		}
+		if cwd == "" {
+			return "", nil, errors.New("shell cwd is not available")
+		}
+		commandCtx, cancel := context.WithTimeout(context.Background(), systemActionShellTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(commandCtx, "bash", "-lc", command)
+		cmd.Dir = cwd
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		runErr := cmd.Run()
+		rawOutput := strings.TrimSpace(output.String())
+		rawOutput = truncateSystemActionOutput(rawOutput, systemActionShellOutputLimit)
+		if rawOutput == "" {
+			rawOutput = "(no output)"
+		}
+		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Sprintf("Shell command timed out after %s.\n\n%s", systemActionShellTimeout, rawOutput), map[string]interface{}{
+				"type":       "shell",
+				"command":    command,
+				"cwd":        cwd,
+				"exit_code":  -1,
+				"timed_out":  true,
+				"output":     rawOutput,
+				"project_id": targetProject.ID,
+			}, nil
+		}
+		exitCode := 0
+		if runErr != nil {
+			var exitErr *exec.ExitError
+			if errors.As(runErr, &exitErr) {
+				exitCode = exitErr.ExitCode()
+			} else {
+				return "", nil, runErr
+			}
+			return fmt.Sprintf("Shell command failed (exit %d).\n\n%s", exitCode, rawOutput), map[string]interface{}{
+				"type":       "shell",
+				"command":    command,
+				"cwd":        cwd,
+				"exit_code":  exitCode,
+				"output":     rawOutput,
+				"project_id": targetProject.ID,
+			}, nil
+		}
+		return rawOutput, map[string]interface{}{
+			"type":       "shell",
+			"command":    command,
+			"cwd":        cwd,
+			"exit_code":  exitCode,
+			"output":     rawOutput,
+			"project_id": targetProject.ID,
+		}, nil
+	case "open_file_canvas":
+		targetProject, err := a.systemActionTargetProject(session)
+		if err != nil {
+			return "", nil, err
+		}
+		rawPath := systemActionOpenPath(action.Params)
+		if rawPath == "" {
+			return "", nil, errors.New("open_file_canvas path is required")
+		}
+		cwd := strings.TrimSpace(targetProject.RootPath)
+		if cwd == "" {
+			cwd = strings.TrimSpace(a.cwdForProjectKey(targetProject.ProjectKey))
+		}
+		if cwd == "" {
+			return "", nil, errors.New("open_file_canvas cwd is not available")
+		}
+		absPath, canvasTitle, err := resolveCanvasFilePath(cwd, rawPath)
+		if err != nil {
+			return "", nil, err
+		}
+		info, err := os.Stat(absPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if info.IsDir() {
+			return "", nil, fmt.Errorf("path %q is a directory", rawPath)
+		}
+		if info.Size() > systemActionOpenFileSizeLimit {
+			return "", nil, fmt.Errorf("file %q exceeds %d bytes", rawPath, systemActionOpenFileSizeLimit)
+		}
+		contentBytes, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", nil, err
+		}
+		canvasSessionID := strings.TrimSpace(a.canvasSessionIDForProject(targetProject))
+		if canvasSessionID == "" {
+			return "", nil, errors.New("canvas session is not available")
+		}
+		port, ok := a.tunnels.getPort(canvasSessionID)
+		if !ok {
+			return "", nil, fmt.Errorf("no active MCP tunnel for project %q", targetProject.Name)
+		}
+		if _, err := a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+			"session_id":       canvasSessionID,
+			"kind":             "text",
+			"title":            canvasTitle,
+			"markdown_or_text": string(contentBytes),
+		}); err != nil {
+			return "", nil, err
+		}
+		return fmt.Sprintf("Opened %s on canvas.", canvasTitle), map[string]interface{}{
+			"type":       "open_file_canvas",
+			"path":       canvasTitle,
+			"project_id": targetProject.ID,
+		}, nil
 	case "delegate":
-		targetProject, err := a.hubPrimaryProject()
+		targetProject, err := a.systemActionTargetProject(session)
 		if err != nil {
 			return "", nil, err
 		}
