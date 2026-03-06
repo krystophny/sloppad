@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log"
@@ -401,6 +402,39 @@ func staticSubFS() fs.FS {
 	return sub
 }
 
+func publicBasePath(r *http.Request) string {
+	if r == nil {
+		return "/"
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Prefix")); forwarded != "" {
+		return normalizeBasePath(forwarded)
+	}
+	return normalizeBasePath(r.URL.Path)
+}
+
+func normalizeBasePath(raw string) string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" || clean == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(clean, "/") {
+		clean = "/" + clean
+	}
+	clean = strings.TrimRight(clean, "/")
+	if clean == "" {
+		return "/"
+	}
+	lastSlash := strings.LastIndex(clean, "/")
+	lastDot := strings.LastIndex(clean, ".")
+	if lastSlash >= 0 && lastDot > lastSlash {
+		clean = clean[:lastSlash]
+		if clean == "" {
+			return "/"
+		}
+	}
+	return clean + "/"
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -437,6 +471,8 @@ func (a *App) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := string(data)
+	baseHref := html.EscapeString(publicBasePath(r))
+	page = strings.Replace(page, "<head>", fmt.Sprintf("<head>\n  <base href=\"%s\">", baseHref), 1)
 	boot := strings.TrimSpace(a.bootID)
 	if boot != "" {
 		styleTag := `href="./static/style.css"`

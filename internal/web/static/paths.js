@@ -9,7 +9,7 @@ function joinRelative(prefix, value) {
 }
 
 export function appURL(path) {
-  return new URL(String(path || './'), window.location.href).toString();
+  return new URL(String(path || './'), document.baseURI || window.location.href).toString();
 }
 
 export function apiURL(path) {
@@ -17,7 +17,7 @@ export function apiURL(path) {
 }
 
 export function wsURL(path) {
-  const url = new URL(joinRelative('ws', path), window.location.href);
+  const url = new URL(joinRelative('ws', path), document.baseURI || window.location.href);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 }

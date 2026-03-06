@@ -41,6 +41,7 @@ func TestServeIndexUsesRelativeStaticAssets(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, fragment := range []string{
+		`<base href="/">`,
 		`href="./static/style.css`,
 		`src="./static/app.js`,
 		`src="./static/polyfill.js"`,
@@ -48,6 +49,22 @@ func TestServeIndexUsesRelativeStaticAssets(t *testing.T) {
 		if !strings.Contains(body, fragment) {
 			t.Fatalf("GET / body missing %q", fragment)
 		}
+	}
+}
+
+func TestServeIndexUsesForwardedPrefixBaseHref(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/tabura")
+	rr := httptest.NewRecorder()
+	app.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want 200", rr.Code)
+	}
+	if body := rr.Body.String(); !strings.Contains(body, `<base href="/tabura/">`) {
+		t.Fatalf("GET / body missing forwarded-prefix base href, body=%q", body)
 	}
 }
 
