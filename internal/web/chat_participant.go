@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/krystophny/tabura/internal/stt"
 	"github.com/krystophny/tabura/internal/store"
+	"github.com/krystophny/tabura/internal/stt"
 )
 
 const (
@@ -33,11 +33,11 @@ type participantMessage struct {
 }
 
 type participantConfig struct {
-	Language              string `json:"language"`
-	MaxSegmentDurationMS  int    `json:"max_segment_duration_ms"`
-	SessionRAMCapMB       int    `json:"session_ram_cap_mb"`
-	STTModel              string `json:"stt_model"`
-	AudioPersistence      string `json:"audio_persistence"`
+	Language             string `json:"language"`
+	MaxSegmentDurationMS int    `json:"max_segment_duration_ms"`
+	SessionRAMCapMB      int    `json:"session_ram_cap_mb"`
+	STTModel             string `json:"stt_model"`
+	AudioPersistence     string `json:"audio_persistence"`
 }
 
 func defaultParticipantConfig() participantConfig {
@@ -81,7 +81,7 @@ func handleParticipantStart(a *App, conn *chatWSConn, chatSessionID string) {
 	log.Printf("participant session started: %s", sess.ID)
 }
 
-// Privacy: buffer is accumulated in RAM only. See docs/meeting-notes-privacy.md.
+// Privacy: each participant chunk is copied into RAM only for immediate transcription.
 func handleParticipantBinaryChunk(a *App, conn *chatWSConn, data []byte) {
 	conn.participantMu.Lock()
 	if !conn.participantActive {
@@ -89,39 +89,26 @@ func handleParticipantBinaryChunk(a *App, conn *chatWSConn, data []byte) {
 		return
 	}
 
-	cfg := a.loadParticipantConfig()
-	ramCap := cfg.SessionRAMCapMB * 1024 * 1024
-	if ramCap <= 0 {
-		ramCap = participantMaxBufBytes
-	}
-
-	if len(conn.participantBuf)+len(data) > ramCap {
-		// Drop oldest data to stay under RAM cap
-		excess := len(conn.participantBuf) + len(data) - ramCap
-		if excess >= len(conn.participantBuf) {
-			conn.participantBuf = make([]byte, 0, 4096)
-		} else {
-			conn.participantBuf = conn.participantBuf[excess:]
-		}
-	}
-
-	conn.participantBuf = append(conn.participantBuf, data...)
 	sessionID := conn.participantSessionID
-
-	if len(conn.participantBuf) < 4096 {
+	if len(data) > participantMaxBufBytes {
+		zeroizeBytes(conn.participantBuf)
+		conn.participantBuf = nil
 		conn.participantMu.Unlock()
+		_ = conn.writeJSON(participantMessage{Type: "participant_error", Error: "participant chunk exceeds max size"})
 		return
 	}
-
-	buf := make([]byte, len(conn.participantBuf))
-	copy(buf, conn.participantBuf)
-	conn.participantBuf = conn.participantBuf[:0]
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	zeroizeBytes(conn.participantBuf)
+	conn.participantBuf = nil
 	conn.participantMu.Unlock()
 
 	go transcribeParticipantChunk(a, conn, sessionID, buf)
 }
 
 func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf []byte) {
+	defer zeroizeBytes(buf)
+
 	if a.sttURL == "" {
 		_ = conn.writeJSON(participantMessage{Type: "participant_error", Error: "STT sidecar is not configured"})
 		return
@@ -129,7 +116,7 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 
 	startTime := time.Now()
 	replacements := a.loadSTTReplacements()
-	mimeType := "audio/webm"
+	mimeType := detectParticipantMimeType(buf)
 	normalizedMimeType, normalizedData, normalizeErr := stt.NormalizeForWhisper(mimeType, buf)
 	if normalizeErr != nil {
 		log.Printf("participant normalize error: %v", normalizeErr)
@@ -197,14 +184,25 @@ func handleParticipantStop(a *App, conn *chatWSConn) {
 	conn.participantBuf = nil
 	conn.participantMu.Unlock()
 
-	if len(remainingBuf) >= 1024 {
-		transcribeParticipantChunk(a, conn, sessionID, remainingBuf)
-	}
+	zeroizeBytes(remainingBuf)
 
 	_ = a.store.EndParticipantSession(sessionID)
 	_ = a.store.AddParticipantEvent(sessionID, 0, "session_stopped", "{}")
 	_ = conn.writeJSON(participantMessage{Type: "participant_stopped", SessionID: sessionID})
 	log.Printf("participant session stopped: %s", sessionID)
+}
+
+func detectParticipantMimeType(data []byte) string {
+	if len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
+		return "audio/wav"
+	}
+	return "audio/webm"
+}
+
+func zeroizeBytes(buf []byte) {
+	for i := range buf {
+		buf[i] = 0
+	}
 }
 
 func (a *App) loadParticipantConfig() participantConfig {

@@ -1,11 +1,15 @@
 package web
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/krystophny/tabura/internal/store"
 )
@@ -406,6 +410,104 @@ func TestPrivacyParticipantBufferCleanupOnStop(t *testing.T) {
 	}
 }
 
+func TestParticipantBinaryChunkTranscribesWAVSegmentImmediately(t *testing.T) {
+	app := newAuthedTestApp(t)
+	t.Setenv("PATH", t.TempDir())
+
+	type upload struct {
+		path     string
+		filename string
+		body     []byte
+	}
+	uploads := make(chan upload, 1)
+	sttSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
+			uploads <- upload{path: "parse-error", filename: err.Error()}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			uploads <- upload{path: "form-file-error", filename: err.Error()}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		body, err := io.ReadAll(file)
+		if err != nil {
+			uploads <- upload{path: "read-error", filename: err.Error()}
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		uploads <- upload{
+			path:     r.URL.Path,
+			filename: header.Filename,
+			body:     body,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"participant transcript"}`))
+	}))
+	defer sttSrv.Close()
+	app.sttURL = sttSrv.URL
+
+	conn, cleanup := newTestWSConn(t)
+	defer cleanup()
+
+	handleParticipantStart(app, conn, "project-chat")
+
+	conn.participantMu.Lock()
+	sessionID := conn.participantSessionID
+	conn.participantMu.Unlock()
+	if sessionID == "" {
+		t.Fatal("expected non-empty participant session id")
+	}
+
+	wav := buildParticipantSpeechWAV(240, 16000)
+	handleParticipantBinaryChunk(app, conn, wav)
+
+	select {
+	case req := <-uploads:
+		if req.path != "/v1/audio/transcriptions" {
+			t.Fatalf("stt path = %q, want /v1/audio/transcriptions", req.path)
+		}
+		if req.filename != "audio.wav" {
+			t.Fatalf("stt filename = %q, want audio.wav", req.filename)
+		}
+		if !bytes.Equal(req.body, wav) {
+			t.Fatal("uploaded WAV payload does not match the participant chunk")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for participant chunk upload")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		segments, err := app.store.ListParticipantSegments(sessionID, 0, 0)
+		if err != nil {
+			t.Fatalf("list participant segments: %v", err)
+		}
+		if len(segments) == 1 {
+			if segments[0].Text != "participant transcript" {
+				t.Fatalf("segment text = %q, want participant transcript", segments[0].Text)
+			}
+			if segments[0].Model != "whisper-1" {
+				t.Fatalf("segment model = %q, want whisper-1", segments[0].Model)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("segments count = %d, want 1", len(segments))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	conn.participantMu.Lock()
+	defer conn.participantMu.Unlock()
+	if conn.participantBuf != nil {
+		t.Fatal("participantBuf should be cleared after immediate chunk transcription")
+	}
+}
+
 func TestParticipantWSStartStop(t *testing.T) {
 	app := newAuthedTestApp(t)
 	conn, cleanup := newTestWSConn(t)
@@ -467,4 +569,34 @@ func TestParticipantStopWithoutStartReturnsError(t *testing.T) {
 	if conn.participantActive {
 		t.Fatal("should not be active after stop-without-start")
 	}
+}
+
+func buildParticipantSpeechWAV(durationMS, sampleRate int) []byte {
+	numSamples := sampleRate * durationMS / 1000
+	dataSize := numSamples * 2
+	buf := bytes.NewBuffer(make([]byte, 0, 44+dataSize))
+
+	buf.WriteString("RIFF")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(36+dataSize))
+	buf.WriteString("WAVE")
+	buf.WriteString("fmt ")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate*2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(16))
+	buf.WriteString("data")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(dataSize))
+
+	for i := 0; i < numSamples; i++ {
+		sample := int16(12000)
+		if i%8 < 4 {
+			sample = -12000
+		}
+		_ = binary.Write(buf, binary.LittleEndian, sample)
+	}
+
+	return buf.Bytes()
 }
