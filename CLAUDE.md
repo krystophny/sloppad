@@ -180,8 +180,8 @@ internal/
   appserver/             Codex app-server WebSocket client
   canvas/                In-memory canvas session/artifact state
   stt/                   STT HTTP client, VAD, hallucination detection
-  plugins/               Plugin webhook manager + HookProvider interface
-  extensions/            Extension host (superset of plugins)
+  plugins/               Legacy webhook compatibility runtime
+  extensions/            Legacy manifest compatibility runtime
   modelprofile/          Model alias resolution, reasoning config
   serve/                 MCP HTTP server runtime
   surface/               MCP tool/route definitions
@@ -200,8 +200,15 @@ internal/
 - **web/ file naming**: HTTP handlers go in the file matching their route group (`chat.go` for `/api/chat/*`). Supporting logic gets a `_<aspect>` suffix (`chat_turn.go`, `chat_queue.go`).
 - **Concurrent-state types**: unexported types (`chatTurnTracker`, `wsHub`, `tunnelRegistry`) each own their own `sync.Mutex`. Live in the file that uses them most.
 - **Size limits**: files < 500 lines (hard limit 1,000), functions < 50 lines (hard limit 100).
-- **Interfaces**: define in the owning package (`plugins.HookProvider`), not in the consumer. Keep narrow (2-4 methods).
+- **Interfaces**: define in the owning package, not in the consumer. Keep narrow (2-4 methods).
 - **Dependency direction**: leaf packages (`store`, `stt`, `canvas`, `appserver`, `modelprofile`) have zero internal deps. `mcp` and `serve` compose leaf packages. `web` composes everything.
+
+## Direction Note
+
+Active product direction is a public modular core, not a private extension or
+plugin ecosystem. Do not build new feature work around `internal/plugins` or
+`internal/extensions`; treat them as transitional compatibility code unless the
+task is explicitly about consolidating/removing them.
 
 ## Adding a New Feature Module
 

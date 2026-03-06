@@ -26,9 +26,9 @@ Runtime stack:
 - `internal/web/server.go`
   - Browser APIs for chat sessions, canvas APIs, and chat/canvas websocket routes on the web listener.
 - `internal/extensions/host.go`
-  - Manifest-driven extension runtime for webhook hooks, command execution, and permissions.
+  - Legacy manifest-driven compatibility runtime pending consolidation/removal.
 - `internal/plugins/manager.go`
-  - Legacy plugin compatibility runtime.
+  - Legacy webhook compatibility runtime pending consolidation/removal.
 - `internal/store/store.go`
   - SQLite persistence for auth and chat session/message history.
 - `internal/protocol/bootstrap.go`
@@ -66,9 +66,9 @@ The browser UI is a full-viewport canvas with no visible chrome:
 4. Browser consumes websocket events: responses stream into ephemeral overlay, artifacts update the canvas in place.
 
 Chat hook flow:
-1. Extension hooks run first (`chat.pre_user_message`, `chat.pre_assistant_prompt`, `chat.post_assistant_response`).
-2. Legacy plugin hooks run second for compatibility.
-3. Meeting-partner debug decision endpoint resolves extensions first, then legacy plugins.
+1. Current code may route through legacy extension/plugin compatibility hooks.
+2. New product behavior should stay in ordinary public core packages, not new extension/plugin surfaces.
+3. Meeting-notes follow-up planning lives in public `krystophny/tabura` issues only.
 
 ## Interaction Model
 
@@ -130,11 +130,13 @@ Utterance filtering (server-side in `internal/stt/transcribe.go`):
 - Tabura stores local auth/session state in SQLite under web data dir.
 - MCP routes are not mounted on the web listener and default to loopback-only bind.
 
-## Extension Boundary
+## Modular Core Direction
 
-Extensionization in Tabura is scoped to product decision/capability layers, not
-runtime safety primitives. The current primary extension target is
-`meeting-partner` (always-listen and intelligent response behavior for meeting
-mode) while auth/session, media transport, queueing, persistence, and privacy
-invariants remain in core. See `docs/plugins.md`,
-`docs/meeting-partner-whitepaper.md`, and `docs/extension-platform-whitepaper.md`.
+Tabura's active direction is a single public repo with ordinary modular
+packages under `internal/`. Product behavior should live in public core code,
+not a private repo and not an extension/plugin bundle system.
+
+Auth/session, media transport, queueing, persistence, privacy invariants, and
+meeting-notes behavior stay in core. The legacy `internal/extensions` and
+`internal/plugins` packages should be treated as transitional compatibility
+code rather than an expanding product surface.

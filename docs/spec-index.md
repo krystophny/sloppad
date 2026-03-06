@@ -19,9 +19,8 @@ Read in this order:
 1. `object-scoped-intent-ui.md`
 2. `interfaces.md`
 3. `architecture.md`
-4. `plugins.md`
-5. `meeting-partner-whitepaper.md`
-6. `extension-platform-whitepaper.md`
+4. `meeting-notes-privacy.md`
+5. `codex-app-server-pivot.md`
 
 Integrated protocol reference:
 
@@ -37,12 +36,14 @@ Release notes:
 Privacy and security specs:
 
 - `meeting-notes-privacy.md`
-- `meeting-partner-whitepaper.md`
-- `extension-platform-whitepaper.md`
 
 Migration/support docs:
 
-- `helpy-recovery-issue-pack.md`
+- Historical retired direction notes:
+  - `plugins.md`
+  - `meeting-partner-whitepaper.md`
+  - `extension-platform-whitepaper.md`
+  - `helpy-recovery-issue-pack.md`
 
 ## Source Code Anchors
 

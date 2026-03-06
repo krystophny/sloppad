@@ -13,13 +13,11 @@ Legal notice: Tabura is provided "as is" and "as available" without warranties, 
 
 - **Spec hub**: [`docs/spec-index.md`](docs/spec-index.md)
 - **System architecture**: [`docs/architecture.md`](docs/architecture.md)
-- **Extension boundaries**: [`docs/plugins.md`](docs/plugins.md)
-- **Meeting-partner whitepaper (prior art)**: [`docs/meeting-partner-whitepaper.md`](docs/meeting-partner-whitepaper.md)
-- **Extension platform whitepaper (prior art)**: [`docs/extension-platform-whitepaper.md`](docs/extension-platform-whitepaper.md)
 - **Codex app-server integration**: [`docs/codex-app-server-pivot.md`](docs/codex-app-server-pivot.md)
 - **HTTP/MCP interface inventory**: [`docs/interfaces.md`](docs/interfaces.md)
 - **UI paradigm**: [`docs/object-scoped-intent-ui.md`](docs/object-scoped-intent-ui.md)
 - **Model download policy**: [`docs/model-download-policy.md`](docs/model-download-policy.md)
+- **Meeting notes privacy**: [`docs/meeting-notes-privacy.md`](docs/meeting-notes-privacy.md)
 - **Third-party licenses**: [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)
 - **Current release notes (v0.1.7)**: [`docs/release-v0.1.7.md`](docs/release-v0.1.7.md)
 
@@ -115,8 +113,6 @@ Why Piper remains an HTTP sidecar:
 - Intent/delegator profile options: `TABURA_INTENT_LLM_PROFILE_OPTIONS` (default `qwen3.5-9b,qwen3.5-4b`)
 - Local canvas session id: `local`
 - Spark thinking budget for Spark model (fast path): `TABURA_APP_SERVER_SPARK_REASONING_EFFORT=low` (`low`/`medium`/`high`/`xhigh`)
-- Extension manifest directory: `TABURA_EXTENSIONS_DIR` (default `<data-dir>/extensions`; set `off` to disable)
-- Plugin manifest directory: `TABURA_PLUGINS_DIR` (default `<data-dir>/plugins`; set `off` to disable)
 
 Security model:
 - MCP routes are intentionally not exposed on the web listener.

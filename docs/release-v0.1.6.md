@@ -2,6 +2,10 @@
 
 > **Legal notice:** Tabura is provided "as is" and "as available" without warranties, and to the maximum extent permitted by applicable law the authors/contributors accept no liability for damages, data loss, or misuse. You are solely responsible for backups, verification, and safe operation. See [`DISCLAIMER.md`](/DISCLAIMER.md).
 
+> **Historical note:** This release note documents a now-retired extension/plugin
+> direction. Current product direction is a public modular core in
+> `krystophny/tabura`, not a private extension ecosystem.
+
 ## Scope
 
 `v0.1.6` ships the first extension-host redesign in core Tabura, preserves
