@@ -7,6 +7,15 @@ Critical boundary:
 - Project-local `AGENTS.md` and `CLAUDE.md` files are user-owned workspace content.
 - Tabura-specific behavior and prompt rules belong in Tabura's internal runtime/prompt code, not in generated project instruction files.
 
+## Contributor Policy
+
+See `CONTRIBUTING.md` for the standing rewrite policy.
+
+Short version:
+- do not assume external compatibility obligations without concrete evidence
+- prefer radical cleanup over preserving weak legacy shapes
+- optimize for UX, code quality, and maintainability
+
 ## Fast Path Rule
 
 For direct runtime requests, run the obvious command first, then verify.
