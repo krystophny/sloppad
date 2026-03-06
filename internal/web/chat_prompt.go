@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"regexp"
 	"strings"
 
 	"github.com/krystophny/tabura/internal/store"
@@ -251,38 +250,4 @@ func (a *App) ensurePromptContractFresh() error {
 		return err
 	}
 	return a.store.SetAppState(promptContractStateKey, currentDigest)
-}
-
-type delegationHint struct {
-	Detected bool
-	Model    string
-	Task     string
-}
-
-var delegationPatterns = regexp.MustCompile(
-	`(?i)^(?:let |ask |use )(codex|gpt|spark|the big model)\b[,: ]*(.*)`,
-)
-
-func detectDelegationHint(text string) delegationHint {
-	m := delegationPatterns.FindStringSubmatch(strings.TrimSpace(text))
-	if m == nil {
-		return delegationHint{}
-	}
-	model := strings.ToLower(m[1])
-	if model == "the big model" {
-		model = "gpt"
-	}
-	task := strings.TrimSpace(m[2])
-	if task == "" {
-		task = text
-	}
-	return delegationHint{Detected: true, Model: model, Task: task}
-}
-
-func applyDelegationHints(text string) string {
-	hint := detectDelegationHint(text)
-	if !hint.Detected {
-		return text
-	}
-	return fmt.Sprintf("[Delegation hint: user wants model=%q] %s", hint.Model, text)
 }

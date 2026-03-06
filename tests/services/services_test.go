@@ -176,7 +176,7 @@ func TestLLMChatCompletion(t *testing.T) {
 
 func TestLLMIntentClassification(t *testing.T) {
 	systemPrompt := `Classify the user intent and return JSON only.
-Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, delegate, chat.
+Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, chat.
 Return {"action":"<action>"}.`
 
 	resp, err := postLLMCompletion([]map[string]string{

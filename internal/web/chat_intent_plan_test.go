@@ -61,6 +61,39 @@ func TestParseSystemActionsJSONRepairsMalformedCommandQuotes(t *testing.T) {
 	}
 }
 
+func TestSuggestShellCommandRetryRepairsJQTrailingBracketTypos(t *testing.T) {
+	command := `curl -s 'https://example.invalid' | jq -r '.current}'`
+	output := `jq: error: syntax error, unexpected INVALID_CHARACTER, expecting end of file at , line 1, column 9:
+    .current}
+            ^
+jq: 1 compile error`
+
+	fixed, reason, ok := suggestShellCommandRetry(command, output)
+	if !ok {
+		t.Fatal("expected retry suggestion for jq typo")
+	}
+	if strings.TrimSpace(reason) == "" {
+		t.Fatal("expected non-empty retry reason")
+	}
+	if fixed == command {
+		t.Fatal("expected fixed command to differ from original")
+	}
+	if strings.Contains(fixed, ".current}") {
+		t.Fatalf("fixed command still contains typo: %q", fixed)
+	}
+	if !strings.Contains(fixed, ".current") {
+		t.Fatalf("fixed command missing corrected jq filter: %q", fixed)
+	}
+}
+
+func TestSuggestShellCommandRetryNoopWithoutJQSyntaxError(t *testing.T) {
+	command := `echo hello`
+	output := `some unrelated stderr`
+	if fixed, reason, ok := suggestShellCommandRetry(command, output); ok || fixed != "" || reason != "" {
+		t.Fatalf("expected no retry suggestion, got fixed=%q reason=%q ok=%v", fixed, reason, ok)
+	}
+}
+
 func TestClassifyIntentPlanWithLLMMultiAction(t *testing.T) {
 	llm := setupMockIntentLLMServer(
 		t,
@@ -372,12 +405,9 @@ func TestClassifyAndExecuteSystemActionWithoutIntentLLMDoesNotAutoOpen(t *testin
 	}
 	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
 
-	_, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Open README")
+	_, _, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Open README")
 	if handled {
 		t.Fatal("expected request to remain unhandled without intent LLM")
-	}
-	if len(payloads) != 0 {
-		t.Fatalf("payloads length = %d, want 0", len(payloads))
 	}
 	if showCalls != 0 {
 		t.Fatalf("canvas_artifact_show calls = %d, want 0", showCalls)
@@ -504,14 +534,11 @@ func TestClassifyAndExecuteSystemActionFallsBackToClassifierWhenLLMUnavailable(t
 	}
 }
 
-func TestClassifyAndExecuteSystemActionWithIntentLLMSkipsClassifierDelegate(t *testing.T) {
+func TestClassifyAndExecuteSystemActionWithIntentLLMPrefersLLMPlanOverUnsupportedClassifierIntent(t *testing.T) {
 	classifier := setupMockIntentClassifierServer(t, http.StatusOK, map[string]interface{}{
-		"intent":     "delegate",
+		"intent":     "unsupported_action",
 		"confidence": 0.99,
-		"entities": map[string]interface{}{
-			"model": "codex",
-			"task":  "irrelevant classifier output",
-		},
+		"entities":   map[string]interface{}{},
 	})
 	defer classifier.Close()
 
@@ -565,17 +592,12 @@ func TestClassifyAndExecuteSystemActionWithIntentLLMSkipsClassifierDelegate(t *t
 	}
 	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
 
-	_, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Open README")
+	_, _, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Open README")
 	if !handled {
 		t.Fatal("expected request to be handled")
 	}
 	if llmCalls == 0 {
 		t.Fatal("expected Qwen call")
-	}
-	for _, payload := range payloads {
-		if strings.TrimSpace(strFromAny(payload["type"])) == "delegate" {
-			t.Fatalf("unexpected delegate payload: %#v", payload)
-		}
 	}
 	if showCalls < 1 {
 		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)

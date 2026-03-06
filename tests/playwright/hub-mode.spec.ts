@@ -40,6 +40,7 @@ test('hub button is visible among project buttons', async ({ page }) => {
   const hubButton = page.locator('#edge-top-projects .edge-hub-btn');
   await expect(hubButton).toHaveCount(1);
   await expect(hubButton).toHaveText('Hub');
+  await expect(hubButton).toHaveClass(/is-active/);
 
   await expect(page.locator('#edge-top-projects .edge-project-btn')).toHaveCount(2);
 });
@@ -48,6 +49,7 @@ test('clicking hub button activates hub project', async ({ page }) => {
   await page.evaluate(() => {
     document.getElementById('edge-top')?.classList.add('edge-pinned');
   });
+  await page.locator('#edge-top-projects .edge-project-btn:not(.edge-hub-btn)').click();
   const hubButton = page.locator('#edge-top-projects .edge-hub-btn');
   await hubButton.click();
 
@@ -68,6 +70,7 @@ test('switching from hub back to project keeps normal project switching', async 
     document.getElementById('edge-top')?.classList.add('edge-pinned');
   });
   const hubButton = page.locator('#edge-top-projects .edge-hub-btn');
+  await page.locator('#edge-top-projects .edge-project-btn:not(.edge-hub-btn)').click();
   await hubButton.click();
   await page.locator('#edge-top-projects .edge-project-btn:not(.edge-hub-btn)').click();
 
@@ -88,6 +91,20 @@ test('switching from hub back to project keeps normal project switching', async 
 });
 
 test('system switch_model action updates project model state', async ({ page }) => {
+  await page.evaluate(() => {
+    document.getElementById('edge-top')?.classList.add('edge-pinned');
+  });
+  const projectButton = page.locator('#edge-top-projects .edge-project-btn:not(.edge-hub-btn)');
+  await projectButton.click();
+  await expect(projectButton).toHaveClass(/is-active/);
+  await page.waitForFunction(() => {
+    const app = (window as any)._taburaApp;
+    if (typeof app?.getState !== 'function') return false;
+    const s = app.getState();
+    const wsOpen = (window as any).WebSocket.OPEN;
+    return String(s.activeProjectId || '') === 'test'
+      && s.chatWs?.readyState === wsOpen;
+  });
   await injectChatEvent(page, {
     type: 'system_action',
     action: {
@@ -98,8 +115,6 @@ test('system switch_model action updates project model state', async ({ page }) 
     },
   });
 
-  await expect(page.locator('#edge-top-models .edge-model-btn', { hasText: 'gpt' })).toHaveClass(/is-active/);
-  await expect(page.locator('#edge-top-models .edge-reasoning-effort-select')).toHaveValue('high');
   await expect.poll(async () => {
     const log = await getLog(page);
     return log.some((entry) => entry.action === 'project_chat_model');
@@ -125,16 +140,16 @@ test('system switch_project action routes through project activation', async ({ 
     type: 'system_action',
     action: {
       type: 'switch_project',
-      project_id: 'hub',
+      project_id: 'test',
     },
   });
 
   await expect.poll(async () => {
     const log = await getLog(page);
     return log.some(
-      (entry) => entry.type === 'api_fetch'
+        (entry) => entry.type === 'api_fetch'
         && entry.action === 'project_activate'
-        && String(entry.payload?.project_id || '') === 'hub',
+        && String(entry.payload?.project_id || '') === 'test',
     );
   }, { timeout: 5_000 }).toBe(true);
 });

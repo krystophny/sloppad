@@ -54,24 +54,12 @@ func TestRuntimeIncludesIntentDelegatorProfiles(t *testing.T) {
 	}
 }
 
-func TestClassifyIntentWithLLM_DelegationHintShortCircuitsNetwork(t *testing.T) {
+func TestClassifyIntentWithLLM_NoLocalModelHintShortcut(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.intentLLMURL = "http://127.0.0.1:1"
 
-	action, err := app.classifyIntentWithLLM(context.Background(), "let codex audit this repo")
-	if err != nil {
-		t.Fatalf("classify intent with llm returned error: %v", err)
-	}
-	if action == nil {
-		t.Fatal("expected action")
-	}
-	if action.Action != "delegate" {
-		t.Fatalf("action = %q, want delegate", action.Action)
-	}
-	if got := strFromAny(action.Params["model"]); got != "codex" {
-		t.Fatalf("delegate model = %q, want codex", got)
-	}
-	if got := strFromAny(action.Params["task"]); got == "" {
-		t.Fatal("delegate task should not be empty")
+	_, err := app.classifyIntentWithLLM(context.Background(), "let codex audit this repo")
+	if err == nil {
+		t.Fatal("expected network error when LLM endpoint is unavailable")
 	}
 }

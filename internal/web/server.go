@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"log"
@@ -47,6 +48,9 @@ const (
 	appStateYoloModeKey         = "safety.yolo_mode"
 	appStateDisclaimerAckKey    = "safety.disclaimer_ack.version"
 	appStateDisclaimerAckAtKey  = "safety.disclaimer_ack.timestamp"
+	appStateSilentModeKey       = "runtime.silent_mode"
+	appStateInputModeKey        = "runtime.input_mode"
+	appStateStartupBehaviorKey  = "runtime.startup_behavior"
 	disclaimerVersionCurrent    = "2026-03-03-v1"
 )
 
@@ -333,6 +337,7 @@ func (a *App) Router() http.Handler {
 
 	// runtime
 	r.Get("/api/runtime", a.handleRuntime)
+	r.Patch("/api/runtime/preferences", a.handleRuntimePreferencesUpdate)
 	r.Post("/api/runtime/yolo", a.handleRuntimeYoloModeUpdate)
 	r.Post("/api/runtime/disclaimer-ack", a.handleRuntimeDisclaimerAck)
 	r.Get("/api/plugins", a.handlePlugins)
@@ -345,13 +350,14 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/projects/{project_id}/chat-model", a.handleProjectChatModelUpdate)
 	r.Get("/api/projects/{project_id}/context", a.handleProjectContext)
 	r.Get("/api/projects/{project_id}/files", a.handleProjectFilesList)
+	r.Get("/api/projects/{project_id}/welcome", a.handleProjectWelcome)
+	r.Post("/api/review/submit", a.handleReviewSubmit)
 	r.Post("/api/chat/sessions", a.handleChatSessionCreate)
 	r.Get("/api/chat/sessions/{session_id}/history", a.handleChatSessionHistory)
 	r.Get("/api/chat/sessions/{session_id}/activity", a.handleChatSessionActivity)
 	r.Post("/api/chat/sessions/{session_id}/messages", a.handleChatSessionMessage)
 	r.Post("/api/chat/sessions/{session_id}/commands", a.handleChatSessionCommand)
 	r.Post("/api/chat/sessions/{session_id}/cancel", a.handleChatSessionCancel)
-	r.Post("/api/chat/sessions/{session_id}/cancel-delegates", a.handleChatSessionCancelDelegates)
 	r.Get("/api/hotword/status", a.handleHotwordStatus)
 	r.Post("/api/stt/transcribe", a.handleSTTTranscribe)
 	r.Get("/api/stt/config", a.handleSTTConfigGet)
@@ -396,6 +402,39 @@ func staticSubFS() fs.FS {
 	return sub
 }
 
+func publicBasePath(r *http.Request) string {
+	if r == nil {
+		return "/"
+	}
+	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Prefix")); forwarded != "" {
+		return normalizeBasePath(forwarded)
+	}
+	return normalizeBasePath(r.URL.Path)
+}
+
+func normalizeBasePath(raw string) string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" || clean == "/" {
+		return "/"
+	}
+	if !strings.HasPrefix(clean, "/") {
+		clean = "/" + clean
+	}
+	clean = strings.TrimRight(clean, "/")
+	if clean == "" {
+		return "/"
+	}
+	lastSlash := strings.LastIndex(clean, "/")
+	lastDot := strings.LastIndex(clean, ".")
+	if lastSlash >= 0 && lastDot > lastSlash {
+		clean = clean[:lastSlash]
+		if clean == "" {
+			return "/"
+		}
+	}
+	return clean + "/"
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -432,12 +471,14 @@ func (a *App) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := string(data)
+	baseHref := html.EscapeString(publicBasePath(r))
+	page = strings.Replace(page, "<head>", fmt.Sprintf("<head>\n  <base href=\"%s\">", baseHref), 1)
 	boot := strings.TrimSpace(a.bootID)
 	if boot != "" {
-		styleTag := `href="/static/style.css"`
-		styleTagVer := fmt.Sprintf(`href="/static/style.css?v=%s"`, url.QueryEscape(boot))
-		scriptTag := `src="/static/app.js"`
-		scriptTagVer := fmt.Sprintf(`src="/static/app.js?v=%s"`, url.QueryEscape(boot))
+		styleTag := `href="./static/style.css"`
+		styleTagVer := fmt.Sprintf(`href="./static/style.css?v=%s"`, url.QueryEscape(boot))
+		scriptTag := `src="./static/app.js"`
+		scriptTagVer := fmt.Sprintf(`src="./static/app.js?v=%s"`, url.QueryEscape(boot))
 		page = strings.Replace(page, styleTag, styleTagVer, 1)
 		page = strings.Replace(page, scriptTag, scriptTagVer, 1)
 	}
@@ -447,7 +488,8 @@ func (a *App) serveIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) serveCanvas(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/?desktop=1", http.StatusTemporaryRedirect)
+	w.Header().Set("Location", "./?desktop=1")
+	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 func decodeJSON(r *http.Request, out interface{}) error {
@@ -528,6 +570,9 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		"available_reasoning_efforts": modelprofile.AvailableReasoningEffortsByAlias(),
 		"stt_url":                     a.sttURL,
 		"tts_enabled":                 a.ttsURL != "",
+		"silent_mode":                 a.silentModeEnabled(),
+		"input_mode":                  a.runtimeInputMode(),
+		"startup_behavior":            a.runtimeStartupBehavior(),
 		"safety_yolo_mode":            a.yoloModeEnabled(),
 		"disclaimer_version":          disclaimerVersionCurrent,
 		"disclaimer_ack_required":     a.disclaimerAckRequired(),

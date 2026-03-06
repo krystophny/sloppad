@@ -17,8 +17,6 @@ import (
 	"github.com/krystophny/tabura/internal/store"
 )
 
-const assistantTurnTimeout = 2 * time.Hour
-
 const (
 	turnOutputModeVoice    = "voice"
 	turnOutputModeSilent   = "silent"
@@ -218,41 +216,17 @@ func (a *App) handleChatSessionActivity(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "missing session_id", http.StatusBadRequest)
 		return
 	}
-	session, err := a.store.GetChatSession(sessionID)
-	if err != nil {
+	if _, err := a.store.GetChatSession(sessionID); err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	activeTurns := a.activeChatTurnCount(sessionID)
 	queuedTurns := a.queuedChatTurnCount(sessionID)
-	delegateActive := a.delegateActiveJobsForProject(session.ProjectKey)
 	writeJSON(w, map[string]interface{}{
-		"ok":              true,
-		"active_turns":    activeTurns,
-		"queued_turns":    queuedTurns,
-		"delegate_active": delegateActive,
-		"is_working":      activeTurns > 0 || queuedTurns > 0 || delegateActive > 0,
-	})
-}
-
-func (a *App) handleChatSessionCancelDelegates(w http.ResponseWriter, r *http.Request) {
-	if !a.requireAuth(w, r) {
-		return
-	}
-	sessionID := strings.TrimSpace(chi.URLParam(r, "session_id"))
-	if sessionID == "" {
-		http.Error(w, "missing session_id", http.StatusBadRequest)
-		return
-	}
-	session, err := a.store.GetChatSession(sessionID)
-	if err != nil {
-		http.Error(w, "session not found", http.StatusNotFound)
-		return
-	}
-	canceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
-	writeJSON(w, map[string]interface{}{
-		"ok":       true,
-		"canceled": canceled,
+		"ok":           true,
+		"active_turns": activeTurns,
+		"queued_turns": queuedTurns,
+		"is_working":   activeTurns > 0 || queuedTurns > 0,
 	})
 }
 
@@ -291,19 +265,16 @@ func (a *App) handleChatSessionCancel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing session_id", http.StatusBadRequest)
 		return
 	}
-	session, err := a.store.GetChatSession(sessionID)
-	if err != nil {
+	if _, err := a.store.GetChatSession(sessionID); err != nil {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	activeCanceled, queuedCanceled := a.cancelChatWork(sessionID)
-	delegateCanceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
 	writeJSON(w, map[string]interface{}{
-		"ok":                true,
-		"canceled":          activeCanceled + queuedCanceled + delegateCanceled,
-		"active_canceled":   activeCanceled,
-		"queued_canceled":   queuedCanceled,
-		"delegate_canceled": delegateCanceled,
+		"ok":              true,
+		"canceled":        activeCanceled + queuedCanceled,
+		"active_canceled": activeCanceled,
+		"queued_canceled": queuedCanceled,
 	})
 }
 
@@ -449,19 +420,17 @@ func (a *App) executeChatCommand(sessionID, raw string) (map[string]interface{},
 		}, nil
 	case "stop", "cancel":
 		activeCanceled, queuedCanceled := a.cancelChatWork(sessionID)
-		delegateCanceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
-		canceled := activeCanceled + queuedCanceled + delegateCanceled
+		canceled := activeCanceled + queuedCanceled
 		message := "No assistant turn is currently running."
 		if canceled > 0 {
 			message = "Stopping assistant work and clearing queued prompts."
 		}
 		return map[string]interface{}{
-			"name":              name,
-			"canceled":          canceled,
-			"active_canceled":   activeCanceled,
-			"queued_canceled":   queuedCanceled,
-			"delegate_canceled": delegateCanceled,
-			"message":           message,
+			"name":            name,
+			"canceled":        canceled,
+			"active_canceled": activeCanceled,
+			"queued_canceled": queuedCanceled,
+			"message":         message,
 		}, nil
 	case "status":
 		message, err := a.fetchCodexStatusMessage(session.ProjectKey)
@@ -528,7 +497,6 @@ func (a *App) executeChatCommand(sessionID, raw string) (map[string]interface{},
 			"message":           "All agents and contexts cleared.",
 			"active_canceled":   report.ActiveCanceled,
 			"queued_canceled":   report.QueuedCanceled,
-			"delegate_canceled": report.DelegateCanceled,
 			"sessions_closed":   report.SessionsClosed,
 			"tmp_files_cleared": report.TempFilesCleared,
 		}, nil

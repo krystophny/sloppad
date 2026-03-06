@@ -36,23 +36,24 @@ const (
 )
 
 const intentLLMSystemPrompt = `You are Tabura's local router. Output JSON only.
-Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, delegate, shell, open_file_canvas, chat.
+Allowed actions: switch_project, switch_model, toggle_silent, toggle_conversation, cancel_work, show_status, shell, open_file_canvas, chat.
 Use {"action":"chat"} unless user clearly requests a system action.
-For explicit delegation or clearly long coding tasks use {"action":"delegate","model":"codex|gpt|spark","task":"..."} (default model: codex).
+For current-information requests (weather, web search, news, prices, schedules, latest/current updates), use {"action":"chat"} and MUST NOT use shell.
 For shell-like requests use {"action":"shell","command":"..."}.
 For open/show/display file requests, end with {"action":"open_file_canvas","path":"..."}.
 If exact path is uncertain, use multi-step {"actions":[...]}: shell search first, then open_file_canvas with path="$last_shell_path".
 Prefer case-insensitive filename search (for example -iname) and use single quotes inside JSON command strings.`
 
 type localIntentClassifierResponse struct {
-	Action     string                 `json:"action"`
-	Intent     string                 `json:"intent"`
-	Confidence float64                `json:"confidence"`
-	Entities   map[string]interface{} `json:"entities"`
-	Params     map[string]interface{} `json:"params"`
-	Name       string                 `json:"name"`
-	Alias      string                 `json:"alias"`
-	Effort     string                 `json:"effort"`
+	Action          string                 `json:"action"`
+	Intent          string                 `json:"intent"`
+	Confidence      float64                `json:"confidence"`
+	Entities        map[string]interface{} `json:"entities"`
+	Params          map[string]interface{} `json:"params"`
+	Name            string                 `json:"name"`
+	Alias           string                 `json:"alias"`
+	Effort          string                 `json:"effort"`
+	ReasoningEffort string                 `json:"reasoning_effort"`
 }
 
 type localIntentLLMChatCompletionResponse struct {
@@ -319,32 +320,11 @@ func systemActionStringParam(params map[string]interface{}, key string) string {
 
 func normalizeSystemActionName(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "delegate", "shell", "open_file_canvas":
+	case "switch_project", "switch_model", "toggle_silent", "toggle_conversation", "cancel_work", "show_status", "shell", "open_file_canvas":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
 	}
-}
-
-func normalizeDelegateModel(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "codex":
-		return "codex"
-	case "gpt", "spark":
-		return strings.ToLower(strings.TrimSpace(raw))
-	default:
-		return ""
-	}
-}
-
-func systemActionDelegateTask(params map[string]interface{}) string {
-	for _, key := range []string{"task", "prompt", "text"} {
-		value := strings.TrimSpace(fmt.Sprint(params[key]))
-		if value != "" && value != "<nil>" {
-			return value
-		}
-	}
-	return ""
 }
 
 func systemActionShellCommand(params map[string]interface{}) string {
@@ -453,18 +433,8 @@ func (a *App) classifyIntentLocally(ctx context.Context, text string) (*SystemAc
 	if strings.TrimSpace(payload.Alias) != "" {
 		params["alias"] = strings.TrimSpace(payload.Alias)
 	}
-	if strings.TrimSpace(payload.Effort) != "" {
+	if actionName == "switch_model" && strings.TrimSpace(payload.Effort) != "" {
 		params["effort"] = strings.TrimSpace(payload.Effort)
-	}
-	if actionName == "delegate" {
-		model := normalizeDelegateModel(systemActionStringParam(params, "model"))
-		if model == "" {
-			model = "codex"
-		}
-		params["model"] = model
-		if systemActionDelegateTask(params) == "" {
-			params["task"] = trimmedText
-		}
 	}
 	return &SystemAction{Action: actionName, Params: params}, payload.Confidence, nil
 }
@@ -479,17 +449,7 @@ func normalizeSystemActionForExecution(action *SystemAction, fallbackText string
 	if action.Params == nil {
 		action.Params = map[string]interface{}{}
 	}
-	switch action.Action {
-	case "delegate":
-		model := normalizeDelegateModel(systemActionStringParam(action.Params, "model"))
-		if model == "" {
-			model = "codex"
-		}
-		action.Params["model"] = model
-		if systemActionDelegateTask(action.Params) == "" {
-			action.Params["task"] = fallbackText
-		}
-	}
+	_ = fallbackText
 	return action
 }
 
@@ -641,23 +601,6 @@ func (a *App) classifyIntentPlanWithLLM(ctx context.Context, text string) ([]*Sy
 		return nil, nil
 	}
 	requiresOpenCanvas := requestRequiresOpenCanvasAction(trimmedText)
-	if hint := detectDelegationHint(trimmedText); hint.Detected {
-		model := normalizeDelegateModel(hint.Model)
-		if model == "" {
-			model = "codex"
-		}
-		task := strings.TrimSpace(hint.Task)
-		if task == "" {
-			task = trimmedText
-		}
-		return []*SystemAction{{
-			Action: "delegate",
-			Params: map[string]interface{}{
-				"model": model,
-				"task":  task,
-			},
-		}}, nil
-	}
 	requestPlan := func(systemPrompt string, userPrompt string) ([]*SystemAction, error) {
 		requestBody, _ := json.Marshal(map[string]interface{}{
 			"model":       a.localIntentLLMModel(),
@@ -782,10 +725,11 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 		return "", nil, false
 	}
 	tryExecutePlan := func(actions []*SystemAction) (string, []map[string]interface{}, bool) {
-		if len(actions) == 0 {
+		enforced := enforceRoutingPolicy(trimmedText, actions)
+		if len(enforced) == 0 {
 			return "", nil, false
 		}
-		message, payloads, err := a.executeSystemActionPlan(sessionID, session, trimmedText, actions)
+		message, payloads, err := a.executeSystemActionPlan(sessionID, session, trimmedText, enforced)
 		if err != nil {
 			return "", nil, false
 		}
@@ -809,7 +753,7 @@ func (a *App) classifyAndExecuteSystemAction(ctx context.Context, sessionID stri
 
 	if strings.TrimSpace(a.intentLLMURL) != "" {
 		llmActions, llmErr := a.classifyIntentPlanWithLLM(ctx, trimmedText)
-		if llmErr == nil && len(llmActions) > 0 {
+		if llmErr == nil {
 			if message, payloads, ok := tryExecutePlan(llmActions); ok {
 				return message, payloads, true
 			}
@@ -1141,6 +1085,7 @@ func preferTopLevelSiblingPath(cwd, candidate string) string {
 }
 
 func (a *App) executeSystemActionPlan(sessionID string, session store.ChatSession, userText string, actions []*SystemAction) (string, []map[string]interface{}, error) {
+	actions = enforceRoutingPolicy(userText, actions)
 	if len(actions) == 0 {
 		return "", nil, errors.New("action plan is empty")
 	}
@@ -1232,6 +1177,91 @@ func truncateSystemActionOutput(text string, maxBytes int) string {
 	return text[:maxBytes] + "\n...(truncated)"
 }
 
+type shellCommandExecution struct {
+	Output   string
+	ExitCode int
+	TimedOut bool
+	RunErr   error
+}
+
+func executeShellCommand(command string, cwd string) shellCommandExecution {
+	commandCtx, cancel := context.WithTimeout(context.Background(), systemActionShellTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(commandCtx, "bash", "-lc", command)
+	cmd.Dir = cwd
+
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	runErr := cmd.Run()
+
+	rawOutput := strings.TrimSpace(output.String())
+	rawOutput = truncateSystemActionOutput(rawOutput, systemActionShellOutputLimit)
+	if rawOutput == "" {
+		rawOutput = "(no output)"
+	}
+
+	if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+		return shellCommandExecution{
+			Output:   rawOutput,
+			ExitCode: -1,
+			TimedOut: true,
+			RunErr:   runErr,
+		}
+	}
+
+	exitCode := 0
+	if runErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	return shellCommandExecution{
+		Output:   rawOutput,
+		ExitCode: exitCode,
+		TimedOut: false,
+		RunErr:   runErr,
+	}
+}
+
+func suggestShellCommandRetry(command string, output string) (string, string, bool) {
+	cleanCommand := strings.TrimSpace(command)
+	if cleanCommand == "" || !strings.Contains(cleanCommand, "jq") {
+		return "", "", false
+	}
+	cleanOutput := strings.TrimSpace(output)
+	if cleanOutput == "" {
+		return "", "", false
+	}
+	lowerOutput := strings.ToLower(cleanOutput)
+	if !strings.Contains(lowerOutput, "jq: error: syntax error") || !strings.Contains(lowerOutput, "compile error") {
+		return "", "", false
+	}
+	lines := strings.Split(cleanOutput, "\n")
+	for _, line := range lines {
+		candidate := strings.TrimSpace(line)
+		if candidate == "" || !strings.HasPrefix(candidate, ".") {
+			continue
+		}
+		if !(strings.HasSuffix(candidate, "}") || strings.HasSuffix(candidate, "]")) {
+			continue
+		}
+		fixedCandidate := strings.TrimSuffix(strings.TrimSuffix(candidate, "}"), "]")
+		if strings.TrimSpace(fixedCandidate) == "" || fixedCandidate == candidate {
+			continue
+		}
+		fixedCommand := strings.Replace(cleanCommand, candidate, fixedCandidate, 1)
+		if fixedCommand == cleanCommand {
+			continue
+		}
+		return fixedCommand, fmt.Sprintf("fixed jq filter typo (%s -> %s)", candidate, fixedCandidate), true
+	}
+	return "", "", false
+}
+
 func (a *App) executeSystemAction(sessionID string, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
 	if action == nil {
 		return "", nil, errors.New("system action is required")
@@ -1281,8 +1311,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		return "Toggled conversation mode.", map[string]interface{}{"type": "toggle_conversation"}, nil
 	case "cancel_work":
 		activeCanceled, queuedCanceled := a.cancelChatWork(sessionID)
-		delegateCanceled := a.cancelDelegatedJobsForProject(session.ProjectKey)
-		total := activeCanceled + queuedCanceled + delegateCanceled
+		total := activeCanceled + queuedCanceled
 		return fmt.Sprintf("Canceled %d running task(s).", total), nil, nil
 	case "show_status":
 		status, err := a.fetchCodexStatusMessage(session.ProjectKey)
@@ -1306,53 +1335,55 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		if cwd == "" {
 			return "", nil, errors.New("shell cwd is not available")
 		}
-		commandCtx, cancel := context.WithTimeout(context.Background(), systemActionShellTimeout)
-		defer cancel()
-		cmd := exec.CommandContext(commandCtx, "bash", "-lc", command)
-		cmd.Dir = cwd
-		var output bytes.Buffer
-		cmd.Stdout = &output
-		cmd.Stderr = &output
-		runErr := cmd.Run()
-		rawOutput := strings.TrimSpace(output.String())
-		rawOutput = truncateSystemActionOutput(rawOutput, systemActionShellOutputLimit)
-		if rawOutput == "" {
-			rawOutput = "(no output)"
-		}
-		if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
-			return fmt.Sprintf("Shell command timed out after %s.\n\n%s", systemActionShellTimeout, rawOutput), map[string]interface{}{
+		execResult := executeShellCommand(command, cwd)
+		if execResult.TimedOut {
+			return fmt.Sprintf("Shell command timed out after %s.\n\n%s", systemActionShellTimeout, execResult.Output), map[string]interface{}{
 				"type":       "shell",
 				"command":    command,
 				"cwd":        cwd,
 				"exit_code":  -1,
 				"timed_out":  true,
-				"output":     rawOutput,
+				"output":     execResult.Output,
 				"project_id": targetProject.ID,
 			}, nil
 		}
-		exitCode := 0
-		if runErr != nil {
-			var exitErr *exec.ExitError
-			if errors.As(runErr, &exitErr) {
-				exitCode = exitErr.ExitCode()
-			} else {
-				return "", nil, runErr
+
+		if execResult.RunErr != nil && execResult.ExitCode == 0 {
+			return "", nil, execResult.RunErr
+		}
+
+		if execResult.ExitCode != 0 {
+			if fixedCommand, fixReason, retry := suggestShellCommandRetry(command, execResult.Output); retry {
+				retryResult := executeShellCommand(fixedCommand, cwd)
+				if !retryResult.TimedOut && retryResult.RunErr == nil && retryResult.ExitCode == 0 {
+					return fmt.Sprintf("Shell command auto-corrected (%s).\n\n%s", fixReason, retryResult.Output), map[string]interface{}{
+						"type":                "shell",
+						"command":             fixedCommand,
+						"original_command":    command,
+						"cwd":                 cwd,
+						"exit_code":           0,
+						"output":              retryResult.Output,
+						"project_id":          targetProject.ID,
+						"auto_corrected":      true,
+						"auto_correct_reason": fixReason,
+					}, nil
+				}
 			}
-			return fmt.Sprintf("Shell command failed (exit %d).\n\n%s", exitCode, rawOutput), map[string]interface{}{
+			return fmt.Sprintf("Shell command failed (exit %d).\n\n%s", execResult.ExitCode, execResult.Output), map[string]interface{}{
 				"type":       "shell",
 				"command":    command,
 				"cwd":        cwd,
-				"exit_code":  exitCode,
-				"output":     rawOutput,
+				"exit_code":  execResult.ExitCode,
+				"output":     execResult.Output,
 				"project_id": targetProject.ID,
 			}, nil
 		}
-		return rawOutput, map[string]interface{}{
+		return execResult.Output, map[string]interface{}{
 			"type":       "shell",
 			"command":    command,
 			"cwd":        cwd,
-			"exit_code":  exitCode,
-			"output":     rawOutput,
+			"exit_code":  execResult.ExitCode,
+			"output":     execResult.Output,
 			"project_id": targetProject.ID,
 		}, nil
 	case "open_file_canvas":
@@ -1408,57 +1439,6 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		return fmt.Sprintf("Opened %s on canvas.", canvasTitle), map[string]interface{}{
 			"type":       "open_file_canvas",
 			"path":       canvasTitle,
-			"project_id": targetProject.ID,
-		}, nil
-	case "delegate":
-		targetProject, err := a.systemActionTargetProject(session)
-		if err != nil {
-			return "", nil, err
-		}
-		model := normalizeDelegateModel(
-			firstNonEmptyPrompt(
-				systemActionStringParam(action.Params, "model"),
-				systemActionStringParam(action.Params, "alias"),
-			),
-		)
-		if model == "" {
-			return "", nil, errors.New("delegate model must be codex, gpt, or spark")
-		}
-		task := systemActionDelegateTask(action.Params)
-		if task == "" {
-			return "", nil, errors.New("delegate task is required")
-		}
-		cwd := strings.TrimSpace(targetProject.RootPath)
-		if cwd == "" {
-			cwd = strings.TrimSpace(a.cwdForProjectKey(targetProject.ProjectKey))
-		}
-		if cwd == "" {
-			return "", nil, errors.New("delegate cwd is not available")
-		}
-		canvasSessionID := strings.TrimSpace(a.canvasSessionIDForProject(targetProject))
-		if canvasSessionID == "" {
-			return "", nil, errors.New("delegate canvas session is not available")
-		}
-		port, ok := a.tunnels.getPort(canvasSessionID)
-		if !ok {
-			return "", nil, fmt.Errorf("no active MCP tunnel for project %q", targetProject.Name)
-		}
-		status, err := a.mcpToolsCall(port, "delegate_to_model", map[string]interface{}{
-			"model":  model,
-			"prompt": task,
-			"cwd":    cwd,
-		})
-		if err != nil {
-			return "", nil, err
-		}
-		jobID := strings.TrimSpace(fmt.Sprint(status["job_id"]))
-		if jobID == "" || jobID == "<nil>" {
-			return "", nil, errors.New("delegate_to_model did not return job_id")
-		}
-		return fmt.Sprintf("Delegated to %s as job %s.", model, jobID), map[string]interface{}{
-			"type":       "delegate",
-			"job_id":     jobID,
-			"model":      model,
 			"project_id": targetProject.ID,
 		}, nil
 	default:

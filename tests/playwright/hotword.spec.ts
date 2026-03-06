@@ -354,7 +354,6 @@ test('hotword re-arms after follow-up timeout and starts a second turn', async (
       && Number(s.assistantUnknownTurns || 0) === 0
       && Number(s.assistantRemoteActiveCount || 0) === 0
       && Number(s.assistantRemoteQueuedCount || 0) === 0
-      && Number(s.assistantRemoteDelegateActiveCount || 0) === 0
       && Number(localActiveTurns) === 0
       && String(s.voiceLifecycle || 'idle') === 'idle';
   }), { timeout: 5_000 }).toBe(true);

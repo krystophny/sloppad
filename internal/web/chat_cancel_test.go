@@ -5,47 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gorilla/websocket"
 )
-
-func setupMockDelegateCancelServer(t *testing.T, canceled int, seen *int) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		var payload map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&payload)
-		if seen != nil {
-			*seen += 1
-		}
-		if result, ok := payload["params"].(map[string]any); ok {
-			if args, ok := result["arguments"].(map[string]any); ok {
-				if _, ok := args["cwd_prefix"]; !ok {
-					http.Error(w, "missing cwd_prefix", http.StatusBadRequest)
-					return
-				}
-			}
-		}
-		out := map[string]any{
-			"result": map[string]any{
-				"structuredContent": map[string]any{
-					"canceled": float64(canceled),
-				},
-			},
-		}
-		if err := json.NewEncoder(w).Encode(out); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}))
-}
 
 func setupMockAppServerStatusServer(t *testing.T, statusMessage string) *httptest.Server {
 	t.Helper()
@@ -108,7 +72,7 @@ func setupMockAppServerStatusServer(t *testing.T, statusMessage string) *httptes
 	}))
 }
 
-func TestExecuteChatCommandStopCancelsDelegatedWork(t *testing.T) {
+func TestExecuteChatCommandStopCancelsWork(t *testing.T) {
 	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("new app: %v", err)
@@ -119,8 +83,8 @@ func TestExecuteChatCommandStopCancelsDelegatedWork(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	project, err := app.store.CreateProject(
-		"delegate-stop-unit",
-		"delegate-stop-unit",
+		"stop-unit",
+		"stop-unit",
 		projectRoot,
 		"local",
 		"",
@@ -146,19 +110,6 @@ func TestExecuteChatCommandStopCancelsDelegatedWork(t *testing.T) {
 	app.turns.queue[session.ID] = 1
 	app.turns.mu.Unlock()
 
-	delegateCancelCalls := 0
-	server := setupMockDelegateCancelServer(t, 7, &delegateCancelCalls)
-	defer server.Close()
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse mock url: %v", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatalf("parse mock port: %v", err)
-	}
-	app.tunnels.setPort(project.CanvasSessionID, port)
-
 	result, err := app.executeChatCommand(session.ID, "/stop")
 	if err != nil {
 		t.Fatalf("execute /stop: %v", err)
@@ -176,17 +127,11 @@ func TestExecuteChatCommandStopCancelsDelegatedWork(t *testing.T) {
 	if got := intFromAny(result["queued_canceled"], -1); got != 1 {
 		t.Fatalf("queued_canceled = %d, want 1", got)
 	}
-	if got := intFromAny(result["delegate_canceled"], -1); got != 7 {
-		t.Fatalf("delegate_canceled = %d, want 7", got)
-	}
-	if got := intFromAny(result["canceled"], -1); got != 9 {
-		t.Fatalf("canceled = %d, want 9", got)
+	if got := intFromAny(result["canceled"], -1); got != 2 {
+		t.Fatalf("canceled = %d, want 2", got)
 	}
 	if name := result["name"]; name != "stop" {
 		t.Fatalf("expected name=stop, got %v", name)
-	}
-	if delegateCancelCalls != 1 {
-		t.Fatalf("expected 1 delegate cancel RPC call, got %d", delegateCancelCalls)
 	}
 }
 
@@ -291,7 +236,7 @@ func TestHandleChatSessionCommandStatusUsesAppServerStatusOutput(t *testing.T) {
 	}
 }
 
-func TestHandleChatSessionCommandStopCancelsDelegatedWork(t *testing.T) {
+func TestHandleChatSessionCommandStopCancelsWork(t *testing.T) {
 	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("new app: %v", err)
@@ -305,8 +250,8 @@ func TestHandleChatSessionCommandStopCancelsDelegatedWork(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	project, err := app.store.CreateProject(
-		"delegate-stop-api",
-		"delegate-stop-api",
+		"stop-api",
+		"stop-api",
 		projectRoot,
 		"local",
 		"",
@@ -323,19 +268,6 @@ func TestHandleChatSessionCommandStopCancelsDelegatedWork(t *testing.T) {
 	app.turns.mu.Lock()
 	app.turns.queue[session.ID] = 3
 	app.turns.mu.Unlock()
-
-	delegateCancelCalls := 0
-	server := setupMockDelegateCancelServer(t, 5, &delegateCancelCalls)
-	defer server.Close()
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse mock url: %v", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatalf("parse mock port: %v", err)
-	}
-	app.tunnels.setPort(project.CanvasSessionID, port)
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/chat/sessions/"+session.ID+"/commands", map[string]any{
 		"command": "/stop",
@@ -357,18 +289,12 @@ func TestHandleChatSessionCommandStopCancelsDelegatedWork(t *testing.T) {
 	if got := intFromAny(resultRaw["queued_canceled"], -1); got != 3 {
 		t.Fatalf("queued_canceled = %d, want 3", got)
 	}
-	if got := intFromAny(resultRaw["delegate_canceled"], -1); got != 5 {
-		t.Fatalf("delegate_canceled = %d, want 5", got)
-	}
-	if got := intFromAny(resultRaw["canceled"], -1); got != 8 {
-		t.Fatalf("canceled = %d, want 8", got)
-	}
-	if delegateCancelCalls != 1 {
-		t.Fatalf("expected 1 delegate cancel RPC call, got %d", delegateCancelCalls)
+	if got := intFromAny(resultRaw["canceled"], -1); got != 3 {
+		t.Fatalf("canceled = %d, want 3", got)
 	}
 }
 
-func TestHandleChatSessionCancelEndpointStopsDelegatedWork(t *testing.T) {
+func TestHandleChatSessionCancelEndpointStopsWork(t *testing.T) {
 	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("new app: %v", err)
@@ -382,8 +308,8 @@ func TestHandleChatSessionCancelEndpointStopsDelegatedWork(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	project, err := app.store.CreateProject(
-		"delegate-cancel-endpoint",
-		"delegate-cancel-endpoint",
+		"cancel-endpoint",
+		"cancel-endpoint",
 		projectRoot,
 		"local",
 		"",
@@ -409,19 +335,6 @@ func TestHandleChatSessionCancelEndpointStopsDelegatedWork(t *testing.T) {
 	app.turns.queue[session.ID] = 2
 	app.turns.mu.Unlock()
 
-	delegateCancelCalls := 0
-	server := setupMockDelegateCancelServer(t, 4, &delegateCancelCalls)
-	defer server.Close()
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatalf("parse mock url: %v", err)
-	}
-	port, err := strconv.Atoi(parsed.Port())
-	if err != nil {
-		t.Fatalf("parse mock port: %v", err)
-	}
-	app.tunnels.setPort(project.CanvasSessionID, port)
-
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/chat/sessions/"+session.ID+"/cancel", map[string]any{})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
@@ -436,19 +349,13 @@ func TestHandleChatSessionCancelEndpointStopsDelegatedWork(t *testing.T) {
 	if got := intFromAny(payload["queued_canceled"], -1); got != 2 {
 		t.Fatalf("queued_canceled = %d, want 2", got)
 	}
-	if got := intFromAny(payload["delegate_canceled"], -1); got != 4 {
-		t.Fatalf("delegate_canceled = %d, want 4", got)
-	}
-	if got := intFromAny(payload["canceled"], -1); got != 7 {
-		t.Fatalf("canceled = %d, want 7", got)
+	if got := intFromAny(payload["canceled"], -1); got != 3 {
+		t.Fatalf("canceled = %d, want 3", got)
 	}
 	select {
 	case <-cancelCalled:
 	default:
 		t.Fatal("expected active chat turn cancel callback to run")
-	}
-	if delegateCancelCalls != 1 {
-		t.Fatalf("expected 1 delegate cancel RPC call, got %d", delegateCancelCalls)
 	}
 }
 
@@ -498,9 +405,6 @@ func TestHandleChatSessionCancelStopsActiveTurn(t *testing.T) {
 	if got := intFromAny(payload["queued_canceled"], -1); got != 0 {
 		t.Fatalf("expected queued_canceled=0, got %v", payload["queued_canceled"])
 	}
-	if got := intFromAny(payload["delegate_canceled"], -1); got != 0 {
-		t.Fatalf("expected delegate_canceled=0, got %v", payload["delegate_canceled"])
-	}
 }
 
 func TestHandleChatSessionActivityReportsActiveTurns(t *testing.T) {
@@ -541,9 +445,6 @@ func TestHandleChatSessionActivityReportsActiveTurns(t *testing.T) {
 	if got := intFromAny(payload["queued_turns"], -1); got != 3 {
 		t.Fatalf("expected queued_turns=3, got %v", payload["queued_turns"])
 	}
-	if got := intFromAny(payload["delegate_active"], -1); got != 0 {
-		t.Fatalf("expected delegate_active=0, got %v", payload["delegate_active"])
-	}
 }
 
 func TestHandleChatSessionCancelClearsQueuedTurns(t *testing.T) {
@@ -579,39 +480,6 @@ func TestHandleChatSessionCancelClearsQueuedTurns(t *testing.T) {
 	}
 	if got := intFromAny(payload["queued_canceled"], -1); got != 2 {
 		t.Fatalf("expected queued_canceled=2, got %v", payload["queued_canceled"])
-	}
-	if got := intFromAny(payload["delegate_canceled"], -1); got != 0 {
-		t.Fatalf("expected delegate_canceled=0, got %v", payload["delegate_canceled"])
-	}
-}
-
-func TestHandleChatSessionCancelDelegatesEndpoint(t *testing.T) {
-	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
-	if err != nil {
-		t.Fatalf("new app: %v", err)
-	}
-	if err := app.store.AddAuthSession("token-test"); err != nil {
-		t.Fatalf("add auth session: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = app.Shutdown(context.Background())
-	})
-
-	session, err := app.store.GetOrCreateChatSession("cancel-delegates-project")
-	if err != nil {
-		t.Fatalf("create chat session: %v", err)
-	}
-
-	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/chat/sessions/"+session.ID+"/cancel-delegates", map[string]any{})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got := intFromAny(payload["canceled"], -1); got != 0 {
-		t.Fatalf("expected canceled=0, got %v", payload["canceled"])
 	}
 }
 

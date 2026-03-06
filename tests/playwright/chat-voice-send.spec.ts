@@ -248,7 +248,7 @@ test.beforeEach(async ({ page }) => {
   }, null, { timeout: 15_000 });
   await page.waitForTimeout(200);
   await setHarnessCancelResponses(page, []);
-  await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
+  await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0 });
   await setHarnessMessagePostDelay(page, 0);
   await setHarnessSTTTranscribeResponse(page, { text: 'hello world' }, 200);
 });
@@ -328,7 +328,7 @@ test('touch stop indicator routes through shared cancel endpoint', async ({ page
   await injectChatEvent(page, {
     type: 'turn_started',
     turn_id: 'stop-turn-test',
-    content: 'delegate work',
+    content: 'background work',
   });
   await expect(page.locator('#chat-history .chat-message.chat-assistant.is-pending')).toHaveCount(1);
 
@@ -344,7 +344,7 @@ test('touch stop indicator routes through shared cancel endpoint', async ({ page
   expect(cancelEntry!.method).toBe('POST');
   expect(typeof cancelEntry!.payload?.canceled).toBe('number');
   expect(Number(cancelEntry!.payload?.canceled)).toBeGreaterThan(0);
-  expect(Number(cancelEntry!.payload?.delegate_canceled)).toBeGreaterThan(0);
+  expect(Number(cancelEntry!.payload?.canceled)).toBeGreaterThan(0);
 
   await injectChatEvent(page, { type: 'turn_cancelled', turn_id: 'stop-turn-test' });
   await page.waitForTimeout(100);
@@ -354,10 +354,10 @@ test('touch stop indicator routes through shared cancel endpoint', async ({ page
 
 test('touch stop retries cancel when first cancel reports zero but work remains', async ({ page }) => {
   await clearLog(page);
-  await setHarnessActivityResponse(page, { active_turns: 1, queued_turns: 0, delegate_active: 0 });
+  await setHarnessActivityResponse(page, { active_turns: 1, queued_turns: 0 });
   await setHarnessCancelResponses(page, [
-    { ok: true, canceled: 0, active_canceled: 0, queued_canceled: 0, delegate_canceled: 0 },
-    { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1, delegate_canceled: 0 },
+    { ok: true, canceled: 0, active_canceled: 0, queued_canceled: 0 },
+    { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1 },
   ]);
 
   await injectChatEvent(page, { type: 'turn_started', turn_id: 'stop-retry-turn' });
@@ -373,9 +373,9 @@ test('touch stop retries cancel when first cancel reports zero but work remains'
 test('stop indicator auto-hides after stop even when activity poll stays active', async ({ page }) => {
   await clearLog(page);
   // Simulate stale backend activity that can keep stop UI stuck in Safari.
-  await setHarnessActivityResponse(page, { active_turns: 1, queued_turns: 0, delegate_active: 0 });
+  await setHarnessActivityResponse(page, { active_turns: 1, queued_turns: 0 });
   await setHarnessCancelResponses(page, [
-    { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1, delegate_canceled: 0 },
+    { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1 },
   ]);
 
   await injectChatEvent(page, { type: 'turn_started', turn_id: 'stop-stale-activity-turn' });
@@ -945,7 +945,7 @@ test.describe('safari-recorder=broken', () => {
     }, null, { timeout: 15_000 });
     await page.waitForTimeout(200);
     await setHarnessCancelResponses(page, []);
-    await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0, delegate_active: 0 });
+    await setHarnessActivityResponse(page, { active_turns: 0, queued_turns: 0 });
     await setHarnessMessagePostDelay(page, 0);
     await setHarnessSTTTranscribeResponse(page, { text: 'hello world' }, 200);
   });

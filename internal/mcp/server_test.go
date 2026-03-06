@@ -165,6 +165,38 @@ func TestResolveModelAlias(t *testing.T) {
 	}
 }
 
+func TestBuildDelegateRequestUsesReasoningEffortOnly(t *testing.T) {
+	adapter := canvas.NewAdapter(t.TempDir(), nil)
+	s := NewServer(adapter)
+
+	reqA, err := s.buildDelegateRequest(map[string]interface{}{
+		"prompt":           "audit code",
+		"model":            "codex",
+		"reasoning_effort": "medium",
+	})
+	if err != nil {
+		t.Fatalf("buildDelegateRequest with reasoning_effort failed: %v", err)
+	}
+	if got := reqA.ReasoningEffort; got != "medium" {
+		t.Fatalf("reasoning effort = %q, want medium", got)
+	}
+	if got, _ := reqA.Reasoning["effort"].(string); got != "medium" {
+		t.Fatalf("reasoning param effort = %q, want medium", got)
+	}
+
+	_, err = s.buildDelegateRequest(map[string]interface{}{
+		"prompt": "audit code",
+		"model":  "codex",
+		"effort": "low",
+	})
+	if err == nil {
+		t.Fatal("expected effort alias to be rejected")
+	}
+	if !strings.Contains(err.Error(), "reasoning_effort") {
+		t.Fatalf("expected reasoning_effort guidance, got: %v", err)
+	}
+}
+
 func TestAssembleDelegatePrompt(t *testing.T) {
 	t.Run("all fields", func(t *testing.T) {
 		got := assembleDelegatePrompt("Be thorough.", "User asked about X.", "Analyze the code.")
@@ -223,92 +255,27 @@ func TestAssembleDelegatePrompt(t *testing.T) {
 
 func TestToolDefinitionsEmitsProperties(t *testing.T) {
 	defs := toolDefinitions()
-	var delegateDef map[string]interface{}
-	var statusDef map[string]interface{}
-	var cancelDef map[string]interface{}
-	var activeCountDef map[string]interface{}
-	var cancelAllDef map[string]interface{}
 	var tempCreateDef map[string]interface{}
 	var tempRemoveDef map[string]interface{}
+	legacyAsyncToolsSeen := 0
 	for _, d := range defs {
 		switch d["name"] {
-		case "delegate_to_model":
-			delegateDef = d
-		case "delegate_to_model_status":
-			statusDef = d
-		case "delegate_to_model_cancel":
-			cancelDef = d
-		case "delegate_to_model_active_count":
-			activeCountDef = d
-		case "delegate_to_model_cancel_all":
-			cancelAllDef = d
 		case "temp_file_create":
 			tempCreateDef = d
 		case "temp_file_remove":
 			tempRemoveDef = d
+		case "delegate_to_model", "delegate_to_model_status", "delegate_to_model_cancel", "delegate_to_model_active_count", "delegate_to_model_cancel_all":
+			legacyAsyncToolsSeen++
 		}
 	}
-	if delegateDef == nil {
-		t.Fatal("delegate_to_model not found in tool definitions")
-	}
-	if statusDef == nil {
-		t.Fatal("delegate_to_model_status not found in tool definitions")
-	}
-	if cancelDef == nil {
-		t.Fatal("delegate_to_model_cancel not found in tool definitions")
-	}
-	if activeCountDef == nil {
-		t.Fatal("delegate_to_model_active_count not found in tool definitions")
-	}
-	if cancelAllDef == nil {
-		t.Fatal("delegate_to_model_cancel_all not found in tool definitions")
+	if legacyAsyncToolsSeen != 0 {
+		t.Fatalf("legacy async tools should be removed from definitions, seen=%d", legacyAsyncToolsSeen)
 	}
 	if tempCreateDef == nil {
 		t.Fatal("temp_file_create not found in tool definitions")
 	}
 	if tempRemoveDef == nil {
 		t.Fatal("temp_file_remove not found in tool definitions")
-	}
-	schema, _ := delegateDef["inputSchema"].(map[string]interface{})
-	if schema == nil {
-		t.Fatal("missing inputSchema")
-	}
-	props, _ := schema["properties"].(map[string]interface{})
-	if props == nil {
-		t.Fatal("missing properties in inputSchema")
-	}
-	for _, key := range []string{"prompt", "model", "context", "system_prompt", "cwd", "timeout_seconds"} {
-		if props[key] == nil {
-			t.Errorf("missing property %q", key)
-		}
-	}
-	modelProp, _ := props["model"].(map[string]interface{})
-	if modelProp == nil {
-		t.Fatal("model property is not a map")
-	}
-	if modelProp["enum"] == nil {
-		t.Error("model property missing enum")
-	}
-
-	statusSchema, _ := statusDef["inputSchema"].(map[string]interface{})
-	statusProps, _ := statusSchema["properties"].(map[string]interface{})
-	if statusProps["job_id"] == nil || statusProps["after_seq"] == nil || statusProps["max_events"] == nil {
-		t.Fatalf("status tool missing expected properties: %#v", statusProps)
-	}
-	cancelSchema, _ := cancelDef["inputSchema"].(map[string]interface{})
-	cancelProps, _ := cancelSchema["properties"].(map[string]interface{})
-	if cancelProps["job_id"] == nil {
-		t.Fatalf("cancel tool missing job_id property: %#v", cancelProps)
-	}
-	activeCountSchema, _ := activeCountDef["inputSchema"].(map[string]interface{})
-	activeCountProps, _ := activeCountSchema["properties"].(map[string]interface{})
-	if activeCountProps["cwd_prefix"] == nil {
-		t.Fatalf("active count tool missing cwd_prefix property: %#v", activeCountProps)
-	}
-	cancelAllSchema, _ := cancelAllDef["inputSchema"].(map[string]interface{})
-	cancelAllProps, _ := cancelAllSchema["properties"].(map[string]interface{})
-	if cancelAllProps["cwd_prefix"] == nil {
-		t.Fatalf("cancel all tool missing cwd_prefix property: %#v", cancelAllProps)
 	}
 	tempCreateSchema, _ := tempCreateDef["inputSchema"].(map[string]interface{})
 	tempCreateProps, _ := tempCreateSchema["properties"].(map[string]interface{})

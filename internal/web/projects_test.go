@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -392,5 +393,106 @@ func TestProjectFilesListRejectsTraversal(t *testing.T) {
 	)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected traversal request 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestProjectWelcomeListsDocsAndRecentFiles(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	rrList := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rrList.Code, rrList.Body.String())
+	}
+	var listPayload projectsListResponse
+	if err := json.Unmarshal(rrList.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode projects response: %v", err)
+	}
+	if len(listPayload.Projects) == 0 {
+		t.Fatalf("expected at least one project")
+	}
+	projectID := ""
+	for _, project := range listPayload.Projects {
+		if project.Kind != "hub" {
+			projectID = project.ID
+			break
+		}
+	}
+	if projectID == "" {
+		t.Fatalf("expected a non-hub project")
+	}
+	project, err := app.store.GetProject(projectID)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "README.md"), []byte("# hello"), 0o644); err != nil {
+		t.Fatalf("write README.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project.RootPath, "notes.txt"), []byte("recent"), 0o644); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
+	}
+
+	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects/"+projectID+"/welcome", nil)
+	if rrWelcome.Code != http.StatusOK {
+		t.Fatalf("expected welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rrWelcome.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode welcome response: %v", err)
+	}
+	if got := strFromAny(payload["scope"]); got != "project" {
+		t.Fatalf("scope = %q, want %q", got, "project")
+	}
+	sections, ok := payload["sections"].([]any)
+	if !ok || len(sections) == 0 {
+		t.Fatalf("expected welcome sections, got %v", payload["sections"])
+	}
+	body := rrWelcome.Body.String()
+	if !strings.Contains(body, "README.md") {
+		t.Fatalf("welcome body missing README.md: %s", body)
+	}
+	if !strings.Contains(body, "notes.txt") {
+		t.Fatalf("welcome body missing notes.txt: %s", body)
+	}
+}
+
+func TestHubWelcomeListsProjects(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	rrList := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", rrList.Code, rrList.Body.String())
+	}
+	var listPayload projectsListResponse
+	if err := json.Unmarshal(rrList.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode projects response: %v", err)
+	}
+	hubID := ""
+	projectName := ""
+	for _, project := range listPayload.Projects {
+		if project.Kind == "hub" {
+			hubID = project.ID
+			continue
+		}
+		if projectName == "" {
+			projectName = project.Name
+		}
+	}
+	if hubID == "" {
+		t.Fatalf("expected hub project id")
+	}
+
+	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects/"+hubID+"/welcome", nil)
+	if rrWelcome.Code != http.StatusOK {
+		t.Fatalf("expected hub welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rrWelcome.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode hub welcome response: %v", err)
+	}
+	if got := strFromAny(payload["scope"]); got != "hub" {
+		t.Fatalf("scope = %q, want %q", got, "hub")
+	}
+	if projectName != "" && !strings.Contains(rrWelcome.Body.String(), projectName) {
+		t.Fatalf("hub welcome missing project name %q: %s", projectName, rrWelcome.Body.String())
 	}
 }

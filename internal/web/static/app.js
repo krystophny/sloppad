@@ -1,4 +1,5 @@
 import { marked } from './vendor/marked.esm.js';
+import { apiURL, wsURL } from './paths.js';
 import {
   renderCanvas,
   clearCanvas,
@@ -10,7 +11,6 @@ import {
   getActiveTextEventId,
   getPreviousArtifactText,
 } from './canvas.js';
-import { createEmptyCanvasRipple } from './empty-canvas-ripple.js';
 import {
   getUiState, setUiMode,
   showIndicatorMode, hideIndicator,
@@ -58,17 +58,20 @@ const state = {
   projectsOpen: false,
   projectSwitchInFlight: false,
   projectModelSwitchInFlight: false,
+  inputMode: 'voice',
+  startupBehavior: 'hub_first',
+  interactionMode: 'ask',
   ttsSilent: false,
   yoloMode: false,
   disclaimerAckRequired: false,
   disclaimerVersion: '',
+  welcomeSurface: null,
   pendingByTurn: new Map(),
   pendingQueue: [],
   assistantActiveTurns: new Set(),
   assistantUnknownTurns: 0,
   assistantRemoteActiveCount: 0,
   assistantRemoteQueuedCount: 0,
-  assistantRemoteDelegateActiveCount: 0,
   assistantLastStartedAt: 0,
   assistantCancelInFlight: false,
   assistantLastError: '',
@@ -115,6 +118,8 @@ const state = {
   workspaceStepInFlight: false,
   prReviewAwaitingArtifact: false,
   artifactEditMode: false,
+  reviewBatch: [],
+  reviewSubmitInFlight: false,
 };
 
 export function getState() {
@@ -198,7 +203,6 @@ let assistantActivityInFlight = false;
 let assistantSilentCancelInFlight = false;
 let chatWsLastMessageAt = 0;
 let suppressClickUntil = 0;
-let emptyCanvasRipple = null;
 
 const ACTIVE_PROJECT_STORAGE_KEY = 'tabura.activeProjectId';
 const LAST_VIEW_STORAGE_KEY = 'tabura.lastView';
@@ -489,7 +493,7 @@ function setYoloModeLocal(enabled, { persist = true, render = true } = {}) {
 
 async function setYoloMode(enabled) {
   const next = Boolean(enabled);
-  const resp = await fetch('/api/runtime/yolo', {
+  const resp = await fetch(apiURL('runtime/yolo'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled: next }),
@@ -779,11 +783,7 @@ function settleKeyboardAfterSubmit() {
 
 function setTTSSilentMode(silent, { persist = true, pinPanel = true } = {}) {
   const next = Boolean(silent);
-  if (state.ttsSilent === next) return;
   state.ttsSilent = next;
-  if (persist) {
-    persistTTSSilentPreference(next);
-  }
   if (next) {
     cancelConversationListen();
     stopTTSPlayback();
@@ -802,8 +802,16 @@ function setTTSSilentMode(silent, { persist = true, pinPanel = true } = {}) {
 function toggleTTSSilentMode() {
   if (!ttsEnabled) return;
   const next = !state.ttsSilent;
-  setTTSSilentMode(next);
-  showStatus(next ? 'silent mode on' : 'voice mode on');
+  updateRuntimePreferences({ silent_mode: next })
+    .then(() => {
+      setTTSSilentMode(next, { persist: false });
+      showStatus(next ? 'silent mode on' : 'voice mode on');
+      void showWelcomeForActiveProject();
+    })
+    .catch((err) => {
+      showStatus(`silent update failed: ${String(err?.message || err || 'unknown error')}`);
+      renderEdgeTopModelButtons();
+    });
 }
 
 // Single shared AudioContext — created once, unlocked via resume() on user
@@ -1017,7 +1025,7 @@ function forceUiHardReload() {
 }
 
 async function fetchRuntimeMeta() {
-  const resp = await fetch('/api/runtime', {
+  const resp = await fetch(apiURL('runtime'), {
     cache: 'no-store',
     headers: { 'Cache-Control': 'no-cache' },
   });
@@ -1034,8 +1042,40 @@ function applyRuntimePreferences(runtime) {
   } else {
     setYoloModeLocal(readYoloModePreference(), { persist: false, render: false });
   }
+  const runtimeSilent = parseOptionalBoolean(runtime?.silent_mode);
+  state.ttsSilent = runtimeSilent === true;
+  state.inputMode = String(runtime?.input_mode || 'voice').trim().toLowerCase() === 'typing' ? 'typing' : 'voice';
+  state.startupBehavior = String(runtime?.startup_behavior || 'hub_first').trim().toLowerCase() || 'hub_first';
   state.disclaimerVersion = String(runtime?.disclaimer_version || '').trim();
   state.disclaimerAckRequired = Boolean(runtime?.disclaimer_ack_required);
+}
+
+async function updateRuntimePreferences(patch) {
+  const resp = await fetch(apiURL('runtime/preferences'), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch || {}),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  const silent = parseOptionalBoolean(payload?.silent_mode);
+  if (silent !== null) {
+    state.ttsSilent = silent;
+  }
+  state.inputMode = String(payload?.input_mode || state.inputMode || 'voice').trim().toLowerCase() === 'typing' ? 'typing' : 'voice';
+  state.startupBehavior = String(payload?.startup_behavior || state.startupBehavior || 'hub_first').trim().toLowerCase() || 'hub_first';
+  renderEdgeTopModelButtons();
+  return payload;
+}
+
+function setInteractionMode(mode) {
+  state.interactionMode = String(mode || '').trim().toLowerCase() === 'review' ? 'review' : 'ask';
+  document.body.classList.toggle('canvas-review-mode', state.interactionMode === 'review');
+  renderEdgeTopModelButtons();
+  renderReviewBatchPanel();
 }
 
 async function acknowledgeDisclaimer(version) {
@@ -1043,7 +1083,7 @@ async function acknowledgeDisclaimer(version) {
   if (String(version || '').trim()) {
     payload.version = String(version || '').trim();
   }
-  const resp = await fetch('/api/runtime/disclaimer-ack', {
+  const resp = await fetch(apiURL('runtime/disclaimer-ack'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -1656,7 +1696,7 @@ function sttStop() {
   form.append('mime_type', mimeType);
   const controller = new AbortController();
   _sttAbortController = controller;
-  return fetch('/api/stt/transcribe', {
+  return fetch(apiURL('stt/transcribe'), {
     method: 'POST',
     body: form,
     signal: controller.signal,
@@ -2155,7 +2195,6 @@ function showCanvasColumn(paneId) {
     }
   }
   state.hasArtifact = true;
-  if (emptyCanvasRipple) emptyCanvasRipple.setEnabled(false);
   setUiMode('artifact');
   persistLastView({ mode: 'artifact' });
   if (!isVoiceTurn() && isDirectAssistantWorking()) {
@@ -2183,7 +2222,6 @@ function hideCanvasColumn() {
       p.classList.remove('is-active');
     });
   }
-  if (emptyCanvasRipple) emptyCanvasRipple.setEnabled(true);
   updateAssistantActivityIndicator();
 }
 
@@ -2220,8 +2258,7 @@ function hasLocalAssistantWork() {
 
 function hasRemoteAssistantWork() {
   return state.assistantRemoteActiveCount > 0
-    || state.assistantRemoteQueuedCount > 0
-    || state.assistantRemoteDelegateActiveCount > 0;
+    || state.assistantRemoteQueuedCount > 0;
 }
 
 function hasLocalStopCapableWork() {
@@ -2246,12 +2283,8 @@ function isDirectAssistantWorking() {
     || state.assistantRemoteQueuedCount > 0;
 }
 
-function isDelegateAssistantWorking() {
-  return state.assistantRemoteDelegateActiveCount > 0;
-}
-
 function isAssistantWorking() {
-  return isDirectAssistantWorking() || isDelegateAssistantWorking();
+  return isDirectAssistantWorking();
 }
 
 function isTTSSpeaking() {
@@ -2710,10 +2743,10 @@ async function loadWorkspaceBrowserPath(path = '') {
   renderPrReviewFileList();
   try {
     const urls = [
-      `/api/projects/${encodeURIComponent(projectID)}/files?path=${encodeURIComponent(requestedPath)}`,
+      apiURL(`projects/${encodeURIComponent(projectID)}/files?path=${encodeURIComponent(requestedPath)}`),
     ];
     if (projectID.toLowerCase() !== 'active') {
-      urls.push(`/api/projects/active/files?path=${encodeURIComponent(requestedPath)}`);
+      urls.push(apiURL(`projects/active/files?path=${encodeURIComponent(requestedPath)}`));
     }
 
     let payload = null;
@@ -2759,6 +2792,7 @@ async function openWorkspaceSidebarFile(path) {
   const filePath = normalizeWorkspaceBrowserPath(path);
   if (!filePath) return false;
   state.fileSidebarMode = 'workspace';
+  clearWelcomeSurface();
   const kind = sidebarFileKindForPath(filePath);
   if (kind === 'image_artifact') {
     state.workspaceOpenFilePath = filePath;
@@ -2789,7 +2823,7 @@ async function openWorkspaceSidebarFile(path) {
 
   const sid = String(state.sessionId || 'local');
   try {
-    const resp = await fetch(`/api/files/${encodeURIComponent(sid)}/${encodeURIComponent(filePath)}`, { cache: 'no-store' });
+    const resp = await fetch(apiURL(`files/${encodeURIComponent(sid)}/${encodeURIComponent(filePath)}`), { cache: 'no-store' });
     if (!resp.ok) {
       const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
       throw new Error(detail);
@@ -2874,6 +2908,7 @@ function renderActivePrReviewFile() {
   }
   const file = files[state.prReviewActiveIndex];
   if (!file) return false;
+  clearWelcomeSurface();
   renderCanvas({
     kind: 'text_artifact',
     event_id: `pr-review-${Date.now()}-${state.prReviewActiveIndex}`,
@@ -3213,7 +3248,6 @@ function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.assistantUnknownTurns = 0;
   state.assistantRemoteActiveCount = 0;
   state.assistantRemoteQueuedCount = 0;
-  state.assistantRemoteDelegateActiveCount = 0;
   state.assistantCancelInFlight = false;
   state.voiceTranscriptSubmitInFlight = false;
   state.voiceAwaitingTurn = false;
@@ -3229,8 +3263,293 @@ function clearChatHistory() {
   if (host) host.innerHTML = '';
 }
 
+function clearWelcomeSurface() {
+  state.welcomeSurface = null;
+  const canvasText = document.getElementById('canvas-text');
+  if (canvasText instanceof HTMLElement) {
+    canvasText.classList.remove('welcome-surface');
+  }
+}
+
+function activeWelcomeProjectID() {
+  if (state.welcomeSurface && typeof state.welcomeSurface === 'object') {
+    return String(state.welcomeSurface.project_id || '').trim();
+  }
+  return '';
+}
+
+async function handleWelcomeAction(action) {
+  const type = String(action?.type || '').trim();
+  if (!type) return;
+  if (type === 'switch_project') {
+    const projectID = String(action?.project_id || '').trim();
+    if (!projectID || projectID === 'hub') {
+      const hub = hubProject();
+      if (hub?.id) {
+        await switchProject(hub.id);
+      }
+      return;
+    }
+    await switchProject(projectID);
+    return;
+  }
+  if (type === 'open_file') {
+    const filePath = String(action?.path || '').trim();
+    if (filePath) {
+      await openWorkspaceSidebarFile(filePath);
+    }
+    return;
+  }
+  if (type === 'set_silent_mode') {
+    const next = parseOptionalBoolean(action?.silent_mode);
+    if (next !== null) {
+      await updateRuntimePreferences({ silent_mode: next });
+      setTTSSilentMode(next, { persist: false });
+      await showWelcomeForActiveProject(true);
+    }
+    return;
+  }
+  if (type === 'set_input_mode') {
+    const next = String(action?.input_mode || '').trim().toLowerCase() === 'typing' ? 'typing' : 'voice';
+    await updateRuntimePreferences({ input_mode: next });
+    await showWelcomeForActiveProject(true);
+    return;
+  }
+  if (type === 'set_startup_behavior') {
+    await updateRuntimePreferences({ startup_behavior: 'hub_first' });
+    await showWelcomeForActiveProject(true);
+  }
+}
+
+function renderWelcomeSurface(payload) {
+  const canvasText = document.getElementById('canvas-text');
+  if (!(canvasText instanceof HTMLElement)) return;
+  const sections = Array.isArray(payload?.sections) ? payload.sections : [];
+  const title = String(payload?.title || 'Welcome').trim() || 'Welcome';
+  const subtitle = isHubActive()
+    ? 'Choose a project or change a global runtime preference.'
+    : 'Pick up a recent file, open docs, or switch modes before asking.';
+  const normalizedSections = sections.map((section, index) => ({
+    ...section,
+    _sectionIndex: index,
+  }));
+  const sectionHtml = normalizedSections.map((section) => {
+    const cards = Array.isArray(section?.cards) ? section.cards : [];
+    const cardsHtml = cards.map((card, index) => `
+      <button
+        type="button"
+        class="welcome-card"
+        data-section-index="${Number(section?._sectionIndex ?? 0)}"
+        data-card-index="${index}"
+      >
+        <span class="welcome-card-title">${escapeHtml(String(card?.title || 'Open'))}</span>
+        ${card?.subtitle ? `<span class="welcome-card-subtitle">${escapeHtml(String(card.subtitle || ''))}</span>` : ''}
+        ${card?.description ? `<span class="welcome-card-description">${escapeHtml(String(card.description || ''))}</span>` : ''}
+      </button>
+    `).join('');
+    return `
+      <section class="welcome-section">
+        <div class="welcome-section-title">${escapeHtml(String(section?.title || 'Section'))}</div>
+        <div class="welcome-card-grid">${cardsHtml}</div>
+      </section>
+    `;
+  }).join('');
+  state.welcomeSurface = {
+    ...payload,
+    sections: normalizedSections,
+  };
+  canvasText.classList.add('welcome-surface');
+  canvasText.innerHTML = `
+    <div class="welcome-surface-root">
+      <div>
+        <div class="welcome-surface-title">${escapeHtml(title)}</div>
+        <div class="welcome-surface-subtitle">${escapeHtml(subtitle)}</div>
+      </div>
+      ${sectionHtml}
+    </div>
+  `;
+  canvasText.querySelectorAll('.welcome-card').forEach((node) => {
+    node.addEventListener('click', (event) => {
+      const target = event.currentTarget;
+      if (!(target instanceof HTMLElement)) return;
+      const sectionIndex = Number.parseInt(target.dataset.sectionIndex || '', 10);
+      const cardIndex = Number.parseInt(target.dataset.cardIndex || '', 10);
+      if (!Number.isFinite(sectionIndex) || !Number.isFinite(cardIndex)) return;
+      const section = state.welcomeSurface?.sections?.[sectionIndex];
+      const card = section?.cards?.[cardIndex];
+      if (!card?.action) return;
+      void handleWelcomeAction(card.action);
+    });
+  });
+  showCanvasColumn('canvas-text');
+}
+
+async function fetchProjectWelcome(projectID = 'active') {
+  const resp = await fetch(apiURL(`projects/${encodeURIComponent(projectID)}/welcome`), { cache: 'no-store' });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
+async function showWelcomeForActiveProject(force = false) {
+  const project = activeProject();
+  if (!project?.id) return;
+  if (!force && state.hasArtifact && activeWelcomeProjectID() !== project.id) return;
+  if (state.prReviewMode || state.artifactEditMode) return;
+  const payload = await fetchProjectWelcome(project.id);
+  if (String(payload?.project_id || '').trim() !== project.id) return;
+  renderWelcomeSurface(payload);
+}
+
+function shouldUseBottomComposer() {
+  return window.matchMedia('(max-width: 767px)').matches;
+}
+
+function openComposerAt(x, y, anchor = null, initialText = '') {
+  const text = String(initialText || '');
+  if (shouldUseBottomComposer()) {
+    const edgeRight = document.getElementById('edge-right');
+    const input = document.getElementById('chat-pane-input');
+    setInputAnchor(anchor);
+    if (edgeRight instanceof HTMLElement) {
+      edgeRight.classList.add('edge-active', 'edge-pinned');
+    }
+    if (input instanceof HTMLTextAreaElement) {
+      input.focus();
+      input.value = text;
+      const caret = text.length;
+      input.setSelectionRange(caret, caret);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return;
+  }
+  showTextInput(x, y, anchor);
+  if (!text) return;
+  const input = document.getElementById('floating-input');
+  if (input instanceof HTMLTextAreaElement) {
+    input.value = text;
+    const caret = text.length;
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+function formatReviewAnchor(anchor) {
+  if (!anchor || typeof anchor !== 'object') return 'annotation';
+  const title = String(anchor.title || getActiveArtifactTitle() || '').trim();
+  const line = Number(anchor.line || 0);
+  const page = Number(anchor.page || 0);
+  if (page > 0 && title) return `${title} · page ${page}`;
+  if (page > 0) return `page ${page}`;
+  if (line > 0 && title) return `${title} · line ${line}`;
+  if (line > 0) return `line ${line}`;
+  return title || 'annotation';
+}
+
+function renderReviewBatchPanel() {
+  const panel = document.getElementById('review-batch-panel');
+  const list = document.getElementById('review-batch-list');
+  const submit = document.getElementById('review-batch-submit');
+  const clear = document.getElementById('review-batch-clear');
+  if (!(panel instanceof HTMLElement) || !(list instanceof HTMLElement)) return;
+  const visible = state.interactionMode === 'review';
+  panel.style.display = visible ? '' : 'none';
+  if (!visible) return;
+  list.innerHTML = '';
+  if (state.reviewBatch.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'review-batch-item';
+    empty.textContent = 'No comments collected yet.';
+    list.appendChild(empty);
+  } else {
+    state.reviewBatch.forEach((item, index) => {
+      const row = document.createElement('div');
+      row.className = 'review-batch-item';
+      row.innerHTML = `
+        <div class="review-batch-item-loc">${escapeHtml(formatReviewAnchor(item.anchor))}</div>
+        <div class="review-batch-item-text">${escapeHtml(String(item.text || ''))}</div>
+      `;
+      row.title = `Comment ${index + 1}`;
+      list.appendChild(row);
+    });
+  }
+  if (submit instanceof HTMLButtonElement) {
+    submit.disabled = state.reviewSubmitInFlight || state.reviewBatch.length === 0;
+  }
+  if (clear instanceof HTMLButtonElement) {
+    clear.disabled = state.reviewSubmitInFlight || state.reviewBatch.length === 0;
+  }
+}
+
+function addReviewBatchItem(text, anchor) {
+  const content = String(text || '').trim();
+  if (!content) return false;
+  state.reviewBatch.push({
+    text: content,
+    anchor: anchor || null,
+    created_at: Date.now(),
+  });
+  renderReviewBatchPanel();
+  showStatus(`queued comment ${state.reviewBatch.length}`);
+  return true;
+}
+
+function activeArtifactKindForReview() {
+  const activePane = document.querySelector('#canvas-viewport .canvas-pane.is-active');
+  if (!(activePane instanceof HTMLElement)) return 'text';
+  if (activePane.id === 'canvas-pdf') return 'pdf';
+  if (activePane.id === 'canvas-image') return 'image';
+  return 'text';
+}
+
+async function submitReviewBatch() {
+  if (state.reviewSubmitInFlight || state.reviewBatch.length === 0) return false;
+  const project = activeProject();
+  if (!project?.id) return false;
+  state.reviewSubmitInFlight = true;
+  renderReviewBatchPanel();
+  try {
+    const payload = {
+      project_id: project.id,
+      artifact_kind: activeArtifactKindForReview(),
+      artifact_title: String(getActiveArtifactTitle() || ''),
+      artifact_path: String(state.workspaceOpenFilePath || ''),
+      comments: state.reviewBatch.map((item) => ({
+        text: String(item.text || ''),
+        anchor: item.anchor || {},
+      })),
+    };
+    const resp = await fetch(apiURL('review/submit'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    const result = await resp.json();
+    state.reviewBatch = [];
+    renderReviewBatchPanel();
+    const reviewPath = String(result?.review_markdown_path || '').trim();
+    showStatus(reviewPath ? `review saved: ${reviewPath}` : 'review submitted');
+    if (reviewPath) {
+      await openWorkspaceSidebarFile(reviewPath);
+    }
+    return true;
+  } catch (err) {
+    showStatus(`review submit failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  } finally {
+    state.reviewSubmitInFlight = false;
+    renderReviewBatchPanel();
+  }
+}
+
 async function fetchProjects() {
-  const resp = await fetch('/api/projects', { cache: 'no-store' });
+  const resp = await fetch(apiURL('projects'), { cache: 'no-store' });
   if (!resp.ok) throw new Error(`projects list failed: HTTP ${resp.status}`);
   const payload = await resp.json();
   const projects = Array.isArray(payload?.projects) ? payload.projects : [];
@@ -3260,6 +3579,10 @@ function upsertProject(project) {
 }
 
 function resolveInitialProjectID() {
+  if (state.startupBehavior === 'hub_first') {
+    const hub = hubProject();
+    if (hub?.id) return hub.id;
+  }
   if (state.serverActiveProjectId && state.projects.some((project) => project.id === state.serverActiveProjectId)) {
     return state.serverActiveProjectId;
   }
@@ -3391,6 +3714,53 @@ function renderEdgeTopModelButtons() {
     toggleTTSSilentMode();
   });
   host.appendChild(silentButton);
+
+  const inputButton = document.createElement('button');
+  inputButton.type = 'button';
+  inputButton.className = 'edge-project-btn edge-model-btn';
+  inputButton.textContent = state.inputMode === 'typing' ? 'typing' : 'voice';
+  if (state.inputMode === 'typing') {
+    inputButton.classList.add('is-active');
+  }
+  inputButton.disabled = state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  inputButton.addEventListener('click', () => {
+    const nextMode = state.inputMode === 'typing' ? 'voice' : 'typing';
+    updateRuntimePreferences({ input_mode: nextMode })
+      .then(() => {
+        showStatus(nextMode === 'typing' ? 'typing mode on' : 'voice mode on');
+        void showWelcomeForActiveProject(true);
+      })
+      .catch((err) => {
+        showStatus(`input mode failed: ${String(err?.message || err || 'unknown error')}`);
+      });
+  });
+  host.appendChild(inputButton);
+
+  const askButton = document.createElement('button');
+  askButton.type = 'button';
+  askButton.className = 'edge-project-btn edge-model-btn';
+  askButton.textContent = 'ask';
+  if (state.interactionMode === 'ask') {
+    askButton.classList.add('is-active');
+  }
+  askButton.addEventListener('click', () => {
+    setInteractionMode('ask');
+    showStatus('ask mode');
+  });
+  host.appendChild(askButton);
+
+  const reviewButton = document.createElement('button');
+  reviewButton.type = 'button';
+  reviewButton.className = 'edge-project-btn edge-model-btn';
+  reviewButton.textContent = 'review';
+  if (state.interactionMode === 'review') {
+    reviewButton.classList.add('is-active');
+  }
+  reviewButton.addEventListener('click', () => {
+    setInteractionMode('review');
+    showStatus('review mode');
+  });
+  host.appendChild(reviewButton);
 }
 
 async function switchProjectChatModel(modelAlias, reasoningEffort = '') {
@@ -3414,7 +3784,7 @@ async function switchProjectChatModel(modelAlias, reasoningEffort = '') {
     if (includeEffort) {
       payload.reasoning_effort = nextEffort;
     }
-    const resp = await fetch(`/api/projects/${encodeURIComponent(project.id)}/chat-model`, {
+    const resp = await fetch(apiURL(`projects/${encodeURIComponent(project.id)}/chat-model`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -3440,7 +3810,7 @@ async function switchProjectChatModel(modelAlias, reasoningEffort = '') {
 }
 
 async function activateProject(projectID) {
-  const resp = await fetch(`/api/projects/${encodeURIComponent(projectID)}/activate`, { method: 'POST' });
+  const resp = await fetch(apiURL(`projects/${encodeURIComponent(projectID)}/activate`), { method: 'POST' });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
@@ -3452,6 +3822,7 @@ async function activateProject(projectID) {
   setChatMode(project.chat_mode || 'chat');
   if (!state.chatSessionId) throw new Error('chat session ID missing');
   upsertProject(project);
+  clearWelcomeSurface();
   return project;
 }
 
@@ -3460,7 +3831,7 @@ async function loadChatHistory() {
   const host = chatHistoryEl();
   if (!host) return;
   host.innerHTML = '';
-  const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/history`);
+  const resp = await fetch(apiURL(`chat/sessions/${encodeURIComponent(state.chatSessionId)}/history`));
   if (!resp.ok) throw new Error(`chat history failed: HTTP ${resp.status}`);
   const payload = await resp.json();
   const session = payload?.session || {};
@@ -3487,12 +3858,11 @@ async function refreshAssistantActivity() {
   const targetSessionID = state.chatSessionId;
   assistantActivityInFlight = true;
   try {
-    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(targetSessionID)}/activity`, { cache: 'no-store' });
+    const resp = await fetch(apiURL(`chat/sessions/${encodeURIComponent(targetSessionID)}/activity`), { cache: 'no-store' });
     if (!resp.ok) {
       if (!hasLocalAssistantWork() && !state.assistantCancelInFlight) {
         state.assistantRemoteActiveCount = 0;
         state.assistantRemoteQueuedCount = 0;
-        state.assistantRemoteDelegateActiveCount = 0;
         updateAssistantActivityIndicator();
       }
       return;
@@ -3501,17 +3871,13 @@ async function refreshAssistantActivity() {
     const payload = await resp.json();
     const activeTurns = Number(payload?.active_turns || 0);
     const queuedTurns = Number(payload?.queued_turns || 0);
-    const delegateActive = Number(payload?.delegate_active || 0);
     if (!Number.isFinite(activeTurns) || activeTurns < 0) return;
     if (!Number.isFinite(queuedTurns) || queuedTurns < 0) return;
-    if (!Number.isFinite(delegateActive) || delegateActive < 0) return;
     state.assistantRemoteActiveCount = activeTurns;
     state.assistantRemoteQueuedCount = queuedTurns;
-    state.assistantRemoteDelegateActiveCount = delegateActive;
     const recentlyStarted = (Date.now() - state.assistantLastStartedAt) < ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS;
     if (activeTurns <= 0
       && queuedTurns <= 0
-      && delegateActive <= 0
       && !state.assistantCancelInFlight
       && !state.voiceAwaitingTurn
       && !state.voiceTranscriptSubmitInFlight
@@ -3525,7 +3891,6 @@ async function refreshAssistantActivity() {
     if (!hasLocalAssistantWork() && !state.assistantCancelInFlight) {
       state.assistantRemoteActiveCount = 0;
       state.assistantRemoteQueuedCount = 0;
-      state.assistantRemoteDelegateActiveCount = 0;
       updateAssistantActivityIndicator();
     }
   } finally {
@@ -3613,9 +3978,7 @@ function openChatWs() {
   const turnToken = state.chatWsToken + 1;
   state.chatWsToken = turnToken;
   const targetSessionID = state.chatSessionId;
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ws/chat/${encodeURIComponent(targetSessionID)}`;
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(wsURL(`chat/${encodeURIComponent(targetSessionID)}`));
   ws.binaryType = 'arraybuffer';
   state.chatWs = ws;
 
@@ -4067,6 +4430,7 @@ async function switchProject(projectID) {
   closeCanvasWs();
   clearChatHistory();
   clearCanvas();
+  clearWelcomeSurface();
   state.workspaceOpenFilePath = '';
   state.workspaceStepInFlight = false;
   hideCanvasColumn();
@@ -4081,6 +4445,7 @@ async function switchProject(projectID) {
     renderEdgeTopProjects();
     await refreshWorkspaceBrowser(true);
     openCanvasWs();
+    await showWelcomeForActiveProject(true);
     await loadChatHistory();
     await refreshAssistantActivity();
     openChatWs();
@@ -4205,7 +4570,7 @@ async function submitMessage(text, options = {}) {
         throw abortError();
       }
     }
-    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/messages`, {
+    const resp = await fetch(apiURL(`chat/sessions/${encodeURIComponent(state.chatSessionId)}/messages`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -4316,7 +4681,7 @@ async function cancelActiveAssistantTurn(options = null) {
     timeoutId = window.setTimeout(() => {
       controller.abort();
     }, STOP_REQUEST_TIMEOUT_MS);
-    const resp = await fetch(`/api/chat/sessions/${encodeURIComponent(state.chatSessionId)}/cancel`, {
+    const resp = await fetch(apiURL(`chat/sessions/${encodeURIComponent(state.chatSessionId)}/cancel`), {
       method: 'POST',
       signal: controller.signal,
     });
@@ -4416,6 +4781,7 @@ async function handleStopAction() {
 }
 
 function applyCanvasArtifactEvent(payload) {
+  clearWelcomeSurface();
   if (state.artifactEditMode) {
     exitArtifactEditMode({ applyChanges: false });
   }
@@ -4427,6 +4793,7 @@ function applyCanvasArtifactEvent(payload) {
     exitPrReviewMode();
     renderCanvas(payload);
     hideCanvasColumn();
+    void showWelcomeForActiveProject(true);
     return;
   }
 
@@ -4472,9 +4839,7 @@ function openCanvasWs() {
   const turnToken = state.canvasWsToken + 1;
   state.canvasWsToken = turnToken;
   const targetSessionID = String(state.sessionId || 'local');
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${location.host}/ws/canvas/${encodeURIComponent(targetSessionID)}`;
-  const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(wsURL(`canvas/${encodeURIComponent(targetSessionID)}`));
   state.canvasWs = ws;
 
   ws.onopen = () => {
@@ -4502,11 +4867,12 @@ function openCanvasWs() {
 
 async function loadCanvasSnapshot(sessionID = state.sessionId) {
   try {
-    const resp = await fetch(`/api/canvas/${encodeURIComponent(sessionID)}/snapshot`);
+    const resp = await fetch(apiURL(`canvas/${encodeURIComponent(sessionID)}/snapshot`));
     if (!resp.ok) {
       if (!state.hasArtifact) {
         exitPrReviewMode();
         clearCanvas();
+        await showWelcomeForActiveProject(true);
       }
       return;
     }
@@ -4518,11 +4884,13 @@ async function loadCanvasSnapshot(sessionID = state.sessionId) {
     if (!state.hasArtifact) {
       exitPrReviewMode();
       clearCanvas();
+      await showWelcomeForActiveProject(true);
     }
   } catch (_) {
     if (!state.hasArtifact) {
       exitPrReviewMode();
       clearCanvas();
+      await showWelcomeForActiveProject(true);
     }
   }
 }
@@ -5082,14 +5450,7 @@ function bindUi() {
   const syncIndicatorOnViewportChange = () => {
     updateAssistantActivityIndicator();
   };
-  const emitEmptyCanvasRipple = (x, y, magnitude = 1) => {
-    if (state.hasArtifact || !emptyCanvasRipple) return;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    emptyCanvasRipple.addImpulse(x, y, magnitude);
-  };
   if (canvasViewport instanceof HTMLElement) {
-    emptyCanvasRipple = createEmptyCanvasRipple(canvasViewport);
-    emptyCanvasRipple.setEnabled(!state.hasArtifact);
     canvasViewport.addEventListener('scroll', syncIndicatorOnViewportChange, { passive: true, capture: true });
     let canvasSwipeStart = null;
     let canvasSwipeHandled = false;
@@ -5111,15 +5472,7 @@ function bindUi() {
       const touch = ev.touches[0];
       const dx = touch.clientX - canvasSwipeStart.x;
       const dy = touch.clientY - canvasSwipeStart.y;
-      if (!state.hasArtifact) {
-        const movement = Math.hypot(dx, dy);
-        if (movement > 1) {
-          const strength = Math.min(1.25, movement / 84);
-          emitEmptyCanvasRipple(touch.clientX, touch.clientY, strength);
-          canvasSwipeStart = { x: touch.clientX, y: touch.clientY };
-        }
-        return;
-      }
+      if (!state.hasArtifact) return;
       if (Math.abs(dx) < 48) return;
       if (Math.abs(dx) <= Math.abs(dy) * 1.25) return;
       const stepped = stepCanvasFile(dx < 0 ? 1 : -1);
@@ -5130,12 +5483,7 @@ function bindUi() {
     canvasViewport.addEventListener('touchend', resetCanvasSwipe, { passive: true });
     canvasViewport.addEventListener('touchcancel', resetCanvasSwipe, { passive: true });
     canvasViewport.addEventListener('wheel', (ev) => {
-      if (!state.hasArtifact) {
-        const intensity = Math.min(1.35, (Math.abs(ev.deltaX) + Math.abs(ev.deltaY)) / 140);
-        emitEmptyCanvasRipple(ev.clientX, ev.clientY, intensity);
-        ev.preventDefault();
-        return;
-      }
+      if (!state.hasArtifact) return;
       const absX = Math.abs(ev.deltaX);
       const absY = Math.abs(ev.deltaY);
       if (absX < 0.8) return;
@@ -5172,11 +5520,15 @@ function bindUi() {
     };
 
     const handleWorkspaceTap = (target, x, y) => {
-      emitEmptyCanvasRipple(x, y, 0.95);
       if (isConversationListenActive()) {
         if (isVoiceInteractionTarget(target, x, y)) return;
         cancelConversationListen();
-        void beginVoiceCaptureFromPoint(x, y);
+        if (state.interactionMode === 'review' || state.inputMode === 'typing') {
+          const anchor = state.hasArtifact && canvasText ? getAnchorFromPoint(x, y) : null;
+          openComposerAt(x, y, anchor);
+        } else {
+          void beginVoiceCaptureFromPoint(x, y);
+        }
         return;
       }
       if (isUiStopGestureActive()) {
@@ -5189,6 +5541,11 @@ function bindUi() {
       rememberMousePosition(x, y);
       if (isRecording()) {
         void stopVoiceCaptureAndSend();
+        return;
+      }
+      if (state.interactionMode === 'review' || state.inputMode === 'typing') {
+        const anchor = state.hasArtifact && canvasText ? getAnchorFromPoint(x, y) : null;
+        openComposerAt(x, y, anchor);
         return;
       }
       void beginVoiceCaptureFromPoint(x, y);
@@ -5212,7 +5569,6 @@ function bindUi() {
       }
       touchTapStartX = touch.clientX;
       touchTapStartY = touch.clientY;
-      emitEmptyCanvasRipple(touch.clientX, touch.clientY, 0.5);
       touchTapTracking = !isVoiceInteractionTarget(ev.target, touch.clientX, touch.clientY);
       touchTapMoved = false;
       touchLongTapTriggered = false;
@@ -5295,7 +5651,7 @@ function bindUi() {
       if (state.hasArtifact && canvasText) {
         anchor = getAnchorFromPoint(ev.clientX, ev.clientY);
       }
-      showTextInput(ev.clientX, ev.clientY, anchor);
+      openComposerAt(ev.clientX, ev.clientY, anchor);
     });
   }
 
@@ -5311,11 +5667,16 @@ function bindUi() {
         const text = floatingInput.value.trim();
         if (text) {
           state.lastInputOrigin = 'text';
+          const anchor = getInputAnchor();
           floatingInput.value = '';
           floatingInput.blur();
           hideTextInput();
           settleKeyboardAfterSubmit();
-          void submitMessage(text);
+          if (state.interactionMode === 'review') {
+            addReviewBatchItem(text, anchor);
+          } else {
+            void submitMessage(text);
+          }
         }
       }
       if (ev.key === 'Escape') {
@@ -5345,7 +5706,11 @@ function bindUi() {
           chatPaneInput.style.height = '';
           chatPaneInput.blur();
           settleKeyboardAfterSubmit();
-          void submitMessage(text);
+          if (state.interactionMode === 'review') {
+            addReviewBatchItem(text, getInputAnchor());
+          } else {
+            void submitMessage(text);
+          }
         }
       }
       if (ev.key === 'Escape') {
@@ -5361,6 +5726,21 @@ function bindUi() {
       chatPaneInput.style.height = `${Math.min(chatPaneInput.scrollHeight, 240)}px`;
     });
 
+  }
+
+  const reviewBatchClear = document.getElementById('review-batch-clear');
+  if (reviewBatchClear instanceof HTMLButtonElement) {
+    reviewBatchClear.addEventListener('click', () => {
+      state.reviewBatch = [];
+      renderReviewBatchPanel();
+      showStatus('review batch cleared');
+    });
+  }
+  const reviewBatchSubmit = document.getElementById('review-batch-submit');
+  if (reviewBatchSubmit instanceof HTMLButtonElement) {
+    reviewBatchSubmit.addEventListener('click', () => {
+      void submitReviewBatch();
+    });
   }
 
   // Voice tap on chat history (only when panel is pinned, not just hover-active)
@@ -5517,18 +5897,13 @@ function bindUi() {
         ev.preventDefault();
         return;
       }
+      if (state.inputMode !== 'typing' && state.interactionMode !== 'review') {
+        return;
+      }
       const cx = window.innerWidth / 2 - 130;
       const cy = window.innerHeight / 2;
       cancelConversationListen();
-      showTextInput(cx, cy, null);
-      // Forward the keystroke
-      const input = document.getElementById('floating-input');
-      if (input instanceof HTMLTextAreaElement) {
-        input.value = ev.key;
-        const caret = ev.key.length;
-        input.setSelectionRange(caret, caret);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
+      openComposerAt(cx, cy, null, ev.key);
       ev.preventDefault();
       return;
     }
@@ -5616,7 +5991,7 @@ async function init() {
     setYoloModeLocal(readYoloModePreference(), { persist: false, render: false });
   }
   await showDisclaimerModal().catch(() => {});
-  setTTSSilentMode(readTTSSilentPreference(), { persist: false, pinPanel: false });
+  setTTSSilentMode(state.ttsSilent, { persist: false, pinPanel: false });
   await initHotwordLifecycle();
 
   await fetchProjects();
@@ -5636,7 +6011,7 @@ async function init() {
 async function authGate() {
   const loginView = document.getElementById('view-login');
   const mainView = document.getElementById('view-main');
-  const resp = await fetch('/api/setup');
+  const resp = await fetch(apiURL('setup'));
   const data = await resp.json();
   if (data.authenticated) {
     if (loginView) loginView.style.display = 'none';
@@ -5665,7 +6040,7 @@ async function authGate() {
       const pw = loginPassword.value;
       if (!pw) return;
       try {
-        const r = await fetch('/api/login', {
+        const r = await fetch(apiURL('login'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: pw }),

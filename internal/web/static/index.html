@@ -7,9 +7,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="color-scheme" content="light">
   <title>tabura</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/vendor/highlight-github.min.css">
-  <script src="/static/polyfill.js"></script>
+  <link rel="stylesheet" href="./static/style.css">
+  <link rel="stylesheet" href="./static/vendor/highlight-github.min.css">
+  <script src="./static/polyfill.js"></script>
 </head>
 <body style="background:#fff;color:#000">
   <noscript><p style="text-align:center;margin-top:40vh;font:18px sans-serif">JavaScript is required</p></noscript>
@@ -53,6 +53,17 @@
         <div class="overlay-content"></div>
       </div>
 
+      <aside id="review-batch-panel" class="review-batch-panel" style="display:none" aria-label="Review batch">
+        <div class="review-batch-head">
+          <span>Review Batch</span>
+          <div class="review-batch-actions">
+            <button id="review-batch-clear" type="button" class="edge-btn">Clear</button>
+            <button id="review-batch-submit" type="button" class="edge-btn">Submit</button>
+          </div>
+        </div>
+        <div id="review-batch-list" class="review-batch-list"></div>
+      </aside>
+
       <button id="edge-left-tap" type="button" class="edge-left-tap" aria-label="Toggle file sidebar"></button>
       <button id="edge-right-tap" type="button" class="edge-right-tap" aria-label="Open chat panel"></button>
 
@@ -89,10 +100,10 @@
     </div>
   </div>
 
-  <script src="/static/vendor/mathjax-config.js"></script>
-  <script defer src="/static/vendor/mathjax/tex-svg.js"></script>
-  <script defer src="/static/vendor/highlight.min.js"></script>
-  <script defer src="/static/vendor/highlight-fortran.min.js"></script>
-  <script type="module" src="/static/app.js"></script>
+  <script src="./static/vendor/mathjax-config.js"></script>
+  <script defer src="./static/vendor/mathjax/tex-svg.js"></script>
+  <script defer src="./static/vendor/highlight.min.js"></script>
+  <script defer src="./static/vendor/highlight-fortran.min.js"></script>
+  <script type="module" src="./static/app.js"></script>
 </body>
 </html>

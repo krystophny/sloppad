@@ -33,6 +33,15 @@ func TestRuntimeIncludesSafetyPreferences(t *testing.T) {
 	if got := boolFromAny(payload["disclaimer_ack_required"]); !got {
 		t.Fatalf("disclaimer_ack_required = %v, want true", got)
 	}
+	if got := boolFromAny(payload["silent_mode"]); got {
+		t.Fatalf("silent_mode = %v, want false", got)
+	}
+	if got := strFromAny(payload["input_mode"]); got != "voice" {
+		t.Fatalf("input_mode = %q, want %q", got, "voice")
+	}
+	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
+		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
+	}
 	if got := strFromAny(payload["disclaimer_version"]); got != disclaimerVersionCurrent {
 		t.Fatalf("disclaimer_version = %q, want %q", got, disclaimerVersionCurrent)
 	}
@@ -76,5 +85,35 @@ func TestRuntimeDisclaimerAckClearsRequiredFlag(t *testing.T) {
 	}
 	if got := strFromAny(payload["disclaimer_ack_version"]); got != disclaimerVersionCurrent {
 		t.Fatalf("disclaimer_ack_version = %q, want %q", got, disclaimerVersionCurrent)
+	}
+}
+
+func TestRuntimePreferenceUpdatePersists(t *testing.T) {
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPatch, "/api/runtime/preferences", map[string]any{
+		"silent_mode":      true,
+		"input_mode":       "typing",
+		"startup_behavior": "hub_first",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("preference update status=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	runtimeRR := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/runtime", nil)
+	if runtimeRR.Code != http.StatusOK {
+		t.Fatalf("runtime status=%d body=%s", runtimeRR.Code, runtimeRR.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(runtimeRR.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode runtime response: %v", err)
+	}
+	if got := boolFromAny(payload["silent_mode"]); !got {
+		t.Fatalf("silent_mode = %v, want true", got)
+	}
+	if got := strFromAny(payload["input_mode"]); got != "typing" {
+		t.Fatalf("input_mode = %q, want %q", got, "typing")
+	}
+	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
+		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
 	}
 }

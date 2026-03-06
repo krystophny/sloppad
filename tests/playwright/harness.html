@@ -132,9 +132,9 @@
 
     // Harness log for test assertions
     window.__harnessLog = [];
-    const DEFAULT_CANCEL_RESPONSE = { ok: true, canceled: 3, active_canceled: 1, queued_canceled: 1, delegate_canceled: 1 };
+    const DEFAULT_CANCEL_RESPONSE = { ok: true, canceled: 2, active_canceled: 1, queued_canceled: 1 };
     let cancelResponsesQueue = [];
-    let activityResponse = { ok: true, active_turns: 0, queued_turns: 0, delegate_active: 0 };
+    let activityResponse = { ok: true, active_turns: 0, queued_turns: 0 };
     let messagePostDelayMs = 0;
     let sttTranscribeStatus = 200;
     let sttTranscribePayload = { text: 'hello world' };
@@ -146,7 +146,6 @@
         ok: true,
         active_turns: Number(response?.active_turns || 0),
         queued_turns: Number(response?.queued_turns || 0),
-        delegate_active: Number(response?.delegate_active || 0),
       };
     };
     window.__setMessagePostDelay = (ms) => {
@@ -159,10 +158,31 @@
       sttTranscribeStatus = Number.isFinite(n) ? Math.max(100, Math.min(599, Math.floor(n))) : 200;
     };
     window.__setCancelResponses([]);
-    window.__setActivityResponse({ active_turns: 0, queued_turns: 0, delegate_active: 0 });
+    window.__setActivityResponse({ active_turns: 0, queued_turns: 0 });
     window.__setMessagePostDelay(0);
     window.__setSTTTranscribeResponse({ text: 'hello world' }, 200);
     const harnessParams = new URL(window.location.href).searchParams;
+    const runtimeState = {
+      dev_mode: false,
+      boot_id: 'test',
+      tts_enabled: true,
+      silent_mode: false,
+      input_mode: 'voice',
+      startup_behavior: 'hub_first',
+    };
+    window.__setRuntimeState = (patch) => {
+      const next = patch && typeof patch === 'object' ? patch : {};
+      if (Object.prototype.hasOwnProperty.call(next, 'silent_mode')) {
+        runtimeState.silent_mode = Boolean(next.silent_mode);
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'input_mode')) {
+        runtimeState.input_mode = String(next.input_mode || '').trim().toLowerCase() === 'typing' ? 'typing' : 'voice';
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'startup_behavior')) {
+        runtimeState.startup_behavior = 'hub_first';
+      }
+    };
+    window.__getRuntimeState = () => ({ ...runtimeState });
     let hotwordInitEnabled = harnessParams.get('hotword') !== 'fail';
     const safariRecorderBroken = harnessParams.get('safari-recorder') === 'broken';
     let ttsPlaybackDelayMs = 10;
@@ -364,6 +384,32 @@
           local_session: 'local',
         }), { status: 200 });
       }
+      if (u.includes('/api/runtime/preferences') && opts?.method === 'PATCH') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        if (Object.prototype.hasOwnProperty.call(body, 'silent_mode')) {
+          runtimeState.silent_mode = Boolean(body.silent_mode);
+        }
+        if (typeof body?.input_mode === 'string') {
+          runtimeState.input_mode = String(body.input_mode).trim().toLowerCase() === 'typing' ? 'typing' : 'voice';
+        }
+        if (typeof body?.startup_behavior === 'string') {
+          runtimeState.startup_behavior = 'hub_first';
+        }
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'runtime_preferences',
+          method: opts?.method || 'PATCH',
+          url: u,
+          payload: { ...runtimeState },
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          silent_mode: runtimeState.silent_mode,
+          input_mode: runtimeState.input_mode,
+          startup_behavior: runtimeState.startup_behavior,
+        }), { status: 200 });
+      }
       if (u.includes('/api/projects') && u.includes('/activate')) {
         const activateId = decodeURIComponent(u.split('/api/projects/')[1].split('/activate')[0] || '').trim();
         const project = cloneProject(activateId);
@@ -502,17 +548,7 @@
       if (u.includes('/api/participant/sessions')) {
         return new Response(JSON.stringify({ ok: true, sessions: [] }), { status: 200 });
       }
-      if (u.includes('/api/chat/sessions') && u.includes('/cancel-delegates')) {
-        window.__harnessLog.push({
-          type: 'api_fetch',
-          action: 'cancel-delegates',
-          method: opts?.method || 'GET',
-          url: u,
-          payload: { ok: true, canceled: 0 },
-        });
-        return new Response(JSON.stringify({ ok: true, canceled: 0 }), { status: 200 });
-      }
-      if (u.includes('/api/chat/sessions') && u.includes('/cancel') && !u.includes('/cancel-delegates')) {
+      if (u.includes('/api/chat/sessions') && u.includes('/cancel')) {
         const response = cancelResponsesQueue.length > 0
           ? { ...DEFAULT_CANCEL_RESPONSE, ...cancelResponsesQueue.shift() }
           : { ...DEFAULT_CANCEL_RESPONSE };
@@ -597,7 +633,7 @@
         return new Response(JSON.stringify({ active: 0, queued: 0 }), { status: 200 });
       }
       if (u.includes('/api/runtime')) {
-        return new Response(JSON.stringify({ dev_mode: false, boot_id: 'test', tts_enabled: true }), { status: 200 });
+        return new Response(JSON.stringify({ ...runtimeState }), { status: 200 });
       }
       if (u.includes('/api/canvas/')) {
         return new Response(JSON.stringify({}), { status: 200 });
