@@ -102,10 +102,14 @@ type canvasContext struct {
 }
 
 func buildPromptFromHistory(mode string, messages []store.ChatMessage, canvas *canvasContext) string {
-	return buildPromptFromHistoryForMode(mode, messages, canvas, turnOutputModeVoice, "")
+	return buildPromptFromHistoryForModeWithCompanion(mode, messages, canvas, nil, turnOutputModeVoice, "")
 }
 
 func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, canvas *canvasContext, outputMode string, modelAlias string) string {
+	return buildPromptFromHistoryForModeWithCompanion(mode, messages, canvas, nil, outputMode, modelAlias)
+}
+
+func buildPromptFromHistoryForModeWithCompanion(mode string, messages []store.ChatMessage, canvas *canvasContext, companion *companionPromptContext, outputMode string, modelAlias string) string {
 	isVoiceMode := isVoiceOutputMode(outputMode)
 	const maxHistory = 80
 	if len(messages) > maxHistory {
@@ -135,6 +139,7 @@ func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, ca
 		b.WriteString("You are in plan mode. Focus on analysis, design, and specification before implementation.\n\n")
 	}
 
+	appendCompanionPromptContext(&b, companion)
 	b.WriteString("Conversation transcript:\n")
 	for _, msg := range messages {
 		content := strings.TrimSpace(msg.ContentPlain)
@@ -162,10 +167,14 @@ func buildPromptFromHistoryForMode(mode string, messages []store.ChatMessage, ca
 // buildTurnPrompt constructs a prompt for a resumed thread: only the latest
 // user message plus optional canvas context update.
 func buildTurnPrompt(messages []store.ChatMessage, canvas *canvasContext) string {
-	return buildTurnPromptForMode(messages, canvas, turnOutputModeVoice, "")
+	return buildTurnPromptForModeWithCompanion(messages, canvas, nil, turnOutputModeVoice, "")
 }
 
 func buildTurnPromptForMode(messages []store.ChatMessage, canvas *canvasContext, outputMode string, modelAlias string) string {
+	return buildTurnPromptForModeWithCompanion(messages, canvas, nil, outputMode, modelAlias)
+}
+
+func buildTurnPromptForModeWithCompanion(messages []store.ChatMessage, canvas *canvasContext, companion *companionPromptContext, outputMode string, modelAlias string) string {
 	isVoiceMode := isVoiceOutputMode(outputMode)
 	_ = modelAlias
 	var lastUserMsg string
@@ -188,6 +197,7 @@ func buildTurnPromptForMode(messages []store.ChatMessage, canvas *canvasContext,
 			fmt.Fprintf(&b, "[Active artifact tab: %q (kind: %s)]\n\n", canvas.ArtifactTitle, canvas.ArtifactKind)
 		}
 	}
+	appendCompanionPromptContext(&b, companion)
 	b.WriteString(lastUserMsg)
 	return b.String()
 }

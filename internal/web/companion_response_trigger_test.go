@@ -14,7 +14,13 @@ import (
 )
 
 func newCompanionAppServerClient(t *testing.T, assistantMessage string) *appserver.Client {
+	client, _ := newCompanionAppServerClientWithCapture(t, assistantMessage)
+	return client
+}
+
+func newCompanionAppServerClientWithCapture(t *testing.T, assistantMessage string) (*appserver.Client, <-chan string) {
 	t.Helper()
+	promptCh := make(chan string, 4)
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -47,6 +53,12 @@ func newCompanionAppServerClient(t *testing.T, assistantMessage string) *appserv
 					},
 				})
 			case "turn/start":
+				if prompt := appServerPromptFromRPC(msg); strings.TrimSpace(prompt) != "" {
+					select {
+					case promptCh <- prompt:
+					default:
+					}
+				}
 				_ = conn.WriteJSON(map[string]interface{}{
 					"id": msg["id"],
 					"result": map[string]interface{}{
@@ -81,7 +93,24 @@ func newCompanionAppServerClient(t *testing.T, assistantMessage string) *appserv
 	if err != nil {
 		t.Fatalf("new appserver client: %v", err)
 	}
-	return client
+	return client, promptCh
+}
+
+func appServerPromptFromRPC(msg map[string]interface{}) string {
+	params, _ := msg["params"].(map[string]interface{})
+	if params == nil {
+		return ""
+	}
+	input, _ := params["input"].([]interface{})
+	if len(input) == 0 {
+		return ""
+	}
+	first, _ := input[0].(map[string]interface{})
+	if first == nil {
+		return ""
+	}
+	text, _ := first["text"].(string)
+	return strings.TrimSpace(text)
 }
 
 func waitForAssistantMessage(t *testing.T, app *App, sessionID, want string) {
@@ -94,6 +123,17 @@ func waitForAssistantMessage(t *testing.T, app *App, sessionID, want string) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for assistant message %q", want)
+}
+
+func waitForCapturedPrompt(t *testing.T, promptCh <-chan string) string {
+	t.Helper()
+	select {
+	case prompt := <-promptCh:
+		return prompt
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for captured prompt")
+		return ""
+	}
 }
 
 func TestCompanionResponseTriggerExecutesAssistantTurn(t *testing.T) {
@@ -510,5 +550,119 @@ func TestCompanionResponseTriggerInterruptsPendingTurn(t *testing.T) {
 	}
 	if !foundReplacementTrigger {
 		t.Fatal("expected assistant_triggered event for the replacement segment")
+	}
+}
+
+func TestCompanionResponseTriggerIncludesProjectScopedCompanionContext(t *testing.T) {
+	t.Setenv("TABURA_INTENT_CLASSIFIER_URL", "off")
+	t.Setenv("TABURA_INTENT_LLM_URL", "off")
+	app := newAuthedTestApp(t)
+	client, promptCh := newCompanionAppServerClientWithCapture(t, "Companion reply.")
+	app.appServerClient = client
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	cfg := app.loadCompanionConfig(project)
+	cfg.CompanionEnabled = true
+	cfg.DirectedSpeechGateEnabled = true
+	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
+		t.Fatalf("save companion config: %v", err)
+	}
+
+	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
+	if err != nil {
+		t.Fatalf("add participant session: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(participantSession.ID, 0, "session_started", "{}"); err != nil {
+		t.Fatalf("add participant event: %v", err)
+	}
+	if err := app.store.UpsertParticipantRoomState(
+		participantSession.ID,
+		"Budget review remains blocked on owner confirmation.",
+		`["Acme Cloud","Budget","Alice"]`,
+		`[{"topic":"Budget review"},{"topic":"Owner follow-up"}]`,
+	); err != nil {
+		t.Fatalf("upsert participant room state: %v", err)
+	}
+	for i := 0; i < 10; i++ {
+		if _, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+			SessionID:   participantSession.ID,
+			StartTS:     int64(100 + i),
+			EndTS:       int64(100 + i),
+			CommittedAt: int64(100 + i),
+			Speaker:     "Alice",
+			Text:        strings.Join([]string{"budget-segment", strings.Repeat("detail", 40)}, "-"),
+			Status:      "final",
+		}); err != nil {
+			t.Fatalf("add participant segment %d: %v", i, err)
+		}
+	}
+
+	otherProject, err := app.store.CreateProject("Other Project", "other-project", t.TempDir(), "managed", "", "", false)
+	if err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	otherSession, err := app.store.AddParticipantSession(otherProject.ProjectKey, "{}")
+	if err != nil {
+		t.Fatalf("add other participant session: %v", err)
+	}
+	if err := app.store.UpsertParticipantRoomState(otherSession.ID, "Zeus takeover planning.", `["Zeus","Mallory"]`, `[{"topic":"Zeus"}]`); err != nil {
+		t.Fatalf("upsert other participant room state: %v", err)
+	}
+	if _, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   otherSession.ID,
+		StartTS:     500,
+		EndTS:       500,
+		CommittedAt: 500,
+		Speaker:     "Mallory",
+		Text:        "Zeus takeover planning should stay isolated.",
+		Status:      "final",
+	}); err != nil {
+		t.Fatalf("add other participant segment: %v", err)
+	}
+
+	seg, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   participantSession.ID,
+		StartTS:     200,
+		EndTS:       201,
+		Text:        "Tabura, what changed in the budget review?",
+		CommittedAt: 202,
+		Status:      "final",
+	})
+	if err != nil {
+		t.Fatalf("add participant segment: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, what changed in the budget review?"}`); err != nil {
+		t.Fatalf("add participant committed event: %v", err)
+	}
+
+	app.maybeTriggerCompanionResponse(participantSession.ID, seg)
+
+	chatSession, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("get chat session: %v", err)
+	}
+	waitForAssistantMessage(t, app, chatSession.ID, "Companion reply.")
+
+	prompt := waitForCapturedPrompt(t, promptCh)
+	if !strings.Contains(prompt, "## Companion Context") {
+		t.Fatalf("prompt missing companion context: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Summary: Budget review remains blocked on owner confirmation.") {
+		t.Fatalf("prompt missing summary: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Entities: Acme Cloud, Budget, Alice") {
+		t.Fatalf("prompt missing entities: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Recent topics: Budget review; Owner follow-up") {
+		t.Fatalf("prompt missing recent topics: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Older transcript omitted:") {
+		t.Fatalf("prompt missing transcript compaction marker: %q", prompt)
+	}
+	if strings.Contains(prompt, "Zeus") || strings.Contains(prompt, "Mallory") {
+		t.Fatalf("prompt leaked cross-project context: %q", prompt)
 	}
 }

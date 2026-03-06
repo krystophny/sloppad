@@ -56,11 +56,12 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 	}
 
 	canvasCtx := a.resolveCanvasContext(session.ProjectKey)
+	companionCtx := a.loadCompanionPromptContext(session.ProjectKey)
 	var prompt string
 	if resumed {
-		prompt = buildTurnPromptForMode(messages, canvasCtx, outputMode, profile.Alias)
+		prompt = buildTurnPromptForModeWithCompanion(messages, canvasCtx, companionCtx, outputMode, profile.Alias)
 	} else {
-		prompt = buildPromptFromHistoryForMode(session.Mode, messages, canvasCtx, outputMode, profile.Alias)
+		prompt = buildPromptFromHistoryForModeWithCompanion(session.Mode, messages, canvasCtx, companionCtx, outputMode, profile.Alias)
 		_ = a.store.UpdateChatSessionThread(sessionID, appSess.ThreadID())
 	}
 	if strings.TrimSpace(prompt) == "" {
