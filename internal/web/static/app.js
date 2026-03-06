@@ -125,6 +125,11 @@ const state = {
     dirty: false,
   },
   inkSubmitInFlight: false,
+  companionEnabled: false,
+  companionIdleSurface: 'robot',
+  companionRuntimeState: 'idle',
+  companionRuntimeReason: 'idle',
+  companionProjectKey: '',
 };
 
 export function getState() {
@@ -135,7 +140,16 @@ function isVoiceTurn() {
   return state.lastInputOrigin === 'voice';
 }
 
-window._taburaApp = { getState, acquireMicStream, sttStart, sttSendBlob, sttStop, sttCancel };
+window._taburaApp = {
+  getState,
+  acquireMicStream,
+  sttStart,
+  sttSendBlob,
+  sttStop,
+  sttCancel,
+  refreshCompanionState,
+  syncCompanionIdleSurface,
+};
 
 void ensureVADLoaded();
 
@@ -202,6 +216,17 @@ const VOICE_LIFECYCLE = Object.freeze({
   AWAITING_TURN: 'awaiting_turn',
   ASSISTANT_WORKING: 'assistant_working',
   TTS_PLAYING: 'tts_playing',
+});
+const COMPANION_IDLE_SURFACES = Object.freeze({
+  ROBOT: 'robot',
+  BLACK: 'black',
+});
+const COMPANION_RUNTIME_STATES = Object.freeze({
+  IDLE: 'idle',
+  LISTENING: 'listening',
+  THINKING: 'thinking',
+  TALKING: 'talking',
+  ERROR: 'error',
 });
 let devReloadBootID = '';
 let devReloadTimer = null;
@@ -1340,6 +1365,107 @@ function activeProject() {
   return state.projects.find((project) => project.id === state.activeProjectId) || null;
 }
 
+function activeProjectKey() {
+  return String(activeProject()?.project_key || '').trim();
+}
+
+function normalizeCompanionIdleSurface(raw) {
+  return String(raw || '').trim().toLowerCase() === COMPANION_IDLE_SURFACES.BLACK
+    ? COMPANION_IDLE_SURFACES.BLACK
+    : COMPANION_IDLE_SURFACES.ROBOT;
+}
+
+function normalizeCompanionRuntimeState(raw) {
+  const stateName = String(raw || '').trim().toLowerCase();
+  if (stateName === COMPANION_RUNTIME_STATES.LISTENING) return COMPANION_RUNTIME_STATES.LISTENING;
+  if (stateName === COMPANION_RUNTIME_STATES.THINKING) return COMPANION_RUNTIME_STATES.THINKING;
+  if (stateName === COMPANION_RUNTIME_STATES.TALKING) return COMPANION_RUNTIME_STATES.TALKING;
+  if (stateName === COMPANION_RUNTIME_STATES.ERROR) return COMPANION_RUNTIME_STATES.ERROR;
+  return COMPANION_RUNTIME_STATES.IDLE;
+}
+
+function companionIdleSurfaceEl() {
+  return document.getElementById('companion-idle-surface');
+}
+
+function companionStatusCopy(runtimeState) {
+  switch (normalizeCompanionRuntimeState(runtimeState)) {
+    case COMPANION_RUNTIME_STATES.LISTENING:
+      return { label: 'Listening', detail: 'Ambient capture is live.' };
+    case COMPANION_RUNTIME_STATES.THINKING:
+      return { label: 'Thinking', detail: 'Working through the current request.' };
+    case COMPANION_RUNTIME_STATES.TALKING:
+      return { label: 'Talking', detail: 'Speaking the current response.' };
+    case COMPANION_RUNTIME_STATES.ERROR:
+      return { label: 'Error', detail: 'Companion hit a runtime error.' };
+    default:
+      return { label: 'Idle', detail: 'Ready in the background.' };
+  }
+}
+
+function hasVisibleCanvasArtifact() {
+  const activePane = document.querySelector('#canvas-viewport .canvas-pane.is-active');
+  if (!(activePane instanceof HTMLElement)) return false;
+  return window.getComputedStyle(activePane).display !== 'none';
+}
+
+function shouldShowCompanionIdleSurface() {
+  return Boolean(state.companionEnabled) && !hasVisibleCanvasArtifact() && !isHubActive();
+}
+
+function updateCompanionIdleSurface() {
+  const surface = companionIdleSurfaceEl();
+  if (!(surface instanceof HTMLElement)) return;
+  const visible = shouldShowCompanionIdleSurface();
+  const runtimeState = normalizeCompanionRuntimeState(state.companionRuntimeState);
+  const idleSurface = normalizeCompanionIdleSurface(state.companionIdleSurface);
+  const copy = companionStatusCopy(runtimeState);
+  surface.dataset.state = runtimeState;
+  surface.dataset.surface = idleSurface;
+  surface.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  surface.style.display = visible ? 'block' : 'none';
+  const statusNode = surface.querySelector('.companion-idle-status');
+  if (statusNode) statusNode.textContent = copy.label;
+  const detailNode = surface.querySelector('.companion-idle-detail');
+  if (detailNode) {
+    const runtimeDetail = String(state.companionRuntimeReason || '').trim();
+    detailNode.textContent = runtimeDetail && runtimeState !== COMPANION_RUNTIME_STATES.IDLE
+      ? runtimeDetail.replaceAll('_', ' ')
+      : copy.detail;
+  }
+}
+
+function syncCompanionIdleSurface() {
+  updateAssistantActivityIndicator();
+}
+
+function applyCompanionState(payload = {}) {
+  const config = payload?.config && typeof payload.config === 'object' ? payload.config : {};
+  state.companionEnabled = Boolean(
+    payload?.companion_enabled ?? config?.companion_enabled ?? state.companionEnabled,
+  );
+  state.companionIdleSurface = normalizeCompanionIdleSurface(
+    payload?.idle_surface ?? config?.idle_surface ?? state.companionIdleSurface,
+  );
+  state.companionRuntimeState = normalizeCompanionRuntimeState(
+    payload?.state ?? payload?.runtime?.state ?? state.companionRuntimeState,
+  );
+  state.companionRuntimeReason = String(
+    payload?.reason ?? payload?.runtime?.reason ?? state.companionRuntimeReason ?? '',
+  ).trim();
+  state.companionProjectKey = String(payload?.project_key || activeProjectKey()).trim();
+  updateCompanionIdleSurface();
+}
+
+function resetCompanionState() {
+  state.companionEnabled = false;
+  state.companionIdleSurface = COMPANION_IDLE_SURFACES.ROBOT;
+  state.companionRuntimeState = COMPANION_RUNTIME_STATES.IDLE;
+  state.companionRuntimeReason = 'idle';
+  state.companionProjectKey = '';
+  updateCompanionIdleSurface();
+}
+
 function isHubProject(project) {
   if (!project || typeof project !== 'object') return false;
   const kind = String(project.kind || '').trim().toLowerCase();
@@ -2377,6 +2503,7 @@ function beginConversationVoiceCapture() {
 }
 
 function currentIndicatorMode() {
+  if (shouldShowCompanionIdleSurface()) return '';
   const mode = state.voiceLifecycle;
   if (mode === VOICE_LIFECYCLE.RECORDING) return 'recording';
   if (mode === VOICE_LIFECYCLE.LISTENING) return 'listening';
@@ -2404,6 +2531,7 @@ function updateAssistantActivityIndicator() {
   }
   syncVoiceLifecycle('indicator-update');
   state.hotwordActive = isHotwordActive();
+  updateCompanionIdleSurface();
   const pos = getLastInputPosition();
   const px = Number.isFinite(pos?.x) && pos.x > 0 ? pos.x : Math.floor(window.innerWidth / 2);
   const py = Number.isFinite(pos?.y) && pos.y > 0 ? pos.y : Math.floor(window.innerHeight / 2);
@@ -3802,6 +3930,63 @@ function upsertProject(project) {
   renderEdgeTopModelButtons();
 }
 
+async function refreshCompanionState(projectID = state.activeProjectId) {
+  const project = state.projects.find((item) => item.id === String(projectID || '').trim()) || null;
+  if (!project || isHubProject(project)) {
+    resetCompanionState();
+    return null;
+  }
+  const resp = await fetch(apiURL(`projects/${encodeURIComponent(project.id)}/companion/state`), { cache: 'no-store' });
+  if (!resp.ok) {
+    resetCompanionState();
+    throw new Error(`companion state failed: HTTP ${resp.status}`);
+  }
+  const payload = await resp.json();
+  applyCompanionState(payload);
+  renderEdgeTopModelButtons();
+  updateAssistantActivityIndicator();
+  return payload;
+}
+
+async function updateCompanionConfig(patch) {
+  const project = activeProject();
+  if (!project || !project.id || isHubProject(project)) return null;
+  const resp = await fetch(apiURL(`projects/${encodeURIComponent(project.id)}/companion/config`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch || {}),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  applyCompanionState({
+    project_key: activeProjectKey(),
+    companion_enabled: payload?.companion_enabled,
+    idle_surface: payload?.idle_surface,
+    state: state.companionRuntimeState,
+    reason: state.companionRuntimeReason,
+  });
+  renderEdgeTopModelButtons();
+  updateAssistantActivityIndicator();
+  return payload;
+}
+
+async function toggleCompanionIdleSurfacePreference() {
+  const nextSurface = state.companionIdleSurface === COMPANION_IDLE_SURFACES.BLACK
+    ? COMPANION_IDLE_SURFACES.ROBOT
+    : COMPANION_IDLE_SURFACES.BLACK;
+  try {
+    await updateCompanionConfig({ idle_surface: nextSurface });
+    showStatus(nextSurface === COMPANION_IDLE_SURFACES.BLACK ? 'black mode on' : 'black mode off');
+  } catch (err) {
+    const message = String(err?.message || err || 'idle surface update failed');
+    appendPlainMessage('system', `Idle surface update failed: ${message}`);
+    showStatus(`idle surface failed: ${message}`);
+  }
+}
+
 function resolveInitialProjectID() {
   if (state.startupBehavior === 'hub_first') {
     const hub = hubProject();
@@ -3952,6 +4137,20 @@ function renderEdgeTopModelButtons() {
     toggleTTSSilentMode();
   });
   host.appendChild(silentButton);
+
+  const blackButton = document.createElement('button');
+  blackButton.type = 'button';
+  blackButton.className = 'edge-project-btn edge-model-btn edge-companion-surface-btn';
+  blackButton.textContent = 'black';
+  blackButton.setAttribute('aria-pressed', state.companionIdleSurface === COMPANION_IDLE_SURFACES.BLACK ? 'true' : 'false');
+  if (state.companionIdleSurface === COMPANION_IDLE_SURFACES.BLACK) {
+    blackButton.classList.add('is-active');
+  }
+  blackButton.disabled = !project || hubActive || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  blackButton.addEventListener('click', () => {
+    void toggleCompanionIdleSurfacePreference();
+  });
+  host.appendChild(blackButton);
 
   const inputModes = [
     { id: 'voice', label: 'voice' },
@@ -4465,6 +4664,16 @@ function handleChatEvent(payload) {
   const type = String(payload?.type || '').trim();
   if (!type) return;
 
+  if (type === 'companion_state') {
+    const projectKey = String(payload?.project_key || '').trim();
+    const currentProjectKey = activeProjectKey();
+    if (!projectKey || !currentProjectKey || projectKey === currentProjectKey) {
+      applyCompanionState(payload);
+      updateAssistantActivityIndicator();
+    }
+    return;
+  }
+
   if (type === 'mode_changed') {
     setChatMode(payload.mode || 'chat');
     const message = String(payload.message || '').trim();
@@ -4817,6 +5026,7 @@ async function switchProject(projectID) {
   clearChatHistory();
   clearCanvas();
   clearWelcomeSurface();
+  resetCompanionState();
   state.workspaceOpenFilePath = '';
   state.workspaceStepInFlight = false;
   hideCanvasColumn();
@@ -4834,6 +5044,7 @@ async function switchProject(projectID) {
     await showWelcomeForActiveProject(true);
     await loadChatHistory();
     await refreshAssistantActivity();
+    await refreshCompanionState(project.id).catch(() => {});
     openChatWs();
     showStatus(`ready`);
   } catch (err) {

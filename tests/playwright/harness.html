@@ -32,6 +32,25 @@
         </div>
       </div>
 
+      <section id="companion-idle-surface" class="companion-idle-surface" aria-hidden="true">
+        <div class="companion-idle-shell">
+          <div class="companion-idle-frame">
+            <div class="companion-idle-face" aria-hidden="true">
+              <div class="companion-idle-brow companion-idle-brow-left"></div>
+              <div class="companion-idle-brow companion-idle-brow-right"></div>
+              <div class="companion-idle-eye companion-idle-eye-left"><span class="companion-idle-pupil"></span></div>
+              <div class="companion-idle-eye companion-idle-eye-right"><span class="companion-idle-pupil"></span></div>
+              <div class="companion-idle-mouth"></div>
+            </div>
+            <div class="companion-idle-copy">
+              <div class="companion-idle-kicker">Companion</div>
+              <div class="companion-idle-status" aria-live="polite">Idle</div>
+              <div class="companion-idle-detail">Ready in the background.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div id="indicator" class="indicator" style="display:none">
         <span class="record-dot"></span>
         <span class="stop-square"></span>
@@ -392,6 +411,12 @@
       audio_persistence: 'none',
       capture_source: 'microphone',
     };
+    window.__companionRuntimeState = {
+      state: 'idle',
+      reason: 'idle',
+      project_key: '/tmp/test',
+      updated_at: Math.floor(Date.now() / 1000),
+    };
     window.__setProjectRunStates = (states) => {
       const next = states && typeof states === 'object' ? states : {};
       harnessProjectRunStates = {
@@ -698,6 +723,51 @@
           session: { id: 'psess-harness-001', project_key: '/tmp/test', started_at: 100, ended_at: 0, config_json: '{}' },
           entities: ['Acme'],
           topic_timeline: ['Budget'],
+        }), { status: 200 });
+      }
+      if (u.includes('/api/projects/') && u.includes('/companion/config') && opts?.method === 'PUT') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        window.__participantConfig = {
+          ...window.__participantConfig,
+          companion_enabled: Object.prototype.hasOwnProperty.call(body, 'companion_enabled')
+            ? Boolean(body.companion_enabled)
+            : Boolean(window.__participantConfig.companion_enabled),
+          language: String(body.language || window.__participantConfig.language || 'en'),
+          max_segment_duration_ms: Number(body.max_segment_duration_ms || window.__participantConfig.max_segment_duration_ms || 30000),
+          session_ram_cap_mb: Number(body.session_ram_cap_mb || window.__participantConfig.session_ram_cap_mb || 64),
+          stt_model: String(body.stt_model || window.__participantConfig.stt_model || 'whisper-1'),
+          idle_surface: String(body.idle_surface || window.__participantConfig.idle_surface || 'robot'),
+          audio_persistence: 'none',
+          capture_source: 'microphone',
+        };
+        return new Response(JSON.stringify(window.__participantConfig), { status: 200 });
+      }
+      if (u.includes('/api/projects/') && u.includes('/companion/config')) {
+        return new Response(JSON.stringify(window.__participantConfig), { status: 200 });
+      }
+      if (u.includes('/api/projects/') && u.includes('/companion/state')) {
+        const runtime = window.__companionRuntimeState || {};
+        return new Response(JSON.stringify({
+          ok: true,
+          project_id: activeProjectId,
+          project_key: String(runtime.project_key || '/tmp/test'),
+          state: String(runtime.state || 'idle'),
+          runtime: {
+            state: String(runtime.state || 'idle'),
+            reason: String(runtime.reason || 'idle'),
+            project_key: String(runtime.project_key || '/tmp/test'),
+            updated_at: Number(runtime.updated_at || Math.floor(Date.now() / 1000)),
+          },
+          companion_enabled: Boolean(window.__participantConfig.companion_enabled),
+          idle_surface: String(window.__participantConfig.idle_surface || 'robot'),
+          audio_persistence: 'none',
+          capture_source: 'microphone',
+          active_sessions: Boolean(window.__participantConfig.companion_enabled) ? 1 : 0,
+          active_session_id: Boolean(window.__participantConfig.companion_enabled) ? 'psess-harness-001' : '',
+          directed_speech_gate: { decision: 'disabled', reason: 'harness' },
+          interaction_policy: { decision: 'disabled', reason: 'harness' },
+          config: { ...window.__participantConfig },
         }), { status: 200 });
       }
       if (u.includes('/api/projects')) {

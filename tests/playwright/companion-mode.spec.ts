@@ -11,6 +11,147 @@ async function waitReady(page: Page) {
   }, null, { timeout: 8_000 });
 }
 
+async function injectChatEvent(page: Page, payload: Record<string, unknown>) {
+  await page.evaluate((eventPayload) => {
+    const sessions = (window as any).__mockWsSessions || [];
+    const chatWs = sessions.find((ws: any) => typeof ws.url === 'string' && ws.url.includes('/ws/chat/'));
+    if (chatWs?.injectEvent) {
+      chatWs.injectEvent(eventPayload);
+    }
+  }, payload);
+}
+
+async function setHarnessCompanionState(
+  page: Page,
+  {
+    enabled = true,
+    idleSurface = 'robot',
+    runtimeState = 'idle',
+    reason = '',
+  }: {
+    enabled?: boolean;
+    idleSurface?: 'robot' | 'black';
+    runtimeState?: 'idle' | 'listening' | 'thinking' | 'talking' | 'error';
+    reason?: string;
+  } = {},
+) {
+  await page.evaluate(async (nextState) => {
+    const app = (window as any)._taburaApp;
+    const appState = app?.getState?.();
+    if (appState) {
+      appState.projects = [
+        {
+          id: 'test',
+          name: 'Test',
+          kind: 'managed',
+          project_key: '/tmp/test',
+          root_path: '/tmp',
+          chat_session_id: 'chat-1',
+          canvas_session_id: 'local',
+          chat_mode: 'chat',
+          chat_model: 'spark',
+          chat_model_reasoning_effort: 'low',
+          run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
+        },
+        {
+          id: 'hub',
+          name: 'Hub',
+          kind: 'hub',
+          project_key: '__hub__',
+          root_path: '/tmp/hub',
+          chat_session_id: 'chat-hub',
+          canvas_session_id: 'local',
+          chat_mode: 'chat',
+          chat_model: 'spark',
+          chat_model_reasoning_effort: 'low',
+          run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
+        },
+      ];
+      appState.activeProjectId = 'test';
+      appState.hasArtifact = false;
+      appState.companionEnabled = Boolean(nextState.enabled);
+      appState.companionIdleSurface = String(nextState.idleSurface || 'robot');
+      appState.companionRuntimeState = String(nextState.runtimeState || 'idle');
+      appState.companionRuntimeReason = String(nextState.reason || nextState.runtimeState || 'idle');
+    }
+    document.querySelectorAll('#canvas-viewport .canvas-pane').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+      node.style.display = 'none';
+      node.classList.remove('is-active');
+    });
+    (window as any).__participantConfig = {
+      ...(window as any).__participantConfig,
+      companion_enabled: Boolean(nextState.enabled),
+      idle_surface: String(nextState.idleSurface || 'robot'),
+    };
+    (window as any).__companionRuntimeState = {
+      state: String(nextState.runtimeState || 'idle'),
+      reason: String(nextState.reason || nextState.runtimeState || 'idle'),
+      project_key: '/tmp/test',
+      updated_at: Math.floor(Date.now() / 1000),
+    };
+    const sessions = (window as any).__mockWsSessions || [];
+    const chatWs = sessions.find((ws: any) => typeof ws.url === 'string' && ws.url.includes('/ws/chat/'));
+    if (chatWs?.injectEvent) {
+      chatWs.injectEvent({
+        type: 'companion_state',
+        project_key: '/tmp/test',
+        state: String(nextState.runtimeState || 'idle'),
+        reason: String(nextState.reason || nextState.runtimeState || 'idle'),
+        companion_enabled: Boolean(nextState.enabled),
+        idle_surface: String(nextState.idleSurface || 'robot'),
+      });
+    }
+    if (typeof app?.syncCompanionIdleSurface === 'function') {
+      app.syncCompanionIdleSurface();
+    }
+  }, { enabled, idleSurface, runtimeState, reason });
+}
+
+async function waitForCompanionSurface(page: Page, state: string, surface: string) {
+  await expect.poll(async () => page.evaluate(() => {
+    const node = document.getElementById('companion-idle-surface');
+    if (!(node instanceof HTMLElement)) return null;
+    return {
+      display: window.getComputedStyle(node).display,
+      state: node.dataset.state || '',
+      surface: node.dataset.surface || '',
+    };
+  })).toEqual({
+    display: 'block',
+    state,
+    surface,
+  });
+}
+
+async function switchToProject(page: Page, projectID: string) {
+  await page.evaluate((targetProjectID) => {
+    const buttons = Array.from(document.querySelectorAll('#edge-top-projects .edge-project-btn'));
+    const button = buttons.find((node) => node.textContent?.trim().toLowerCase() === targetProjectID);
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error(`project button not found: ${targetProjectID}`);
+    }
+    button.click();
+  }, projectID);
+  await expect.poll(async () => page.evaluate(() => {
+    const app = (window as any)._taburaApp;
+    return app?.getState?.().activeProjectId || '';
+  })).toBe(projectID);
+}
+
+async function clearCanvas(page: Page) {
+  await page.evaluate(() => {
+    const button = document.getElementById('btn-edge-rasa');
+    if (button instanceof HTMLButtonElement) {
+      button.click();
+    }
+  });
+  await expect.poll(async () => page.evaluate(() => {
+    const app = (window as any)._taburaApp;
+    return Boolean(app?.getState?.().hasArtifact);
+  })).toBe(false);
+}
+
 test('workspace sidebar exposes companion transcript, summary, and references viewer entries', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await waitReady(page);
@@ -30,4 +171,56 @@ test('workspace sidebar exposes companion transcript, summary, and references vi
   await page.getByRole('button', { name: 'Companion References' }).click();
   await expect(page.locator('#canvas-text')).toContainText('Acme');
   await expect(page.locator('#canvas-text')).toContainText('Budget');
+});
+
+test('companion idle surface tracks runtime state and hides behind open artifacts', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await waitReady(page);
+  await switchToProject(page, 'test');
+  await setHarnessCompanionState(page, { enabled: true, idleSurface: 'robot', runtimeState: 'idle' });
+  await clearCanvas(page);
+  await page.evaluate(() => {
+    (window as any)._taburaApp?.syncCompanionIdleSurface?.();
+  });
+
+  await waitForCompanionSurface(page, 'idle', 'robot');
+
+  for (const nextState of ['listening', 'thinking', 'talking', 'error'] as const) {
+    await setHarnessCompanionState(page, {
+      enabled: true,
+      idleSurface: 'robot',
+      runtimeState: nextState,
+      reason: nextState,
+    });
+    await waitForCompanionSurface(page, nextState, 'robot');
+  }
+
+  await page.locator('#edge-left-tap').click();
+  await page.getByRole('button', { name: 'Companion Transcript' }).click();
+  await expect(page.locator('#canvas-text')).toContainText('Harness companion transcript');
+  await expect(page.locator('#companion-idle-surface')).toBeHidden();
+});
+
+test('black mode toggle updates the companion idle surface preference', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await waitReady(page);
+  await switchToProject(page, 'test');
+  await setHarnessCompanionState(page, { enabled: true, idleSurface: 'robot', runtimeState: 'idle' });
+  await clearCanvas(page);
+  await page.evaluate(() => {
+    (window as any)._taburaApp?.syncCompanionIdleSurface?.();
+  });
+
+  const blackButton = page.locator('#edge-top-models .edge-companion-surface-btn');
+  await expect(blackButton).toHaveAttribute('aria-pressed', 'false');
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-companion-surface-btn');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('black button missing');
+    }
+    button.click();
+  });
+
+  await waitForCompanionSurface(page, 'idle', 'black');
+  await expect(blackButton).toHaveAttribute('aria-pressed', 'true');
 });
