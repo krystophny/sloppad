@@ -91,16 +91,17 @@ type App struct {
 
 	upgrader websocket.Upgrader
 
-	mu              sync.Mutex
-	confirmMu       sync.Mutex
-	workerWG        sync.WaitGroup
-	hub             *wsHub
-	turns           *chatTurnTracker
-	companionTurns  *companionPendingTurnTracker
-	tunnels         *tunnelRegistry
-	chatAppSessions map[string]*appserver.Session
-	pendingDanger   map[string]*pendingDangerousAction
-	ghCommandRunner ghCommandRunner
+	mu               sync.Mutex
+	confirmMu        sync.Mutex
+	workerWG         sync.WaitGroup
+	hub              *wsHub
+	turns            *chatTurnTracker
+	companionTurns   *companionPendingTurnTracker
+	companionRuntime *companionRuntimeTracker
+	tunnels          *tunnelRegistry
+	chatAppSessions  map[string]*appserver.Session
+	pendingDanger    map[string]*pendingDangerousAction
+	ghCommandRunner  ghCommandRunner
 
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -262,6 +263,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		hub:                           newWSHub(),
 		turns:                         newChatTurnTracker(),
 		companionTurns:                newCompanionPendingTurnTracker(),
+		companionRuntime:              newCompanionRuntimeTracker(),
 		tunnels:                       newTunnelRegistry(),
 		chatAppSessions:               map[string]*appserver.Session{},
 		pendingDanger:                 map[string]*pendingDangerousAction{},

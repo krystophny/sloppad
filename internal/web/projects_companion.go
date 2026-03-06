@@ -49,6 +49,7 @@ type companionStateResponse struct {
 	ProjectID          string                          `json:"project_id"`
 	ProjectKey         string                          `json:"project_key"`
 	State              string                          `json:"state"`
+	Runtime            companionRuntimeSnapshot        `json:"runtime"`
 	CompanionEnabled   bool                            `json:"companion_enabled"`
 	IdleSurface        string                          `json:"idle_surface"`
 	AudioPersistence   string                          `json:"audio_persistence"`
@@ -320,17 +321,15 @@ func (a *App) handleProjectCompanionState(w http.ResponseWriter, r *http.Request
 	if gateSession == nil {
 		gateSession = latestSession
 	}
-	state := companionRuntimeStateIdle
-	if cfg.CompanionEnabled && activeSessions > 0 {
-		state = companionRuntimeStateListening
-	}
+	runtime := a.currentCompanionRuntimeState(project.ProjectKey, cfg)
 	gate := a.loadCompanionDirectedSpeechGate(cfg, gateSession)
 	policy := a.loadCompanionInteractionPolicy(cfg, gateSession)
 	writeJSON(w, companionStateResponse{
 		OK:                 true,
 		ProjectID:          project.ID,
 		ProjectKey:         project.ProjectKey,
-		State:              state,
+		State:              runtime.State,
+		Runtime:            runtime,
 		CompanionEnabled:   cfg.CompanionEnabled,
 		IdleSurface:        cfg.IdleSurface,
 		AudioPersistence:   cfg.AudioPersistence,
@@ -380,4 +379,9 @@ func (a *App) disableCompanionCapture(projectKey string) {
 		_ = a.store.EndParticipantSession(session.ID)
 		_ = a.store.AddParticipantEvent(session.ID, 0, "session_stopped", `{"reason":"companion_disabled"}`)
 	}
+	a.broadcastCompanionRuntimeState(cleanProjectKey, companionRuntimeSnapshot{
+		State:      companionRuntimeStateIdle,
+		Reason:     "companion_disabled",
+		ProjectKey: cleanProjectKey,
+	})
 }

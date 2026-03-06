@@ -59,6 +59,12 @@ func handleParticipantStart(a *App, conn *chatWSConn, chatSessionID string) {
 
 	_ = a.store.AddParticipantEvent(sess.ID, 0, "session_started", "{}")
 	_ = conn.writeJSON(participantMessage{Type: "participant_started", SessionID: sess.ID})
+	a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+		State:                companionRuntimeStateListening,
+		Reason:               "participant_started",
+		ProjectKey:           projectKey,
+		ParticipantSessionID: sess.ID,
+	})
 	log.Printf("participant session started: %s", sess.ID)
 }
 
@@ -75,6 +81,15 @@ func handleParticipantBinaryChunk(a *App, conn *chatWSConn, data []byte) {
 		zeroizeBytes(conn.participantBuf)
 		conn.participantBuf = nil
 		conn.participantMu.Unlock()
+		if session, err := a.store.GetParticipantSession(sessionID); err == nil {
+			a.broadcastCompanionRuntimeState(session.ProjectKey, companionRuntimeSnapshot{
+				State:                companionRuntimeStateError,
+				Reason:               "participant_chunk_too_large",
+				Error:                "participant chunk exceeds max size",
+				ProjectKey:           session.ProjectKey,
+				ParticipantSessionID: sessionID,
+			})
+		}
 		_ = conn.writeJSON(participantMessage{Type: "participant_error", Error: "participant chunk exceeds max size"})
 		return
 	}
@@ -90,7 +105,22 @@ func handleParticipantBinaryChunk(a *App, conn *chatWSConn, data []byte) {
 func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf []byte) {
 	defer zeroizeBytes(buf)
 
+	participantSession, sessionErr := a.store.GetParticipantSession(sessionID)
+	projectKey := ""
+	if sessionErr == nil {
+		projectKey = participantSession.ProjectKey
+	}
+
 	if a.sttURL == "" {
+		if projectKey != "" {
+			a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+				State:                companionRuntimeStateError,
+				Reason:               "stt_not_configured",
+				Error:                "STT sidecar is not configured",
+				ProjectKey:           projectKey,
+				ParticipantSessionID: sessionID,
+			})
+		}
 		_ = conn.writeJSON(participantMessage{Type: "participant_error", Error: "STT sidecar is not configured"})
 		return
 	}
@@ -101,6 +131,15 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 	normalizedMimeType, normalizedData, normalizeErr := stt.NormalizeForWhisper(mimeType, buf)
 	if normalizeErr != nil {
 		log.Printf("participant normalize error: %v", normalizeErr)
+		if projectKey != "" {
+			a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+				State:                companionRuntimeStateError,
+				Reason:               "participant_normalize_failed",
+				Error:                fmt.Sprintf("audio normalization failed: %v", normalizeErr),
+				ProjectKey:           projectKey,
+				ParticipantSessionID: sessionID,
+			})
+		}
 		writeParticipantErrorIfActive(conn, sessionID, fmt.Sprintf("audio normalization failed: %v", normalizeErr))
 		return
 	}
@@ -112,6 +151,15 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 			return
 		}
 		log.Printf("participant transcribe error: %v", err)
+		if projectKey != "" {
+			a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+				State:                companionRuntimeStateError,
+				Reason:               "participant_transcribe_failed",
+				Error:                fmt.Sprintf("transcription failed: %v", err),
+				ProjectKey:           projectKey,
+				ParticipantSessionID: sessionID,
+			})
+		}
 		writeParticipantErrorIfActive(conn, sessionID, fmt.Sprintf("transcription failed: %v", err))
 		return
 	}
@@ -137,11 +185,45 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 			return
 		}
 		log.Printf("participant store segment error: %v", err)
+		if projectKey != "" {
+			a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+				State:                companionRuntimeStateError,
+				Reason:               "participant_store_failed",
+				Error:                fmt.Sprintf("failed to store transcript segment: %v", err),
+				ProjectKey:           projectKey,
+				ParticipantSessionID: sessionID,
+			})
+		}
 		writeParticipantErrorIfActive(conn, sessionID, fmt.Sprintf("failed to store transcript segment: %v", err))
 		return
 	}
 
 	_ = a.store.AddParticipantEvent(sessionID, seg.ID, "segment_committed", fmt.Sprintf(`{"text":%q}`, text))
+	if projectKey != "" {
+		a.broadcastCompanionTranscriptEvent(projectKey, map[string]interface{}{
+			"type":                   companionEventTranscriptPartial,
+			"participant_session_id": sessionID,
+			"participant_segment_id": seg.ID,
+			"text":                   text,
+			"status":                 "partial",
+			"latency_ms":             latencyMS,
+		})
+		a.broadcastCompanionTranscriptEvent(projectKey, map[string]interface{}{
+			"type":                   companionEventTranscriptFinal,
+			"participant_session_id": sessionID,
+			"participant_segment_id": seg.ID,
+			"text":                   text,
+			"status":                 seg.Status,
+			"latency_ms":             latencyMS,
+		})
+		a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+			State:                companionRuntimeStateListening,
+			Reason:               "transcript_finalized",
+			ProjectKey:           projectKey,
+			ParticipantSessionID: sessionID,
+			ParticipantSegmentID: seg.ID,
+		})
+	}
 	a.maybeTriggerCompanionResponse(sessionID, seg)
 
 	_ = conn.writeJSON(participantMessage{
@@ -215,6 +297,13 @@ func (a *App) maybeTriggerCompanionResponse(participantSessionID string, seg sto
 	default:
 		return
 	}
+	a.broadcastCompanionRuntimeState(session.ProjectKey, companionRuntimeSnapshot{
+		State:                companionRuntimeStateThinking,
+		Reason:               policy.Reason,
+		ProjectKey:           session.ProjectKey,
+		ParticipantSessionID: participantSessionID,
+		ParticipantSegmentID: seg.ID,
+	})
 	text := strings.TrimSpace(seg.Text)
 	if text == "" {
 		return
@@ -285,8 +374,19 @@ func releaseParticipantSession(a *App, conn *chatWSConn) (string, bool) {
 
 	zeroizeBytes(remainingBuf)
 
+	projectKey := ""
+	if session, err := a.store.GetParticipantSession(sessionID); err == nil {
+		projectKey = session.ProjectKey
+	}
 	_ = a.store.EndParticipantSession(sessionID)
 	_ = a.store.AddParticipantEvent(sessionID, 0, "session_stopped", "{}")
+	if projectKey != "" {
+		cfg := defaultCompanionConfig()
+		if project, err := a.store.GetProjectByProjectKey(projectKey); err == nil {
+			cfg = a.loadCompanionConfig(project)
+		}
+		a.settleCompanionRuntimeState(projectKey, cfg, "participant_stopped")
+	}
 	return sessionID, true
 }
 

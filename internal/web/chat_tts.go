@@ -18,19 +18,54 @@ const (
 )
 
 func (a *App) handleTTSSpeak(sessionID string, conn *chatWSConn, seq int64, text, lang string) {
+	projectKey := ""
+	if session, err := a.store.GetChatSession(sessionID); err == nil {
+		projectKey = session.ProjectKey
+		if strings.TrimSpace(projectKey) != "" {
+			a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+				State:      companionRuntimeStateTalking,
+				Reason:     "tts_started",
+				ProjectKey: projectKey,
+				OutputMode: turnOutputModeVoice,
+			})
+		}
+	}
 	wavData, clientErr := a.synthesizeTTSAudio(sessionID, seq, text, lang)
 	ready := conn.completeTTSSeq(seq, wavData, clientErr)
 	for _, result := range ready {
 		if result.err != "" {
 			log.Printf("tts emit error: session=%s seq=%d err=%s", sessionID, result.seq, result.err)
+			if projectKey != "" {
+				a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+					State:      companionRuntimeStateError,
+					Reason:     "tts_failed",
+					Error:      result.err,
+					ProjectKey: projectKey,
+					OutputMode: turnOutputModeVoice,
+				})
+			}
 			_ = conn.writeJSON(map[string]string{"type": "tts_error", "error": result.err})
 			continue
 		}
 		if err := conn.writeBinary(result.audio); err != nil {
 			log.Printf("tts websocket write error: session=%s seq=%d bytes=%d err=%v", sessionID, result.seq, len(result.audio), err)
+			if projectKey != "" {
+				a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+					State:      companionRuntimeStateError,
+					Reason:     "tts_delivery_failed",
+					Error:      err.Error(),
+					ProjectKey: projectKey,
+					OutputMode: turnOutputModeVoice,
+				})
+			}
 			continue
 		}
 		log.Printf("tts delivered: session=%s seq=%d bytes=%d", sessionID, result.seq, len(result.audio))
+		if projectKey != "" {
+			if project, err := a.store.GetProjectByProjectKey(projectKey); err == nil {
+				a.settleCompanionRuntimeState(projectKey, a.loadCompanionConfig(project), "tts_completed")
+			}
+		}
 	}
 }
 

@@ -74,6 +74,13 @@ func (t *companionPendingTurnTracker) clear(chatSessionID string) (companionPend
 	return pending, true
 }
 
+func (t *companionPendingTurnTracker) get(chatSessionID string) (companionPendingTurn, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	pending, ok := t.pending[strings.TrimSpace(chatSessionID)]
+	return pending, ok
+}
+
 func (a *App) loadCompanionInteractionPolicy(cfg companionConfig, session *store.ParticipantSession) companionInteractionPolicyState {
 	if !cfg.CompanionEnabled || !cfg.DirectedSpeechGateEnabled {
 		return evaluateCompanionInteractionPolicy(cfg, session, nil, nil)
@@ -267,6 +274,28 @@ func (a *App) finishCompanionPendingTurn(chatSessionID, eventType string) {
 	}
 	payload := fmt.Sprintf(`{"chat_session_id":%q}`, strings.TrimSpace(chatSessionID))
 	_ = a.store.AddParticipantEvent(pending.participantSessionID, pending.segmentID, strings.TrimSpace(eventType), payload)
+	session, err := a.store.GetParticipantSession(pending.participantSessionID)
+	if err != nil {
+		return
+	}
+	project, err := a.store.GetProjectByProjectKey(session.ProjectKey)
+	if err != nil {
+		return
+	}
+	switch strings.TrimSpace(eventType) {
+	case "assistant_turn_cancelled":
+		a.settleCompanionRuntimeState(session.ProjectKey, a.loadCompanionConfig(project), "assistant_turn_cancelled")
+	case "assistant_turn_failed":
+		a.broadcastCompanionRuntimeState(session.ProjectKey, companionRuntimeSnapshot{
+			State:                companionRuntimeStateError,
+			Reason:               "assistant_turn_failed",
+			ProjectKey:           session.ProjectKey,
+			ParticipantSessionID: pending.participantSessionID,
+			ParticipantSegmentID: pending.segmentID,
+		})
+	case "assistant_turn_completed":
+		a.settleCompanionRuntimeState(session.ProjectKey, a.loadCompanionConfig(project), "assistant_turn_completed")
+	}
 }
 
 func (a *App) interruptCompanionPendingTurn(chatSessionID, participantSessionID string, segmentID int64, activeCanceled, queuedCanceled int) {
@@ -288,4 +317,13 @@ func (a *App) interruptCompanionPendingTurn(chatSessionID, participantSessionID 
 	}
 	payload := fmt.Sprintf(`{"chat_session_id":%q,"active_canceled":%d,"queued_canceled":%d}`, strings.TrimSpace(chatSessionID), activeCanceled, queuedCanceled)
 	_ = a.store.AddParticipantEvent(participantSessionID, segmentID, "assistant_interrupted", payload)
+	session, err := a.store.GetParticipantSession(participantSessionID)
+	if err != nil {
+		return
+	}
+	project, err := a.store.GetProjectByProjectKey(session.ProjectKey)
+	if err != nil {
+		return
+	}
+	a.settleCompanionRuntimeState(session.ProjectKey, a.loadCompanionConfig(project), "assistant_interrupted")
 }

@@ -155,6 +155,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
 			}
+			a.markCompanionThinking(sessionID, session.ProjectKey, latestTurnID, outputMode, "assistant_turn_started")
 		case "assistant_message":
 			latestMessage = ev.Message
 			latestTurnID = ev.TurnID
@@ -411,6 +412,7 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 			if strings.TrimSpace(ev.TurnID) != "" {
 				latestTurnID = ev.TurnID
 			}
+			a.markCompanionThinking(sessionID, session.ProjectKey, latestTurnID, outputMode, "assistant_turn_started")
 		case "assistant_message":
 			latestMessage = ev.Message
 			latestTurnID = ev.TurnID
@@ -586,6 +588,19 @@ func (a *App) finalizeAssistantResponse(
 	}
 	a.finishCompanionPendingTurn(sessionID, "assistant_turn_completed")
 	a.broadcastChatEvent(sessionID, payload)
+	if isVoiceOutputMode(outputMode) && strings.TrimSpace(chatPlain) != "" {
+		a.broadcastCompanionRuntimeState(projectKey, companionRuntimeSnapshot{
+			State:      companionRuntimeStateTalking,
+			Reason:     "assistant_output_ready",
+			ProjectKey: projectKey,
+			TurnID:     tid,
+			OutputMode: outputMode,
+		})
+	} else {
+		if project, err := a.store.GetProjectByProjectKey(projectKey); err == nil {
+			a.settleCompanionRuntimeState(projectKey, a.loadCompanionConfig(project), "assistant_turn_completed")
+		}
+	}
 	return chatMarkdown
 }
 
