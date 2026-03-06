@@ -226,6 +226,9 @@ func TestLLMLatency(t *testing.T) {
 func TestSTTHealth(t *testing.T) {
 	resp, err := httpGetJSON(sttURL + "/healthz")
 	if err != nil {
+		resp, err = httpGetJSON(sttURL + "/health")
+	}
+	if err != nil {
 		t.Fatalf("STT health failed: %v", err)
 	}
 	status, _ := resp["status"].(string)

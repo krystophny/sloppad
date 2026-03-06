@@ -89,7 +89,7 @@ Tabura runs as one Go runtime plus six local services:
 1. `tabura-web.service` (`tabura server`)
 2. `tabura-codex-app-server.service` (`codex app-server`)
 3. `tabura-piper-tts.service` (Piper `/v1/audio/speech`)
-4. `tabura-stt.service` (voxtype `/v1/audio/transcriptions`)
+4. `tabura-stt.service` (Voxtral-first local STT on `/v1/audio/transcriptions`, with voxtype fallback)
 5. `tabura-intent.service` (local intent classifier at `127.0.0.1:8425/classify`)
 6. `tabura-llm.service` (Qwen3.5 9B local coordinator at `127.0.0.1:8426/v1/chat/completions`)
 
@@ -107,7 +107,8 @@ Why Piper remains an HTTP sidecar:
 - Canvas websocket relay source: `ws://127.0.0.1:9420/ws/canvas`
 - Codex app-server websocket: `ws://127.0.0.1:8787`
 - Piper TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
-- Voxtype STT endpoint: `http://127.0.0.1:8427/v1/audio/transcriptions`
+- STT endpoint: `http://127.0.0.1:8427/v1/audio/transcriptions`
+- Default STT provider: `TABURA_STT_PROVIDER=auto` (prefers local Voxtral via vLLM when available, otherwise falls back to voxtype)
 - Intent classifier endpoint: `http://127.0.0.1:8425/classify` (`TABURA_INTENT_CLASSIFIER_URL`, set `off` to disable)
 - Intent LLM fallback endpoint: `http://127.0.0.1:8426/v1/chat/completions` (`TABURA_INTENT_LLM_URL`, set `off` to disable)
 - Intent/delegator request model id: `TABURA_INTENT_LLM_MODEL` (default `local`)
@@ -122,9 +123,15 @@ Security model:
 - MCP routes are intentionally not exposed on the web listener.
 - By default, non-loopback MCP bind is rejected unless `--unsafe-public-mcp` is explicitly set.
 
-## Temporary Voxtype Branch Pin
+## STT Runtime Notes
 
-Until upstream release catches up, Tabura docs and service integration assume:
+Tabura currently keeps the web/server-side STT contract OpenAI-compatible and selects the local backend at service start:
+
+- `TABURA_STT_PROVIDER=auto`: prefer local Voxtral via `vllm` when available, else run voxtype
+- `TABURA_STT_PROVIDER=voxtral`: require local Voxtral runtime
+- `TABURA_STT_PROVIDER=voxtype`: force voxtype fallback
+
+The current fallback service still assumes:
 
 - Repo: `https://github.com/peteonrails/voxtype`
 - Branch: `feature/single-daemon-openai-stt-api`

@@ -11,6 +11,12 @@ fail() { printf 'FATAL: %s\n' "$1" >&2; exit 1; }
 
 printf 'Checking services...\n'
 
+check_stt_health() {
+  curl -fsS --max-time 3 http://127.0.0.1:8427/healthz >/dev/null 2>&1 && return 0
+  curl -fsS --max-time 3 http://127.0.0.1:8427/health >/dev/null 2>&1 && return 0
+  return 1
+}
+
 curl -fsS --max-time 3 http://127.0.0.1:8420/api/setup >/dev/null \
   || fail 'Tabura web server not running on :8420'
 
@@ -20,8 +26,8 @@ curl -fsS --max-time 3 -o /dev/null -w '' \
   -d '{"input":"ok","voice":"en","response_format":"wav"}' \
   || fail 'Piper TTS not running on :8424'
 
-curl -fsS --max-time 3 http://127.0.0.1:8427/healthz >/dev/null \
-  || fail 'voxtype STT not running on :8427'
+check_stt_health \
+  || fail 'STT sidecar not running on :8427'
 
 command -v ffmpeg >/dev/null 2>&1 \
   || fail 'ffmpeg not installed'

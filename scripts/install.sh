@@ -558,10 +558,12 @@ install_voxtype_stt() {
         return
     fi
     cat <<NOTICE
-=== Voxtype STT (MIT, runs as HTTP sidecar) ===
-voxtype provides local OpenAI-compatible speech-to-text on port 8427.
-License: MIT (isolated sidecar process, does not affect Tabura MIT license)
-Model: large-v3-turbo (~1.5 GB download from Hugging Face via voxtype)
+=== Local STT Sidecar ===
+Tabura defaults to TABURA_STT_PROVIDER=auto:
+- prefer local Voxtral when a local vLLM + mistral_common runtime is available
+- otherwise fall back to voxtype on port 8427
+License boundary remains sidecar-based.
+Fallback model download below uses voxtype large-v3-turbo (~1.5 GB).
 NOTICE
     if ! confirm_default_yes "Install voxtype STT sidecar?"; then
         log "skipping voxtype STT setup"
