@@ -323,6 +323,29 @@ test('Dialogue with hotword active shows pause indicator', async ({ page }) => {
   }), { timeout: 4_000 }).toBe(true);
 });
 
+test('meeting mode hotword still starts direct recording', async ({ page }) => {
+  await waitReady(page);
+  await switchToTestProject(page);
+  await waitForEdgeButtons(page);
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-live-meeting-btn');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('meeting button not found');
+    }
+    button.click();
+  });
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+  await waitForHotwordStart(page);
+  await clearLog(page);
+
+  await triggerHotword(page);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some((entry) => entry.type === 'recorder' && entry.action === 'start');
+  }, { timeout: 5_000 }).toBe(true);
+});
+
 test('follow-up timeout returns to pause indicator', async ({ page }) => {
   await waitReady(page);
   await setConversationListenWindowMs(page, 500);

@@ -152,6 +152,31 @@ test('Live panel swaps Dialogue/Meeting choices for active status and Stop', asy
   await expect(page.locator('#edge-top-models .edge-live-meeting-btn')).toBeVisible();
 });
 
+test('Meeting entry shows active status and returns to choices on Stop', async ({ page }) => {
+  await switchToTestProject(page);
+  await waitForEdgeButtons(page);
+  const meetingButton = page.locator('#edge-top-models .edge-live-meeting-btn');
+  await expect(meetingButton).toBeEnabled();
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-live-meeting-btn');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('meeting button not found');
+    }
+    button.click();
+  });
+
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-live-stop-btn');
+    if (button instanceof HTMLButtonElement) {
+      button.click();
+    }
+  });
+  await expect(page.locator('#edge-top-models .edge-live-dialogue-btn')).toBeVisible();
+  await expect(page.locator('#edge-top-models .edge-live-meeting-btn')).toBeVisible();
+});
+
 test('Dialogue shows listening indicator after TTS playback completes', async ({ page }) => {
   await setConversationListenWindowMs(page, 1_200);
   await setConversationMode(page, true);
