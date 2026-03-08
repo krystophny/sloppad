@@ -107,6 +107,16 @@ type ExternalBinding struct {
 	LastSyncedAt    string  `json:"last_synced_at"`
 }
 
+type ExternalContainerMapping struct {
+	ID            int64   `json:"id"`
+	Provider      string  `json:"provider"`
+	ContainerType string  `json:"container_type"`
+	ContainerRef  string  `json:"container_ref"`
+	WorkspaceID   *int64  `json:"workspace_id,omitempty"`
+	ProjectID     *string `json:"project_id,omitempty"`
+	Sphere        *string `json:"sphere,omitempty"`
+}
+
 type Actor struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`

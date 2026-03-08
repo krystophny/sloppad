@@ -66,6 +66,17 @@ CREATE TABLE IF NOT EXISTS external_accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_accounts_identity
   ON external_accounts(lower(sphere), lower(provider), lower(label));
+CREATE TABLE IF NOT EXISTS external_container_mappings (
+  id INTEGER PRIMARY KEY,
+  provider TEXT NOT NULL,
+  container_type TEXT NOT NULL,
+  container_ref TEXT NOT NULL,
+  workspace_id INTEGER REFERENCES workspaces(id) ON DELETE SET NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  sphere TEXT CHECK (sphere IN ('work', 'private'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_container_mappings_identity
+  ON external_container_mappings(lower(provider), lower(container_type), lower(container_ref));
 CREATE TABLE IF NOT EXISTS external_bindings (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL REFERENCES external_accounts(id) ON DELETE CASCADE,
