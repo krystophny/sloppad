@@ -74,6 +74,10 @@ func New(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
@@ -259,7 +263,10 @@ CREATE TABLE IF NOT EXISTS participant_room_state (
 	if err := s.migrateProjectColumns(); err != nil {
 		return err
 	}
-	return s.migrateParticipantColumns()
+	if err := s.migrateParticipantColumns(); err != nil {
+		return err
+	}
+	return s.migrateDomainTables()
 }
 
 func (s *Store) migrateProjectColumns() error {

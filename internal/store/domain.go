@@ -1,0 +1,57 @@
+package store
+
+type ArtifactKind string
+
+const (
+	ArtifactKindEmail       ArtifactKind = "email"
+	ArtifactKindDocument    ArtifactKind = "document"
+	ArtifactKindPDF         ArtifactKind = "pdf"
+	ArtifactKindMarkdown    ArtifactKind = "markdown"
+	ArtifactKindImage       ArtifactKind = "image"
+	ArtifactKindGitHubIssue ArtifactKind = "github_issue"
+	ArtifactKindGitHubPR    ArtifactKind = "github_pr"
+	ArtifactKindTranscript  ArtifactKind = "transcript"
+	ArtifactKindPlanNote    ArtifactKind = "plan_note"
+)
+
+type Workspace struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	DirPath   string `json:"dir_path"`
+	IsActive  bool   `json:"is_active"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type Actor struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	CreatedAt string `json:"created_at"`
+}
+
+type Artifact struct {
+	ID        int64        `json:"id"`
+	Kind      ArtifactKind `json:"kind"`
+	RefPath   *string      `json:"ref_path,omitempty"`
+	RefURL    *string      `json:"ref_url,omitempty"`
+	Title     *string      `json:"title,omitempty"`
+	MetaJSON  *string      `json:"meta_json,omitempty"`
+	CreatedAt string       `json:"created_at"`
+	UpdatedAt string       `json:"updated_at"`
+}
+
+type Item struct {
+	ID           int64   `json:"id"`
+	Title        string  `json:"title"`
+	State        string  `json:"state"`
+	WorkspaceID  *int64  `json:"workspace_id,omitempty"`
+	ArtifactID   *int64  `json:"artifact_id,omitempty"`
+	ActorID      *int64  `json:"actor_id,omitempty"`
+	VisibleAfter *string `json:"visible_after,omitempty"`
+	FollowUpAt   *string `json:"follow_up_at,omitempty"`
+	Source       *string `json:"source,omitempty"`
+	SourceRef    *string `json:"source_ref,omitempty"`
+	CreatedAt    string  `json:"created_at"`
+	UpdatedAt    string  `json:"updated_at"`
+}
