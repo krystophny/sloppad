@@ -10,8 +10,7 @@ async function clearLog(page: Page) {
   await page.evaluate(() => { (window as any).__harnessLog.splice(0); });
 }
 
-async function waitReady(page: Page) {
-  await page.goto('/tests/playwright/harness.html');
+async function waitWsReady(page: Page) {
   await page.waitForFunction(() => {
     const app = (window as any)._taburaApp;
     if (typeof app?.getState !== 'function') return false;
@@ -19,6 +18,11 @@ async function waitReady(page: Page) {
     return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
   }, null, { timeout: 5_000 });
   await page.waitForTimeout(200);
+}
+
+async function waitReady(page: Page) {
+  await page.goto('/tests/playwright/harness.html');
+  await waitWsReady(page);
 }
 
 async function injectCanvasModuleRef(page: Page) {
@@ -132,6 +136,43 @@ async function dispatchTouchLongPress(page: Page, x: number, y: number, holdMs =
     target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [endTouch], bubbles: true, cancelable: true }));
   }, { x, y, holdMs });
 }
+
+
+test.describe('runtime refresh', () => {
+  test.beforeEach(async ({ page }) => {
+    await waitReady(page);
+  });
+
+  test('reloads on boot changes and restores the active project context', async ({ page }) => {
+    await page.evaluate(() => {
+      document.getElementById('edge-right')?.classList.add('edge-pinned');
+      const buttons = Array.from(document.querySelectorAll('#edge-top-projects .edge-project-btn'));
+      const target = buttons.find((button) => String(button.textContent || '').trim() === 'Test');
+      if (target instanceof HTMLButtonElement) target.click();
+    });
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any)._taburaApp?.getState?.().activeProjectId || '');
+    }, { timeout: 5_000 }).toBe('test');
+
+    await page.evaluate(() => {
+      (window as any).__setRuntimeState({ boot_id: 'boot-2' });
+    });
+
+    await page.waitForURL(/__tabura_reload=/, { timeout: 5_000 });
+    await waitWsReady(page);
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any)._taburaApp?.getState?.().activeProjectId || '');
+    }, { timeout: 5_000 }).toBe('test');
+    await expect(page.locator('#status-label')).toHaveText('Bug fix applied.');
+
+    const edgeRightPinned = await page.evaluate(() => {
+      return document.getElementById('edge-right')?.classList.contains('edge-pinned') === true;
+    });
+    expect(edgeRightPinned).toBe(true);
+  });
+});
 
 
 // =============================================================================

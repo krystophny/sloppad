@@ -198,6 +198,12 @@
     };
     window.__setRuntimeState = (patch) => {
       const next = patch && typeof patch === 'object' ? patch : {};
+      if (Object.prototype.hasOwnProperty.call(next, 'boot_id')) {
+        runtimeState.boot_id = String(next.boot_id || '').trim() || runtimeState.boot_id;
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'dev_mode')) {
+        runtimeState.dev_mode = Boolean(next.dev_mode);
+      }
       if (Object.prototype.hasOwnProperty.call(next, 'silent_mode')) {
         runtimeState.silent_mode = Boolean(next.silent_mode);
       }

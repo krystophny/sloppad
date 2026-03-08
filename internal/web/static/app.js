@@ -256,10 +256,12 @@ const COMPANION_RUNTIME_STATES = Object.freeze({
   TALKING: 'talking',
   ERROR: 'error',
 });
-let devReloadBootID = '';
-let devReloadTimer = null;
-let devReloadInFlight = false;
-let devReloadRequested = false;
+let runtimeReloadBootID = '';
+let runtimeReloadTimer = null;
+let runtimeReloadInFlight = false;
+let runtimeReloadRequested = false;
+let pendingRuntimeReloadContext = null;
+let pendingRuntimeReloadStatus = '';
 let assistantActivityTimer = null;
 let assistantActivityInFlight = false;
 let projectRunStatesInFlight = false;
@@ -269,6 +271,7 @@ let suppressClickUntil = 0;
 
 const ACTIVE_PROJECT_STORAGE_KEY = 'tabura.activeProjectId';
 const LAST_VIEW_STORAGE_KEY = 'tabura.lastView';
+const RUNTIME_RELOAD_CONTEXT_STORAGE_KEY = 'tabura.runtimeReloadContext';
 const PROJECT_CHAT_MODEL_ALIASES = ['codex', 'gpt', 'spark'];
 const PROJECT_CHAT_MODEL_REASONING_EFFORTS = {
   codex: ['low', 'medium', 'high', 'xhigh'],
@@ -1104,7 +1107,70 @@ function microphoneUnavailableMessage() {
   return 'Microphone unavailable. Check browser microphone permissions and audio input availability.';
 }
 
-function forceUiHardReload() {
+function persistRuntimeReloadContext(reason = '') {
+  const edgeTop = document.getElementById('edge-top');
+  const edgeRight = document.getElementById('edge-right');
+  const chatHistory = document.getElementById('chat-history');
+  const context = {
+    reason: String(reason || '').trim().toLowerCase(),
+    activeProjectId: String(state.activeProjectId || '').trim(),
+    edgeTopPinned: edgeTop?.classList.contains('edge-pinned') === true,
+    edgeRightPinned: edgeRight?.classList.contains('edge-pinned') === true,
+    chatScrollTop: chatHistory instanceof HTMLElement ? chatHistory.scrollTop : 0,
+    windowScrollX: Number.isFinite(window.scrollX) ? window.scrollX : 0,
+    windowScrollY: Number.isFinite(window.scrollY) ? window.scrollY : 0,
+    capturedAt: Date.now(),
+  };
+  try {
+    window.sessionStorage.setItem(RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+  } catch (_) {}
+}
+
+function consumeRuntimeReloadContext() {
+  try {
+    const raw = window.sessionStorage.getItem(RUNTIME_RELOAD_CONTEXT_STORAGE_KEY);
+    if (!raw) return null;
+    window.sessionStorage.removeItem(RUNTIME_RELOAD_CONTEXT_STORAGE_KEY);
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function restoreRuntimeReloadContext() {
+  const context = pendingRuntimeReloadContext;
+  pendingRuntimeReloadContext = null;
+  if (!context || typeof context !== 'object') return;
+  const edgeTop = document.getElementById('edge-top');
+  if (edgeTop instanceof HTMLElement) {
+    edgeTop.classList.toggle('edge-pinned', context.edgeTopPinned === true);
+  }
+  const edgeRight = document.getElementById('edge-right');
+  if (edgeRight instanceof HTMLElement) {
+    edgeRight.classList.toggle('edge-pinned', context.edgeRightPinned === true);
+  }
+  const chatHistory = document.getElementById('chat-history');
+  if (chatHistory instanceof HTMLElement) {
+    const top = Number(context.chatScrollTop);
+    chatHistory.scrollTop = Number.isFinite(top) ? top : 0;
+  }
+  const scrollX = Number(context.windowScrollX);
+  const scrollY = Number(context.windowScrollY);
+  if (Number.isFinite(scrollX) || Number.isFinite(scrollY)) {
+    window.scrollTo(
+      Number.isFinite(scrollX) ? scrollX : 0,
+      Number.isFinite(scrollY) ? scrollY : 0,
+    );
+  }
+  if (String(context.reason || '').trim().toLowerCase() === 'deployment') {
+    pendingRuntimeReloadStatus = 'Bug fix applied.';
+    showStatus(pendingRuntimeReloadStatus);
+  }
+}
+
+function forceUiHardReload(reason = 'deployment') {
+  persistRuntimeReloadContext(reason);
   const url = new URL(window.location.href);
   url.searchParams.set('__tabura_reload', Date.now().toString(36));
   window.location.replace(url.toString());
@@ -1268,37 +1334,36 @@ function showDisclaimerModal() {
   });
 }
 
-async function pollRuntimeForDevReload() {
-  if (devReloadInFlight || devReloadRequested) return;
-  devReloadInFlight = true;
+async function pollRuntimeForRuntimeReload() {
+  if (runtimeReloadInFlight || runtimeReloadRequested) return;
+  runtimeReloadInFlight = true;
   try {
     const runtime = await fetchRuntimeMeta();
-    const isDevMode = Boolean(runtime?.dev_mode);
     const bootID = String(runtime?.boot_id || '').trim();
-    if (!isDevMode) return;
     if (!bootID) return;
-    if (!devReloadBootID) {
-      devReloadBootID = bootID;
+    if (!runtimeReloadBootID) {
+      runtimeReloadBootID = bootID;
       return;
     }
-    if (devReloadBootID !== bootID) {
-      devReloadRequested = true;
-      showStatus('UI changed; reloading...');
-      forceUiHardReload();
+    if (runtimeReloadBootID !== bootID) {
+      runtimeReloadBootID = bootID;
+      runtimeReloadRequested = true;
+      showStatus('Bug fix applied, refreshing...');
+      forceUiHardReload('deployment');
     }
   } catch (_) {
     // Ignore transient runtime probe errors during service restarts.
   } finally {
-    devReloadInFlight = false;
+    runtimeReloadInFlight = false;
   }
 }
 
-function startDevReloadWatcher() {
-  if (devReloadTimer !== null) return;
+function startRuntimeReloadWatcher() {
+  if (runtimeReloadTimer !== null) return;
   const tick = () => {
-    void pollRuntimeForDevReload();
+    void pollRuntimeForRuntimeReload();
   };
-  devReloadTimer = window.setInterval(tick, DEV_UI_RELOAD_POLL_MS);
+  runtimeReloadTimer = window.setInterval(tick, DEV_UI_RELOAD_POLL_MS);
   tick();
   window.addEventListener('focus', tick);
   document.addEventListener('visibilitychange', () => {
@@ -4127,6 +4192,10 @@ async function deactivateLiveSession(options = {}) {
 }
 
 function resolveInitialProjectID() {
+  const reloadProjectID = String(pendingRuntimeReloadContext?.activeProjectId || '').trim();
+  if (reloadProjectID && state.projects.some((project) => project.id === reloadProjectID)) {
+    return reloadProjectID;
+  }
   if (state.startupBehavior === 'hub_first') {
     const hub = hubProject();
     if (hub?.id) return hub.id;
@@ -4739,6 +4808,10 @@ function openChatWs() {
     const isReconnect = state.chatWsHasConnected;
     state.chatWsHasConnected = true;
     showStatus('connected');
+    if (pendingRuntimeReloadStatus) {
+      showStatus(pendingRuntimeReloadStatus);
+      pendingRuntimeReloadStatus = '';
+    }
     void refreshAssistantActivity();
     if (isReconnect) {
       resetAssistantTurnTracking();
@@ -6810,6 +6883,7 @@ function showSplash() {
 }
 
 async function init() {
+  pendingRuntimeReloadContext = consumeRuntimeReloadContext();
   applyIPhoneFrameCorners();
   window.addEventListener('resize', () => {
     if (document.body.classList.contains('keyboard-open')) return;
@@ -6822,7 +6896,7 @@ async function init() {
   renderInkControls();
   syncInputModeBodyState();
   updateAssistantActivityIndicator();
-  startDevReloadWatcher();
+  startRuntimeReloadWatcher();
   startAssistantActivityWatcher();
   clearCanvas();
   hideCanvasColumn();
@@ -6852,6 +6926,7 @@ async function init() {
     const edgeRight = document.getElementById('edge-right');
     if (edgeRight) edgeRight.classList.add('edge-pinned');
   }
+  restoreRuntimeReloadContext();
   showSplash();
   // Enable panel slide transitions only after startup is fully painted.
   requestAnimationFrame(() => requestAnimationFrame(initPanelMotionMode));
