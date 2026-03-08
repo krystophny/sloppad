@@ -66,6 +66,22 @@ CREATE TABLE IF NOT EXISTS external_accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_accounts_identity
   ON external_accounts(lower(sphere), lower(provider), lower(label));
+CREATE TABLE IF NOT EXISTS external_bindings (
+  id INTEGER PRIMARY KEY,
+  account_id INTEGER NOT NULL REFERENCES external_accounts(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  object_type TEXT NOT NULL,
+  remote_id TEXT NOT NULL,
+  item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+  artifact_id INTEGER REFERENCES artifacts(id) ON DELETE SET NULL,
+  container_ref TEXT,
+  remote_updated_at TEXT,
+  last_synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_external_bindings_identity
+  ON external_bindings(account_id, provider, object_type, remote_id);
+CREATE INDEX IF NOT EXISTS idx_external_bindings_stale
+  ON external_bindings(provider, last_synced_at);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

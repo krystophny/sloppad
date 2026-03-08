@@ -34,6 +34,7 @@ func TestStoreMigratesDomainTablesOnFreshDatabase(t *testing.T) {
 		"actors":            {"id", "name", "kind", "created_at"},
 		"artifacts":         {"id", "kind", "ref_path", "ref_url", "title", "meta_json", "created_at", "updated_at"},
 		"external_accounts": {"id", "sphere", "provider", "label", "config_json", "enabled", "created_at", "updated_at"},
+		"external_bindings": {"id", "account_id", "provider", "object_type", "remote_id", "item_id", "artifact_id", "container_ref", "remote_updated_at", "last_synced_at"},
 		"items":             {"id", "title", "state", "workspace_id", "artifact_id", "actor_id", "visible_after", "follow_up_at", "source", "source_ref", "created_at", "updated_at"},
 	} {
 		got := make(map[string]bool, len(columns[table]))
@@ -120,7 +121,7 @@ CREATE TABLE chat_messages (
 	if err != nil {
 		t.Fatalf("TableColumns() error: %v", err)
 	}
-	for _, table := range []string{"workspaces", "actors", "artifacts", "external_accounts", "items"} {
+	for _, table := range []string{"workspaces", "actors", "artifacts", "external_accounts", "external_bindings", "items"} {
 		if _, ok := columns[table]; !ok {
 			t.Fatalf("expected migrated table %s to exist", table)
 		}

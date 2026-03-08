@@ -94,6 +94,19 @@ type ExternalAccountUpdate struct {
 	Enabled  *bool          `json:"enabled,omitempty"`
 }
 
+type ExternalBinding struct {
+	ID              int64   `json:"id"`
+	AccountID       int64   `json:"account_id"`
+	Provider        string  `json:"provider"`
+	ObjectType      string  `json:"object_type"`
+	RemoteID        string  `json:"remote_id"`
+	ItemID          *int64  `json:"item_id,omitempty"`
+	ArtifactID      *int64  `json:"artifact_id,omitempty"`
+	ContainerRef    *string `json:"container_ref,omitempty"`
+	RemoteUpdatedAt *string `json:"remote_updated_at,omitempty"`
+	LastSyncedAt    string  `json:"last_synced_at"`
+}
+
 type Actor struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
