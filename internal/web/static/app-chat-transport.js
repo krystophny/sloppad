@@ -84,6 +84,7 @@ const isTTSSpeaking = (...args) => refs.isTTSSpeaking(...args);
 const hasLocalStopCapableWork = (...args) => refs.hasLocalStopCapableWork(...args);
 const hasPendingOverlayTurn = (...args) => refs.hasPendingOverlayTurn(...args);
 const hasRemoteAssistantWork = (...args) => refs.hasRemoteAssistantWork(...args);
+const maybeHandleInlineBugReport = (...args) => refs.maybeHandleInlineBugReport(...args);
 
 const STOP_REQUEST_TIMEOUT_MS = 3500;
 const VOICE_TRANSCRIPT_SUBMIT_GUARD_MS = 220;
@@ -750,6 +751,15 @@ export async function submitMessage(text, options = {}) {
   state.indicatorSuppressedByCanvasUpdate = false;
   // Interrupt TTS playback when sending a new message
   stopTTSPlayback();
+  if (await maybeHandleInlineBugReport(trimmed, {
+    trigger: submitKind === 'voice_transcript' ? 'voice' : 'chat',
+  })) {
+    clearPendingSubmit(submitController);
+    if (submitKind === 'voice_transcript') {
+      state.voiceTranscriptSubmitInFlight = false;
+    }
+    return;
+  }
   let finalText = trimmed;
   const anchor = getInputAnchor();
   if (anchor) {

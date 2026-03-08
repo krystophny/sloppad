@@ -191,10 +191,18 @@
     const runtimeState = {
       dev_mode: false,
       boot_id: 'test',
+      version: '0.1.8',
+      started_at: '2026-03-08T14:00:00Z',
       tts_enabled: true,
       silent_mode: false,
       input_mode: 'pen',
       startup_behavior: 'hub_first',
+    };
+    const TEST_BUG_REPORT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W8xkAAAAASUVORK5CYII=';
+    window.__taburaBugReportTestEnv = { screenshotDataURL: TEST_BUG_REPORT_PNG };
+    window.__bugReportRequests = [];
+    window.__setBugReportScreenshotDataURL = (value) => {
+      window.__taburaBugReportTestEnv = { screenshotDataURL: String(value || TEST_BUG_REPORT_PNG) };
     };
     window.__setRuntimeState = (patch) => {
       const next = patch && typeof patch === 'object' ? patch : {};
@@ -786,6 +794,28 @@
           silent_mode: runtimeState.silent_mode,
           input_mode: runtimeState.input_mode,
           startup_behavior: runtimeState.startup_behavior,
+        }), { status: 200 });
+      }
+      if (u.includes('/api/bugs/report') && opts?.method === 'POST') {
+        let body = {};
+        try {
+          body = JSON.parse(String(opts?.body || '{}'));
+        } catch (_) {
+          body = {};
+        }
+        window.__bugReportRequests.push(body);
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'bug_report',
+          method: opts?.method || 'POST',
+          url: u,
+          trigger: body.trigger || '',
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          bundle_path: '.tabura/artifacts/bugs/20260308-150405-abcd1234/bundle.json',
+          screenshot_path: '.tabura/artifacts/bugs/20260308-150405-abcd1234/screenshot.png',
+          annotated_path: body.annotated_data_url ? '.tabura/artifacts/bugs/20260308-150405-abcd1234/annotated.png' : '',
         }), { status: 200 });
       }
       if (u.endsWith('/api/projects') && opts?.method === 'POST') {
