@@ -376,6 +376,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/api/projects/{project_id}/references", a.handleProjectCompanionReferences)
 	r.Post("/api/ink/submit", a.handleInkSubmit)
 	r.Post("/api/review/submit", a.handleReviewSubmit)
+	r.Post("/api/items/sync/github", a.handleGitHubIssueSync)
 	r.Put("/api/items/{item_id}/assign", a.handleItemAssign)
 	r.Put("/api/items/{item_id}/unassign", a.handleItemUnassign)
 	r.Put("/api/items/{item_id}/complete", a.handleItemComplete)

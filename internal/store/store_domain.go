@@ -468,6 +468,14 @@ func (s *Store) FindWorkspaceByGitRemote(ownerRepo string) (*int64, error) {
 	return &matches[0], nil
 }
 
+func (s *Store) GitHubRepoForWorkspace(id int64) (string, error) {
+	workspace, err := s.GetWorkspace(id)
+	if err != nil {
+		return "", err
+	}
+	return workspaceGitRemoteOwnerRepo(workspace.DirPath)
+}
+
 func (s *Store) InferWorkspaceForArtifact(artifact Artifact) (*int64, error) {
 	switch artifact.Kind {
 	case ArtifactKindDocument, ArtifactKindMarkdown, ArtifactKindPDF:
@@ -778,6 +786,117 @@ func (s *Store) GetItem(id int64) (Item, error) {
 		 WHERE id = ?`,
 		id,
 	))
+}
+
+func (s *Store) GetItemBySource(source, sourceRef string) (Item, error) {
+	cleanSource := strings.TrimSpace(source)
+	cleanSourceRef := strings.TrimSpace(sourceRef)
+	if cleanSource == "" || cleanSourceRef == "" {
+		return Item{}, errors.New("item source and source_ref are required")
+	}
+	return scanItem(s.db.QueryRow(
+		`SELECT id, title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, created_at, updated_at
+		 FROM items
+		 WHERE source = ? AND source_ref = ?`,
+		cleanSource,
+		cleanSourceRef,
+	))
+}
+
+func (s *Store) UpsertItemFromSource(source, sourceRef, title string, workspaceID *int64) (Item, error) {
+	cleanSource := strings.TrimSpace(source)
+	cleanSourceRef := strings.TrimSpace(sourceRef)
+	cleanTitle := strings.TrimSpace(title)
+	if cleanSource == "" || cleanSourceRef == "" {
+		return Item{}, errors.New("item source and source_ref are required")
+	}
+	if cleanTitle == "" {
+		return Item{}, errors.New("item title is required")
+	}
+
+	existing, err := s.GetItemBySource(cleanSource, cleanSourceRef)
+	switch {
+	case err == nil:
+		res, err := s.db.Exec(
+			`UPDATE items
+			 SET title = ?, workspace_id = ?, updated_at = datetime('now')
+			 WHERE id = ?`,
+			cleanTitle,
+			workspaceID,
+			existing.ID,
+		)
+		if err != nil {
+			return Item{}, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return Item{}, err
+		}
+		if affected == 0 {
+			return Item{}, sql.ErrNoRows
+		}
+		return s.GetItem(existing.ID)
+	case !errors.Is(err, sql.ErrNoRows):
+		return Item{}, err
+	}
+
+	return s.CreateItem(cleanTitle, ItemOptions{
+		WorkspaceID: workspaceID,
+		Source:      &cleanSource,
+		SourceRef:   &cleanSourceRef,
+	})
+}
+
+func (s *Store) UpdateItemArtifact(id int64, artifactID *int64) error {
+	res, err := s.db.Exec(
+		`UPDATE items
+		 SET artifact_id = ?, updated_at = datetime('now')
+		 WHERE id = ?`,
+		artifactID,
+		id,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) SyncItemStateBySource(source, sourceRef, state string) error {
+	cleanSource := strings.TrimSpace(source)
+	cleanSourceRef := strings.TrimSpace(sourceRef)
+	cleanState := normalizeItemState(state)
+	if cleanSource == "" || cleanSourceRef == "" {
+		return errors.New("item source and source_ref are required")
+	}
+	if cleanState == "" {
+		return errors.New("invalid item state")
+	}
+	res, err := s.db.Exec(
+		`UPDATE items
+		 SET state = ?, updated_at = datetime('now')
+		 WHERE source = ? AND source_ref = ?`,
+		cleanState,
+		cleanSource,
+		cleanSourceRef,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) UpdateItemState(id int64, state string) error {

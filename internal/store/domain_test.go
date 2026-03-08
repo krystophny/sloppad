@@ -948,6 +948,129 @@ func TestFindWorkspaceByGitRemoteMatchesUniqueWorkspace(t *testing.T) {
 	}
 }
 
+func TestGitHubRepoForWorkspace(t *testing.T) {
+	s := newTestStore(t)
+
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	initGitRepoWithRemote(t, repoDir, "https://github.com/owner/tabula.git")
+	workspace, err := s.CreateWorkspace("Repo", repoDir)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(repo) error: %v", err)
+	}
+
+	repo, err := s.GitHubRepoForWorkspace(workspace.ID)
+	if err != nil {
+		t.Fatalf("GitHubRepoForWorkspace() error: %v", err)
+	}
+	if repo != "owner/tabula" {
+		t.Fatalf("GitHubRepoForWorkspace() = %q, want %q", repo, "owner/tabula")
+	}
+
+	missingRemoteDir := filepath.Join(t.TempDir(), "no-remote")
+	if err := exec.Command("git", "init", missingRemoteDir).Run(); err != nil {
+		t.Fatalf("git init %s: %v", missingRemoteDir, err)
+	}
+	noRemoteWorkspace, err := s.CreateWorkspace("No Remote", missingRemoteDir)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(no remote) error: %v", err)
+	}
+	repo, err = s.GitHubRepoForWorkspace(noRemoteWorkspace.ID)
+	if err != nil {
+		t.Fatalf("GitHubRepoForWorkspace(no remote) error: %v", err)
+	}
+	if repo != "" {
+		t.Fatalf("GitHubRepoForWorkspace(no remote) = %q, want empty", repo)
+	}
+}
+
+func TestSourceItemUpsertAndSyncState(t *testing.T) {
+	s := newTestStore(t)
+
+	workspaceDir := filepath.Join(t.TempDir(), "workspace")
+	workspace, err := s.CreateWorkspace("Workspace", workspaceDir)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	artifactTitle := "Issue #12"
+	artifactURL := "https://github.com/owner/tabula/issues/12"
+	artifact, err := s.CreateArtifact(ArtifactKindGitHubIssue, nil, &artifactURL, &artifactTitle, nil)
+	if err != nil {
+		t.Fatalf("CreateArtifact() error: %v", err)
+	}
+
+	item, err := s.UpsertItemFromSource("github", "owner/tabula#12", "Initial issue title", &workspace.ID)
+	if err != nil {
+		t.Fatalf("UpsertItemFromSource(create) error: %v", err)
+	}
+	if item.State != ItemStateInbox {
+		t.Fatalf("created item state = %q, want %q", item.State, ItemStateInbox)
+	}
+	if err := s.UpdateItemArtifact(item.ID, &artifact.ID); err != nil {
+		t.Fatalf("UpdateItemArtifact() error: %v", err)
+	}
+
+	gotBySource, err := s.GetItemBySource("github", "owner/tabula#12")
+	if err != nil {
+		t.Fatalf("GetItemBySource() error: %v", err)
+	}
+	if gotBySource.ID != item.ID {
+		t.Fatalf("GetItemBySource() ID = %d, want %d", gotBySource.ID, item.ID)
+	}
+	if gotBySource.ArtifactID == nil || *gotBySource.ArtifactID != artifact.ID {
+		t.Fatalf("GetItemBySource().ArtifactID = %v, want %d", gotBySource.ArtifactID, artifact.ID)
+	}
+
+	updatedItem, err := s.UpsertItemFromSource("github", "owner/tabula#12", "Renamed issue title", nil)
+	if err != nil {
+		t.Fatalf("UpsertItemFromSource(update) error: %v", err)
+	}
+	if updatedItem.ID != item.ID {
+		t.Fatalf("updated item ID = %d, want %d", updatedItem.ID, item.ID)
+	}
+	if updatedItem.Title != "Renamed issue title" {
+		t.Fatalf("updated title = %q, want %q", updatedItem.Title, "Renamed issue title")
+	}
+	if updatedItem.WorkspaceID != nil {
+		t.Fatalf("updated WorkspaceID = %v, want nil", updatedItem.WorkspaceID)
+	}
+	items, err := s.ListItemsByState(ItemStateInbox)
+	if err != nil {
+		t.Fatalf("ListItemsByState(inbox) error: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("ListItemsByState(inbox) len = %d, want 1", len(items))
+	}
+
+	if err := s.SyncItemStateBySource("github", "owner/tabula#12", ItemStateDone); err != nil {
+		t.Fatalf("SyncItemStateBySource(done) error: %v", err)
+	}
+	doneItem, err := s.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem(done) error: %v", err)
+	}
+	if doneItem.State != ItemStateDone {
+		t.Fatalf("done item state = %q, want %q", doneItem.State, ItemStateDone)
+	}
+
+	if err := s.SyncItemStateBySource("github", "owner/tabula#12", ItemStateInbox); err != nil {
+		t.Fatalf("SyncItemStateBySource(reopen) error: %v", err)
+	}
+	reopenedItem, err := s.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem(reopened) error: %v", err)
+	}
+	if reopenedItem.State != ItemStateInbox {
+		t.Fatalf("reopened item state = %q, want %q", reopenedItem.State, ItemStateInbox)
+	}
+
+	if _, err := s.GetItemBySource("github", "owner/tabula#404"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetItemBySource(missing) error = %v, want sql.ErrNoRows", err)
+	}
+	if err := s.SyncItemStateBySource("github", "owner/tabula#404", ItemStateDone); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("SyncItemStateBySource(missing) error = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestInferWorkspaceForArtifact(t *testing.T) {
 	s := newTestStore(t)
 
