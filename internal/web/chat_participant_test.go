@@ -583,10 +583,14 @@ func TestParticipantBinaryChunkTranscribesWAVSegmentImmediately(t *testing.T) {
 		t.Fatalf("GetOrCreateChatSession: %v", err)
 	}
 
-	conn, cleanup := newTestWSConn(t)
+	conn, clientConn, cleanup := newParticipantTestWSConn(t)
 	defer cleanup()
 
 	handleParticipantStart(app, conn, chatSession.ID)
+	started := readParticipantMessage(t, clientConn, 2*time.Second)
+	if started.Type != "participant_started" {
+		t.Fatalf("start message type = %q, want participant_started", started.Type)
+	}
 
 	conn.participantMu.Lock()
 	sessionID := conn.participantSessionID
@@ -613,25 +617,29 @@ func TestParticipantBinaryChunkTranscribesWAVSegmentImmediately(t *testing.T) {
 		t.Fatal("timed out waiting for participant chunk upload")
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		segments, err := app.store.ListParticipantSegments(sessionID, 0, 0)
-		if err != nil {
-			t.Fatalf("list participant segments: %v", err)
-		}
-		if len(segments) == 1 {
-			if segments[0].Text != "participant transcript" {
-				t.Fatalf("segment text = %q, want participant transcript", segments[0].Text)
-			}
-			if segments[0].Model != "whisper-1" {
-				t.Fatalf("segment model = %q, want whisper-1", segments[0].Model)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("segments count = %d, want 1", len(segments))
-		}
-		time.Sleep(10 * time.Millisecond)
+	segmentMsg := readParticipantMessage(t, clientConn, 2*time.Second)
+	if segmentMsg.Type != "participant_segment_text" {
+		t.Fatalf("message type = %q, want participant_segment_text", segmentMsg.Type)
+	}
+	if segmentMsg.SessionID != sessionID {
+		t.Fatalf("segment message session_id = %q, want %q", segmentMsg.SessionID, sessionID)
+	}
+	if segmentMsg.Text != "participant transcript" {
+		t.Fatalf("segment message text = %q, want participant transcript", segmentMsg.Text)
+	}
+
+	segments, err := app.store.ListParticipantSegments(sessionID, 0, 0)
+	if err != nil {
+		t.Fatalf("list participant segments: %v", err)
+	}
+	if len(segments) != 1 {
+		t.Fatalf("segments count = %d, want 1", len(segments))
+	}
+	if segments[0].Text != "participant transcript" {
+		t.Fatalf("segment text = %q, want participant transcript", segments[0].Text)
+	}
+	if segments[0].Model != "whisper-1" {
+		t.Fatalf("segment model = %q, want whisper-1", segments[0].Model)
 	}
 
 	conn.participantMu.Lock()
