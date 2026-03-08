@@ -807,6 +807,37 @@ test.describe('system_action model and project switching', () => {
   });
 });
 
+test.describe('system_action print item', () => {
+  test.beforeEach(async ({ page }) => {
+    await waitReady(page);
+    await clearLog(page);
+  });
+
+  test('loads the print view into the hidden print iframe', async ({ page }) => {
+    await injectChatEvent(page, {
+      type: 'system_action',
+      action: {
+        type: 'print_item',
+        item_id: 42,
+        url: '/api/items/42/print',
+      },
+    });
+
+    await expect.poll(async () => {
+      return page.evaluate(() => {
+        const frame = document.getElementById('print-frame');
+        if (!(frame instanceof HTMLIFrameElement)) return '';
+        return String(frame.getAttribute('src') || '');
+      });
+    }, { timeout: 5_000 }).toContain('/api/items/42/print');
+
+    const log = await getLog(page);
+    const printEntry = log.find((entry) => entry.type === 'print' && entry.action === 'open');
+    expect(String(printEntry?.url || '')).toContain('/api/items/42/print');
+    await expect(page.locator('#status-label')).toHaveText('print view opened');
+  });
+});
+
 
 // =============================================================================
 // Mic stream caching and invalidation

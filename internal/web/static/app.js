@@ -1958,6 +1958,28 @@ function recordHarnessSTTAction(action, payload = {}) {
   window.__harnessLog.push({ type: 'stt', action, ...payload });
 }
 
+function recordHarnessPrintAction(action, payload = {}) {
+  if (!Array.isArray(window.__harnessLog)) return;
+  window.__harnessLog.push({ type: 'print', action, ...payload });
+}
+
+function openPrintView(url) {
+  const target = String(url || '').trim();
+  if (!target) return;
+  let frame = document.getElementById('print-frame');
+  if (!(frame instanceof HTMLIFrameElement)) {
+    frame = document.createElement('iframe');
+    frame.id = 'print-frame';
+    frame.style.display = 'none';
+    document.body.appendChild(frame);
+  }
+  const separator = target.includes('?') ? '&' : '?';
+  const nextURL = `${target}${separator}__tabura_print=${Date.now()}`;
+  frame.setAttribute('src', nextURL);
+  recordHarnessPrintAction('open', { url: nextURL });
+  showStatus('print view opened');
+}
+
 function sttStart(mimeType) {
   if (_sttAbortController) {
     try { _sttAbortController.abort(); } catch (_) {}
@@ -4979,6 +5001,8 @@ function handleChatEvent(payload) {
       }
     } else if (actionType === 'toggle_silent') {
       toggleTTSSilentMode();
+    } else if (actionType === 'print_item') {
+      openPrintView(String(action?.url || '').trim());
     } else if (actionType === 'toggle_live_dialogue' || actionType === 'toggle_conversation') {
       const next = state.liveSessionActive ? '' : LIVE_SESSION_MODE_DIALOGUE;
       const action = next

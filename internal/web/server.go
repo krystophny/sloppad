@@ -405,6 +405,7 @@ func (a *App) Router() http.Handler {
 	r.Put("/api/items/{item_id}/complete", a.handleItemComplete)
 	r.Put("/api/items/{item_id}/state", a.handleItemStateUpdate)
 	r.Post("/api/items/{item_id}/triage", a.handleItemTriage)
+	r.Get("/api/items/{item_id}/print", a.handleItemPrint)
 	r.Get("/api/items/{item_id}", a.handleItemGet)
 	r.Put("/api/items/{item_id}", a.handleItemUpdate)
 	r.Delete("/api/items/{item_id}", a.handleItemDelete)

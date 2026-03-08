@@ -1,0 +1,138 @@
+body.print-page {
+  margin: 0;
+  background: #f3efe5;
+  color: #1e1b16;
+  font: 15px/1.5 "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+.print-shell {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 40px 24px 56px;
+}
+
+.print-cover,
+.print-section {
+  background: #fffdf8;
+  border: 1px solid #d8cfbc;
+  box-shadow: 0 10px 30px rgba(69, 53, 24, 0.08);
+}
+
+.print-cover {
+  padding: 28px 32px;
+  margin-bottom: 20px;
+}
+
+.print-cover h1,
+.print-section h2 {
+  margin: 0;
+  font-family: "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.print-cover h1 {
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1.05;
+  margin-top: 8px;
+}
+
+.print-subtitle,
+.print-muted,
+.print-link {
+  color: #5f5340;
+}
+
+.print-kicker,
+.print-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #efe5cf;
+  color: #7a5f20;
+  font: 700 0.8rem/1 "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.print-kicker {
+  padding: 6px 10px;
+}
+
+.print-section {
+  padding: 24px 28px;
+  margin-bottom: 18px;
+}
+
+.print-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px 18px;
+  margin: 18px 0 0;
+}
+
+.print-fact {
+  border-top: 1px solid #e8deca;
+  padding-top: 10px;
+}
+
+.print-fact dt {
+  font: 700 0.76rem/1.2 "Avenir Next Condensed", "Franklin Gothic Medium", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b7443;
+  margin-bottom: 6px;
+}
+
+.print-fact dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.print-artifact-head {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 18px;
+}
+
+.print-badge {
+  margin-left: 10px;
+  padding: 4px 8px;
+}
+
+.print-link {
+  text-decoration: none;
+}
+
+.print-content {
+  margin: 0;
+  padding: 18px;
+  background: #f8f3e7;
+  border: 1px solid #e2d8c3;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 0.95rem/1.55 "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.print-details {
+  margin-top: 16px;
+}
+
+@media print {
+  body.print-page {
+    background: #fff;
+  }
+
+  .print-shell {
+    max-width: none;
+    padding: 0;
+  }
+
+  .print-cover,
+  .print-section {
+    border: 0;
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}

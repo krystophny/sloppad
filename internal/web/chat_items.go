@@ -62,6 +62,8 @@ func parseInlineItemIntentWithInputMode(text string, now time.Time, inputMode st
 	switch normalized {
 	case "make this an item", "track this", "add to inbox":
 		return &SystemAction{Action: "make_item", Params: map[string]interface{}{}}
+	case "print this item", "print this for me":
+		return &SystemAction{Action: "print_item", Params: map[string]interface{}{}}
 	case "later", "remind me later":
 		visibleAfter := defaultReminderTime(now)
 		return &SystemAction{
@@ -216,7 +218,7 @@ func parseItemSplitCount(raw string) (int, bool) {
 
 func isItemSystemAction(action string) bool {
 	switch strings.ToLower(strings.TrimSpace(action)) {
-	case "make_item", "delegate_item", "snooze_item", "split_items", "capture_idea", "create_github_issue", "create_github_issue_split":
+	case "make_item", "delegate_item", "snooze_item", "split_items", "capture_idea", "create_github_issue", "create_github_issue_split", "print_item":
 		return true
 	default:
 		return false
@@ -229,6 +231,8 @@ func itemActionFailurePrefix(action string) string {
 		return "I couldn't create the GitHub issue: "
 	case "capture_idea":
 		return "I couldn't capture the idea: "
+	case "print_item":
+		return "I couldn't prepare the print view: "
 	}
 	if strings.EqualFold(strings.TrimSpace(action), "split_items") {
 		return "I couldn't create the items: "
