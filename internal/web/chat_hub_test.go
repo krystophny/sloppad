@@ -386,6 +386,84 @@ func TestHubSwitchModelTargetsPrimaryProject(t *testing.T) {
 	}
 }
 
+func TestOpenFileCanvasRendersPresentationAsPDF(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	presentationPath := filepath.Join(project.RootPath, "slides", "deck.pptx")
+	if err := os.MkdirAll(filepath.Dir(presentationPath), 0o755); err != nil {
+		t.Fatalf("mkdir presentation dir: %v", err)
+	}
+	if err := os.WriteFile(presentationPath, []byte("pptx"), 0o644); err != nil {
+		t.Fatalf("write presentation file: %v", err)
+	}
+	app.presentationRenderer = func(_ context.Context, inputPath, outputPath string) error {
+		if inputPath != presentationPath {
+			t.Fatalf("presentation input = %q, want %q", inputPath, presentationPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(outputPath, []byte("%PDF-1.4\n"), 0o644)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	showCalls := 0
+	var observed map[string]interface{}
+	server := setupMockCanvasShowServer(t, &showCalls, &observed)
+	defer server.Close()
+	port, err := extractPort(server.URL)
+	if err != nil {
+		t.Fatalf("extract mock port: %v", err)
+	}
+	app.tunnels.setPort(app.canvasSessionIDForProject(project), port)
+
+	msg, payload, err := app.executeSystemAction(session.ID, session, &SystemAction{
+		Action: "open_file_canvas",
+		Params: map[string]interface{}{
+			"path": "slides/deck.pptx",
+		},
+	})
+	if err != nil {
+		t.Fatalf("execute open_file_canvas: %v", err)
+	}
+	if msg != "Opened slides/deck.pptx on canvas as PDF." {
+		t.Fatalf("message = %q", msg)
+	}
+	if payload == nil {
+		t.Fatal("expected payload")
+	}
+	renderedPath := strings.TrimSpace(strFromAny(payload["rendered_path"]))
+	if !strings.HasPrefix(renderedPath, ".tabura/artifacts/presentations/") {
+		t.Fatalf("rendered_path = %q", renderedPath)
+	}
+	renderedAbs := filepath.Join(project.RootPath, filepath.FromSlash(renderedPath))
+	renderedBytes, err := os.ReadFile(renderedAbs)
+	if err != nil {
+		t.Fatalf("read rendered pdf: %v", err)
+	}
+	if string(renderedBytes) != "%PDF-1.4\n" {
+		t.Fatalf("rendered pdf = %q", string(renderedBytes))
+	}
+	if showCalls < 1 {
+		t.Fatalf("canvas_artifact_show calls = %d, want >= 1", showCalls)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["kind"])); got != "pdf" {
+		t.Fatalf("canvas kind = %q, want pdf", got)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["title"])); got != "slides/deck.pptx" {
+		t.Fatalf("canvas title = %q, want slides/deck.pptx", got)
+	}
+	if got := strings.TrimSpace(strFromAny(observed["path"])); got != renderedPath {
+		t.Fatalf("canvas path = %q, want %q", got, renderedPath)
+	}
+}
+
 func TestHubSwitchProjectActionReturnsActivationPayload(t *testing.T) {
 	app := newAuthedTestApp(t)
 	hub, err := app.ensureHubProject()
