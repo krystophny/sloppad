@@ -385,6 +385,7 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/projects/{project_id}/meeting-items", a.handleProjectMeetingItemsCreate)
 	r.Post("/api/ink/submit", a.handleInkSubmit)
 	r.Post("/api/review/submit", a.handleReviewSubmit)
+	r.Post("/api/bugs/report", a.handleBugReportCreate)
 	r.Get("/api/workspaces", a.handleWorkspaceList)
 	r.Post("/api/workspaces", a.handleWorkspaceCreate)
 	r.Get("/api/workspaces/{workspace_id}", a.handleWorkspaceGet)

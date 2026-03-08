@@ -10,9 +10,11 @@ import * as inkModule from './app-ink.js';
 import * as projectsModule from './app-projects.js';
 import * as projectStateModule from './app-project-state.js';
 import * as chatTransportModule from './app-chat-transport.js';
+import * as chatSubmitModule from './app-chat-submit.js';
 import * as canvasTransportModule from './app-canvas-transport.js';
 import * as canvasUiModule from './app-canvas-ui.js';
 import * as edgePanelsModule from './app-edge-panels.js';
+import * as bugReportModule from './app-bug-report.js';
 import * as initModule from './app-init.js';
 
 setAppRefs({
@@ -27,13 +29,16 @@ setAppRefs({
   ...projectsModule,
   ...projectStateModule,
   ...chatTransportModule,
+  ...chatSubmitModule,
   ...canvasTransportModule,
   ...canvasUiModule,
   ...edgePanelsModule,
+  ...bugReportModule,
   ...initModule,
 });
 
 runtimeUiModule.initRuntimeUi();
+bugReportModule.initBugReportUi();
 
 window._taburaApp = {
   getState,
