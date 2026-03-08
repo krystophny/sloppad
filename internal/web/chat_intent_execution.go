@@ -394,13 +394,6 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		if info.IsDir() {
 			return "", nil, fmt.Errorf("path %q is a directory", rawPath)
 		}
-		if info.Size() > systemActionOpenFileSizeLimit {
-			return "", nil, fmt.Errorf("file %q exceeds %d bytes", rawPath, systemActionOpenFileSizeLimit)
-		}
-		contentBytes, err := os.ReadFile(absPath)
-		if err != nil {
-			return "", nil, err
-		}
 		canvasSessionID := strings.TrimSpace(a.canvasSessionIDForProject(targetProject))
 		if canvasSessionID == "" {
 			return "", nil, errors.New("canvas session is not available")
@@ -408,6 +401,48 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		port, ok := a.tunnels.getPort(canvasSessionID)
 		if !ok {
 			return "", nil, fmt.Errorf("no active MCP tunnel for project %q", targetProject.Name)
+		}
+		if isPresentationFilePath(absPath) {
+			renderedPath, err := a.renderPresentationArtifact(cwd, absPath)
+			if err != nil {
+				return "", nil, err
+			}
+			if _, err := a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+				"session_id": canvasSessionID,
+				"kind":       "pdf",
+				"title":      canvasTitle,
+				"path":       renderedPath,
+			}); err != nil {
+				return "", nil, err
+			}
+			return fmt.Sprintf("Opened %s on canvas as PDF.", canvasTitle), map[string]interface{}{
+				"type":          "open_file_canvas",
+				"path":          canvasTitle,
+				"project_id":    targetProject.ID,
+				"rendered_path": renderedPath,
+			}, nil
+		}
+		if isPDFFilePath(absPath) {
+			if _, err := a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
+				"session_id": canvasSessionID,
+				"kind":       "pdf",
+				"title":      canvasTitle,
+				"path":       canvasTitle,
+			}); err != nil {
+				return "", nil, err
+			}
+			return fmt.Sprintf("Opened %s on canvas.", canvasTitle), map[string]interface{}{
+				"type":       "open_file_canvas",
+				"path":       canvasTitle,
+				"project_id": targetProject.ID,
+			}, nil
+		}
+		if info.Size() > systemActionOpenFileSizeLimit {
+			return "", nil, fmt.Errorf("file %q exceeds %d bytes", rawPath, systemActionOpenFileSizeLimit)
+		}
+		contentBytes, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", nil, err
 		}
 		if _, err := a.mcpToolsCall(port, "canvas_artifact_show", map[string]interface{}{
 			"session_id":       canvasSessionID,

@@ -91,21 +91,22 @@ type App struct {
 
 	upgrader websocket.Upgrader
 
-	mu               sync.Mutex
-	confirmMu        sync.Mutex
-	approvalMu       sync.Mutex
-	workerWG         sync.WaitGroup
-	hub              *wsHub
-	turns            *chatTurnTracker
-	companionTurns   *companionPendingTurnTracker
-	companionRuntime *companionRuntimeTracker
-	chatInputModes   *chatInputModeTracker
-	projectAttention *projectAttentionTracker
-	tunnels          *tunnelRegistry
-	chatAppSessions  map[string]*appserver.Session
-	pendingDanger    map[string]*pendingDangerousAction
-	pendingApprovals map[string]map[string]*pendingAppServerApproval
-	ghCommandRunner  ghCommandRunner
+	mu                   sync.Mutex
+	confirmMu            sync.Mutex
+	approvalMu           sync.Mutex
+	workerWG             sync.WaitGroup
+	hub                  *wsHub
+	turns                *chatTurnTracker
+	companionTurns       *companionPendingTurnTracker
+	companionRuntime     *companionRuntimeTracker
+	chatInputModes       *chatInputModeTracker
+	projectAttention     *projectAttentionTracker
+	tunnels              *tunnelRegistry
+	chatAppSessions      map[string]*appserver.Session
+	pendingDanger        map[string]*pendingDangerousAction
+	pendingApprovals     map[string]map[string]*pendingAppServerApproval
+	ghCommandRunner      ghCommandRunner
+	presentationRenderer presentationRenderFunc
 
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -275,6 +276,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		pendingDanger:                 map[string]*pendingDangerousAction{},
 		pendingApprovals:              map[string]map[string]*pendingAppServerApproval{},
 		ghCommandRunner:               runGitHubCLI,
+		presentationRenderer:          renderPresentationToPDF,
 		shutdownCtx:                   shutdownCtx,
 		shutdownCancel:                shutdownCancel,
 		bootID:                        strconv.FormatInt(time.Now().UnixNano(), 16),
