@@ -142,8 +142,16 @@ async function switchToProject(page: Page, projectID: string) {
   }, projectID);
   await expect.poll(async () => page.evaluate(() => {
     const app = (window as any)._taburaApp;
-    return app?.getState?.().activeProjectId || '';
-  })).toBe(projectID);
+    const state = app?.getState?.();
+    if (!state) return null;
+    return {
+      activeProjectId: state.activeProjectId || '',
+      projectSwitchInFlight: Boolean(state.projectSwitchInFlight),
+    };
+  })).toEqual({
+    activeProjectId: projectID,
+    projectSwitchInFlight: false,
+  });
 }
 
 async function clearCanvas(page: Page) {
