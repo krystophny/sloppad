@@ -100,6 +100,14 @@ export function normalizeItemSidebarCounts(rawCounts) {
 export function setInboxTriggerCount(count) {
   const edgeLeftTap = document.getElementById('edge-left-tap');
   if (!(edgeLeftTap instanceof HTMLElement)) return;
+  const normalizedCount = Number.isFinite(Number(count)) && Number(count) > 0
+    ? Math.trunc(Number(count))
+    : 0;
+  if (normalizedCount > 0) {
+    edgeLeftTap.dataset.inboxCount = String(normalizedCount);
+    edgeLeftTap.classList.add('has-inbox-count');
+    return;
+  }
   edgeLeftTap.dataset.inboxCount = '';
   edgeLeftTap.classList.remove('has-inbox-count');
 }
@@ -449,9 +457,7 @@ export async function performItemSidebarStateUpdate(item, nextState) {
       throw new Error(detail);
     }
     state.itemSidebarActiveItemID = itemID;
-    const targetView = normalizedState === 'inbox'
-      ? 'inbox'
-      : state.itemSidebarView;
+    const targetView = state.itemSidebarView;
     state.itemSidebarView = targetView;
     await loadItemSidebarView(targetView);
     showStatus(itemSidebarStatusText(normalizedState, item));
