@@ -155,6 +155,58 @@ export function bindUi() {
     }
     return beginVoiceCapture(x, y, anchor);
   };
+  const buildCanvasPositionPayload = (anchor, options = {}) => {
+    if (!anchor || typeof anchor !== 'object') return null;
+    const payload = {
+      type: 'canvas_position',
+      gesture: String(options?.gesture || 'tap').trim().toLowerCase() || 'tap',
+      output_mode: state.ttsSilent ? 'silent' : 'voice',
+      cursor: {},
+    };
+    const cursor = payload.cursor;
+    const setTextField = (key, value) => {
+      const text = String(value || '').trim();
+      if (text) cursor[key] = text;
+    };
+    const setIntField = (key, value) => {
+      const num = Number.parseInt(String(value || ''), 10);
+      if (Number.isFinite(num) && num > 0) cursor[key] = num;
+    };
+    const setFloatField = (key, value) => {
+      const num = Number(value);
+      if (Number.isFinite(num)) cursor[key] = num;
+    };
+    setTextField('view', anchor.view);
+    setTextField('element', anchor.element);
+    setTextField('title', anchor.title);
+    setIntField('page', anchor.page);
+    setIntField('line', anchor.line);
+    setFloatField('relative_x', anchor.relativeX);
+    setFloatField('relative_y', anchor.relativeY);
+    setTextField('selected_text', anchor.selectedText);
+    setTextField('surrounding_text', anchor.surroundingText);
+    setIntField('item_id', anchor.itemID || anchor.item_id);
+    setTextField('item_title', anchor.itemTitle || anchor.item_title);
+    setTextField('item_state', anchor.itemState || anchor.item_state);
+    setIntField('workspace_id', anchor.workspaceID || anchor.workspace_id);
+    setTextField('workspace_name', anchor.workspaceName || anchor.workspace_name);
+    setTextField('path', anchor.path);
+    if (anchor.isDir === true || anchor.is_dir === true) {
+      cursor.is_dir = true;
+    }
+    if (options?.requestResponse) {
+      payload.request_response = true;
+    }
+    if (Object.keys(cursor).length === 0) return null;
+    return payload;
+  };
+  const sendCanvasPosition = (anchor, options = {}) => {
+    const payload = buildCanvasPositionPayload(anchor, options);
+    const ws = state.chatWs;
+    if (!payload || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  };
 
   document.addEventListener('mousemove', (ev) => {
     rememberMousePosition(ev.clientX, ev.clientY);
@@ -319,6 +371,20 @@ export function bindUi() {
     };
 
     const handleWorkspaceTap = (target, x, y) => {
+      const requestedPositionPrompt = String(state.requestedPositionPrompt || '').trim();
+      if (requestedPositionPrompt) {
+        if (isVoiceInteractionTarget(target, x, y)) return;
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) return;
+        rememberMousePosition(x, y);
+        const anchor = state.hasArtifact && canvasText ? getAnchorFromPoint(x, y) : null;
+        pinCursorAnchor(x, y, anchor);
+        state.requestedPositionPrompt = '';
+        sendCanvasPosition(anchor, { gesture: 'tap', requestResponse: true });
+        showStatus('position shared');
+        updateAssistantActivityIndicator();
+        return;
+      }
       const liveSessionPointerMode = state.liveSessionActive
         && (state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE || state.liveSessionMode === LIVE_SESSION_MODE_MEETING);
       if (liveSessionPointerMode) {
@@ -328,6 +394,7 @@ export function bindUi() {
         rememberMousePosition(x, y);
         const anchor = state.hasArtifact && canvasText ? getAnchorFromPoint(x, y) : null;
         pinCursorAnchor(x, y, anchor);
+        sendCanvasPosition(anchor, { gesture: 'tap' });
         updateAssistantActivityIndicator();
         return;
       }
