@@ -11,15 +11,15 @@ import (
 func parseInlineSomedayIntent(text string) *SystemAction {
 	normalized := normalizeItemCommandText(text)
 	switch normalized {
-	case "review my someday list", "review someday list", "what's in someday", "what is in someday":
+	case "review my someday list", "review someday list", "what's in someday", "what is in someday", "zeige irgendwann", "was ist auf irgendwann":
 		return &SystemAction{Action: "review_someday", Params: map[string]interface{}{}}
-	case "someday", "not now", "maybe later", "defer to someday", "defer this to someday", "defer it to someday":
+	case "someday", "not now", "maybe later", "defer to someday", "defer this to someday", "defer it to someday", "irgendwann", "nicht jetzt", "vielleicht spaeter":
 		return &SystemAction{Action: "triage_someday", Params: map[string]interface{}{}}
-	case "bring this back", "make this active", "move this to inbox", "move it to inbox":
+	case "bring this back", "make this active", "move this to inbox", "move it to inbox", "hol das zurueck", "mach das wieder aktiv", "verschiebe das in den posteingang":
 		return &SystemAction{Action: "promote_someday", Params: map[string]interface{}{}}
-	case "turn off someday reminders", "disable someday reminders", "disable someday review reminders":
+	case "turn off someday reminders", "disable someday reminders", "disable someday review reminders", "schalte irgendwann erinnerungen aus":
 		return &SystemAction{Action: "toggle_someday_review_nudge", Params: map[string]interface{}{"enabled": false}}
-	case "turn on someday reminders", "enable someday reminders", "enable someday review reminders":
+	case "turn on someday reminders", "enable someday reminders", "enable someday review reminders", "schalte irgendwann erinnerungen an":
 		return &SystemAction{Action: "toggle_someday_review_nudge", Params: map[string]interface{}{"enabled": true}}
 	default:
 		return nil

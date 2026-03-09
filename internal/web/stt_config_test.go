@@ -90,3 +90,16 @@ func TestSTTConfigDefaultAndRoundTrip(t *testing.T) {
 		t.Fatal("opts.PreVAD.Enabled=true, want false")
 	}
 }
+
+func TestSTTConfigLocalePrefersGermanFallback(t *testing.T) {
+	t.Setenv("TABURA_LOCALE", "de_AT.UTF-8")
+	app := newAuthedTestApp(t)
+
+	cfg := app.loadSTTConfig()
+	if cfg.FallbackLanguage != "de" {
+		t.Fatalf("fallback_language=%q, want de", cfg.FallbackLanguage)
+	}
+	if len(cfg.AllowedLanguages) == 0 || cfg.AllowedLanguages[0] != "de" {
+		t.Fatalf("allowed_languages=%v, want de first", cfg.AllowedLanguages)
+	}
+}

@@ -15,9 +15,9 @@ import (
 
 var (
 	itemTitlePrefixPattern = regexp.MustCompile(`^\s*(?:[#>*-]+|\d+[.)]|(?:\[[ xX]\]))\s*`)
-	itemDelegatePattern    = regexp.MustCompile(`(?i)^(?:delegate|assign)(?:\s+(?:this|it))?\s+to\s+(.+?)$`)
-	itemSplitPattern       = regexp.MustCompile(`(?i)^split\s+(?:this|it)\s+into\s+(.+?)\s+items?$`)
-	ideaPrefixPattern      = regexp.MustCompile(`(?i)^\s*(?:new\s+idea|idea|i\s+have\s+an\s+idea|capture)\s*:\s*(.+?)\s*$`)
+	itemDelegatePattern    = regexp.MustCompile(`(?i)^(?:delegate|assign|delegiere|übergib|uebergib|übergebe|uebergebe|übertrage|uebertrage)(?:\s+(?:this|it|das))?\s+(?:to|an)\s+(.+?)$`)
+	itemSplitPattern       = regexp.MustCompile(`(?i)^(?:split|teile)\s+(?:this|it|das)\s+(?:into|in)\s+(.+?)\s+(?:items?|aufgaben?)$`)
+	ideaPrefixPattern      = regexp.MustCompile(`(?i)^\s*(?:new\s+idea|idea|i\s+have\s+an\s+idea|capture|idee|einfall|ich\s+habe\s+eine\s+idee)\s*:\s*(.+?)\s*$`)
 	ideaSentencePattern    = regexp.MustCompile(`^.*?[.!?](?:\s|$)`)
 )
 
@@ -38,8 +38,19 @@ type conversationItemContext struct {
 
 func normalizeItemCommandText(raw string) string {
 	text := strings.ToLower(strings.TrimSpace(raw))
-	text = strings.Trim(text, " \t\r\n.!?,:;")
+	replacer := strings.NewReplacer(
+		"’", "'",
+		"‘", "'",
+		"ä", "ae",
+		"ö", "oe",
+		"ü", "ue",
+		"ß", "ss",
+	)
+	text = replacer.Replace(text)
+	text = strings.Trim(text, " \t\r\n.!?,:;\"'")
 	text = strings.TrimPrefix(text, "please ")
+	text = strings.TrimPrefix(text, "bitte ")
+	text = strings.Join(strings.Fields(text), " ")
 	return strings.TrimSpace(text)
 }
 
@@ -78,11 +89,11 @@ func parseInlineItemIntentWithInputMode(text string, now time.Time, inputMode st
 		return reassignment
 	}
 	switch normalized {
-	case "make this an item", "track this", "add to inbox":
+	case "make this an item", "track this", "add to inbox", "mach das zu einem item", "mach daraus ein item", "fuege das zum posteingang hinzu":
 		return &SystemAction{Action: "make_item", Params: map[string]interface{}{}}
-	case "print this item", "print this for me":
+	case "print this item", "print this for me", "druck das aus", "druck dieses item aus":
 		return &SystemAction{Action: "print_item", Params: map[string]interface{}{}}
-	case "later", "remind me later":
+	case "later", "remind me later", "spaeter", "erinnere mich spaeter":
 		visibleAfter := defaultReminderTime(now)
 		return &SystemAction{
 			Action: "snooze_item",
@@ -175,6 +186,13 @@ func parseReminderVisibleAfter(text string, now time.Time) (string, bool) {
 	if strings.Contains(lower, "tomorrow") {
 		return defaultReminderTime(now), true
 	}
+	if strings.Contains(lower, "morgen") {
+		return defaultReminderTime(now), true
+	}
+	if strings.Contains(lower, "next week") || strings.Contains(lower, "naechste woche") {
+		base := now.UTC().AddDate(0, 0, 7)
+		return time.Date(base.Year(), base.Month(), base.Day(), 9, 0, 0, 0, time.UTC).Format(time.RFC3339), true
+	}
 	for weekday, name := range map[time.Weekday]string{
 		time.Monday:    "monday",
 		time.Tuesday:   "tuesday",
@@ -183,6 +201,19 @@ func parseReminderVisibleAfter(text string, now time.Time) (string, bool) {
 		time.Friday:    "friday",
 		time.Saturday:  "saturday",
 		time.Sunday:    "sunday",
+	} {
+		if strings.Contains(lower, name) {
+			return nextWeekdayReminderTime(now, weekday), true
+		}
+	}
+	for weekday, name := range map[time.Weekday]string{
+		time.Monday:    "montag",
+		time.Tuesday:   "dienstag",
+		time.Wednesday: "mittwoch",
+		time.Thursday:  "donnerstag",
+		time.Friday:    "freitag",
+		time.Saturday:  "samstag",
+		time.Sunday:    "sonntag",
 	} {
 		if strings.Contains(lower, name) {
 			return nextWeekdayReminderTime(now, weekday), true
@@ -219,16 +250,27 @@ func parseItemSplitCount(raw string) (int, bool) {
 		return n, true
 	}
 	words := map[string]int{
-		"one":   1,
-		"two":   2,
-		"three": 3,
-		"four":  4,
-		"five":  5,
-		"six":   6,
-		"seven": 7,
-		"eight": 8,
-		"nine":  9,
-		"ten":   10,
+		"one":    1,
+		"two":    2,
+		"three":  3,
+		"four":   4,
+		"five":   5,
+		"six":    6,
+		"seven":  7,
+		"eight":  8,
+		"nine":   9,
+		"ten":    10,
+		"eins":   1,
+		"zwei":   2,
+		"drei":   3,
+		"vier":   4,
+		"fuenf":  5,
+		"funf":   5,
+		"sechs":  6,
+		"sieben": 7,
+		"acht":   8,
+		"neun":   9,
+		"zehn":   10,
 	}
 	n, ok := words[value]
 	return n, ok

@@ -18,11 +18,16 @@ func TestParseInlineItemIntentSomedayCommands(t *testing.T) {
 		checkBool   bool
 	}{
 		{text: "review my someday list", wantAction: "review_someday"},
+		{text: "zeige irgendwann", wantAction: "review_someday"},
 		{text: "what's in someday?", wantAction: "review_someday"},
 		{text: "not now", wantAction: "triage_someday"},
+		{text: "nicht jetzt", wantAction: "triage_someday"},
 		{text: "bring this back", wantAction: "promote_someday"},
+		{text: "hol das zurück", wantAction: "promote_someday"},
 		{text: "turn off someday reminders", wantAction: "toggle_someday_review_nudge", wantEnabled: false, checkBool: true},
+		{text: "schalte irgendwann erinnerungen aus", wantAction: "toggle_someday_review_nudge", wantEnabled: false, checkBool: true},
 		{text: "enable someday reminders", wantAction: "toggle_someday_review_nudge", wantEnabled: true, checkBool: true},
+		{text: "schalte irgendwann erinnerungen an", wantAction: "toggle_someday_review_nudge", wantEnabled: true, checkBool: true},
 	}
 
 	for _, tc := range cases {

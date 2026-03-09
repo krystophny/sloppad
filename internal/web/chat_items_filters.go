@@ -10,22 +10,25 @@ import (
 )
 
 var itemFilterSourceCommands = map[string]string{
-	"show todoist tasks":     store.ExternalProviderTodoist,
-	"show todoist items":     store.ExternalProviderTodoist,
-	"show gmail messages":    store.ExternalProviderGmail,
-	"show gmail items":       store.ExternalProviderGmail,
-	"show imap messages":     store.ExternalProviderIMAP,
-	"show imap items":        store.ExternalProviderIMAP,
-	"show exchange messages": store.ExternalProviderExchange,
-	"show exchange items":    store.ExternalProviderExchange,
-	"show github items":      "github",
-	"show manual items":      "manual",
+	"show todoist tasks":      store.ExternalProviderTodoist,
+	"show todoist items":      store.ExternalProviderTodoist,
+	"zeige todoist aufgaben":  store.ExternalProviderTodoist,
+	"zeige todoist items":     store.ExternalProviderTodoist,
+	"show gmail messages":     store.ExternalProviderGmail,
+	"show gmail items":        store.ExternalProviderGmail,
+	"zeige gmail nachrichten": store.ExternalProviderGmail,
+	"show imap messages":      store.ExternalProviderIMAP,
+	"show imap items":         store.ExternalProviderIMAP,
+	"show exchange messages":  store.ExternalProviderExchange,
+	"show exchange items":     store.ExternalProviderExchange,
+	"show github items":       "github",
+	"show manual items":       "manual",
 }
 
 func parseInlineItemFilterIntent(text string) *SystemAction {
 	normalized := normalizeItemCommandText(text)
 	switch normalized {
-	case "show inbox", "open inbox", "show my inbox":
+	case "show inbox", "open inbox", "show my inbox", "zeige posteingang", "oeffne posteingang", "zeige meinen posteingang":
 		return &SystemAction{
 			Action: "show_filtered_items",
 			Params: map[string]interface{}{
@@ -33,7 +36,7 @@ func parseInlineItemFilterIntent(text string) *SystemAction {
 				"clear_filters": true,
 			},
 		}
-	case "show unassigned items", "show unassigned inbox items", "show items without workspace":
+	case "show unassigned items", "show unassigned inbox items", "show items without workspace", "zeige nicht zugeordnete items", "zeige items ohne workspace":
 		return &SystemAction{
 			Action: "show_filtered_items",
 			Params: map[string]interface{}{

@@ -67,6 +67,23 @@ func parseLanguageListEnv(raw string) []string {
 	return out
 }
 
+func prependPreferredLanguage(languages []string, preferred string) []string {
+	lang := normalizeLanguageCodeEnv(preferred)
+	if lang == "" || lang == "auto" {
+		return languages
+	}
+	out := make([]string, 0, len(languages)+1)
+	out = append(out, lang)
+	for _, existing := range languages {
+		clean := normalizeLanguageCodeEnv(existing)
+		if clean == "" || clean == "auto" || clean == lang {
+			continue
+		}
+		out = append(out, clean)
+	}
+	return out
+}
+
 func parseEnvBoolDefault(key string, fallback bool) bool {
 	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
 	switch raw {

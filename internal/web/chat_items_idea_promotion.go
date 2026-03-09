@@ -23,12 +23,15 @@ const (
 )
 
 var (
-	ideaPromotionSelectionPattern = regexp.MustCompile(`(?i)\b(?:selected|items?)\s+([0-9][0-9,\s]*)`)
+	ideaPromotionSelectionPattern = regexp.MustCompile(`(?i)\b(?:selected|items?)\s+([0-9][0-9a-z,\s]*)`)
 	ideaPromotionActionVerbSet    = map[string]struct{}{
 		"add": {}, "break": {}, "build": {}, "capture": {}, "clarify": {}, "create": {}, "define": {},
 		"document": {}, "draft": {}, "explore": {}, "file": {}, "fix": {}, "implement": {}, "investigate": {},
 		"outline": {}, "plan": {}, "prepare": {}, "prototype": {}, "refactor": {}, "review": {}, "ship": {},
 		"split": {}, "test": {}, "write": {},
+		"analysiere": {}, "baue": {}, "behebe": {}, "dokumentiere": {}, "entwirf": {}, "erkunde": {},
+		"erstelle": {}, "fixe": {}, "implementiere": {}, "plane": {}, "pruefe": {}, "refaktorisiere": {},
+		"schreibe": {}, "skizziere": {}, "teste": {}, "untersuche": {}, "zerlege": {},
 	}
 )
 
@@ -71,11 +74,11 @@ func parseInlineIdeaPromotionIntent(text string) *SystemAction {
 	}
 	target := ""
 	switch {
-	case normalized == "make this actionable" || normalized == "turn this idea into a task" || normalized == "turn this idea into an item":
+	case normalized == "make this actionable" || normalized == "turn this idea into a task" || normalized == "turn this idea into an item" || normalized == "mach diese idee umsetzbar" || normalized == "wandle diese idee in eine aufgabe um" || normalized == "wandle diese idee in ein item um":
 		target = ideaPromotionTargetTask
-	case normalized == "turn this idea into items" || normalized == "turn this idea into tasks" || normalized == "split this idea into tasks" || normalized == "split this into tasks" || normalized == "break this down":
+	case normalized == "turn this idea into items" || normalized == "turn this idea into tasks" || normalized == "split this idea into tasks" || normalized == "split this into tasks" || normalized == "break this down" || normalized == "wandle diese idee in items um" || normalized == "wandle diese idee in aufgaben um" || normalized == "zerlege diese idee in aufgaben":
 		target = ideaPromotionTargetItems
-	case normalized == "create a github issue from this idea" || normalized == "file this idea as a github issue":
+	case normalized == "create a github issue from this idea" || normalized == "file this idea as a github issue" || normalized == "erstelle aus dieser idee ein github issue":
 		target = ideaPromotionTargetGitHub
 	}
 	if target == "" {
@@ -100,6 +103,12 @@ func parseInlineIdeaPromotionApplyIntent(text string) *SystemAction {
 		target = ideaPromotionTargetItems
 	case strings.HasPrefix(normalized, "create this idea github issue"):
 		target = ideaPromotionTargetGitHub
+	case strings.HasPrefix(normalized, "erstelle diese idee aufgabe"), strings.HasPrefix(normalized, "erstelle diese idee item"):
+		target = ideaPromotionTargetTask
+	case strings.HasPrefix(normalized, "erstelle diese idee items"), strings.HasPrefix(normalized, "erstelle ausgewaehlte idee items"):
+		target = ideaPromotionTargetItems
+	case strings.HasPrefix(normalized, "erstelle diese idee github issue"):
+		target = ideaPromotionTargetGitHub
 	}
 	if target == "" {
 		return nil
@@ -123,11 +132,11 @@ func parseInlineIdeaPromotionApplyIntent(text string) *SystemAction {
 
 func ideaPromotionDispositionFromText(normalized string) string {
 	switch {
-	case strings.Contains(normalized, "mark this idea done"), strings.Contains(normalized, "mark it done"), strings.Contains(normalized, "mark idea done"):
+	case strings.Contains(normalized, "mark this idea done"), strings.Contains(normalized, "mark it done"), strings.Contains(normalized, "mark idea done"), strings.Contains(normalized, "markiere diese idee als erledigt"), strings.Contains(normalized, "markiere sie als erledigt"):
 		return ideaPromotionDispositionDone
-	case strings.Contains(normalized, "move this idea to someday"), strings.Contains(normalized, "send this idea to someday"):
+	case strings.Contains(normalized, "move this idea to someday"), strings.Contains(normalized, "send this idea to someday"), strings.Contains(normalized, "verschiebe diese idee auf irgendwann"):
 		return ideaPromotionDispositionSomeday
-	case strings.Contains(normalized, "keep this idea"), strings.Contains(normalized, "keep it"):
+	case strings.Contains(normalized, "keep this idea"), strings.Contains(normalized, "keep it"), strings.Contains(normalized, "behalte diese idee"), strings.Contains(normalized, "behalte sie"):
 		return ideaPromotionDispositionKeep
 	default:
 		return ideaPromotionDispositionKeep
@@ -139,7 +148,8 @@ func parseIdeaPromotionSelection(normalized string) []int {
 	if len(match) != 2 {
 		return nil
 	}
-	parts := strings.Split(match[1], ",")
+	selectionText := strings.NewReplacer(" und ", ",", " and ", ",").Replace(match[1])
+	parts := strings.Split(selectionText, ",")
 	out := make([]int, 0, len(parts))
 	seen := map[int]struct{}{}
 	for _, part := range parts {
