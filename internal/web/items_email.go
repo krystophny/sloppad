@@ -296,18 +296,50 @@ func emailMessageRemoteUpdatedAt(message *providerdata.EmailMessage) *string {
 	return &value
 }
 
-func emailMessageContainerRef(message *providerdata.EmailMessage) *string {
+func emailMessageLabelRefs(message *providerdata.EmailMessage) []string {
 	if message == nil {
 		return nil
 	}
+	seen := map[string]struct{}{}
+	refs := make([]string, 0, len(message.Labels))
 	for _, label := range message.Labels {
 		clean := strings.TrimSpace(label)
 		if clean == "" {
 			continue
 		}
-		return &clean
+		key := strings.ToLower(clean)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, clean)
 	}
-	return nil
+	return refs
+}
+
+func emailMessageContainerRef(message *providerdata.EmailMessage, mappings []store.ExternalContainerMapping) *string {
+	refs := emailMessageLabelRefs(message)
+	if len(refs) == 0 {
+		return nil
+	}
+	if len(mappings) == 0 {
+		return &refs[0]
+	}
+	mappedRefs := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
+		ref := strings.TrimSpace(mapping.ContainerRef)
+		if ref == "" {
+			continue
+		}
+		mappedRefs[strings.ToLower(ref)] = struct{}{}
+	}
+	for _, ref := range refs {
+		if _, ok := mappedRefs[strings.ToLower(ref)]; ok {
+			return &ref
+		}
+	}
+	ref := refs[0]
+	return &ref
 }
 
 func emailArtifactMetaJSON(message *providerdata.EmailMessage, senderActor *store.Actor) (string, error) {
@@ -365,7 +397,7 @@ func (a *App) upsertMessageSenderActor(account store.ExternalAccount, message *p
 	return a.upsertContactActor(account, contact)
 }
 
-func (a *App) persistEmailMessage(ctx context.Context, sink tabsync.Sink, account store.ExternalAccount, message *providerdata.EmailMessage, followUp bool) (emailPersistedMessage, error) {
+func (a *App) persistEmailMessage(ctx context.Context, sink tabsync.Sink, account store.ExternalAccount, message *providerdata.EmailMessage, mappings []store.ExternalContainerMapping, followUp bool) (emailPersistedMessage, error) {
 	if message == nil || strings.TrimSpace(message.ID) == "" {
 		return emailPersistedMessage{}, nil
 	}
@@ -383,7 +415,7 @@ func (a *App) persistEmailMessage(ctx context.Context, sink tabsync.Sink, accoun
 		Provider:        account.Provider,
 		ObjectType:      emailBindingObjectType,
 		RemoteID:        strings.TrimSpace(message.ID),
-		ContainerRef:    emailMessageContainerRef(message),
+		ContainerRef:    emailMessageContainerRef(message, mappings),
 		RemoteUpdatedAt: emailMessageRemoteUpdatedAt(message),
 	}
 	artifact, err := sink.UpsertArtifact(ctx, store.Artifact{
@@ -448,6 +480,10 @@ func (a *App) syncEmailAccountWithProvider(ctx context.Context, account store.Ex
 	if err != nil {
 		return emailSyncResult{}, err
 	}
+	mappings, err := a.store.ListContainerMappings(account.Provider)
+	if err != nil {
+		return emailSyncResult{}, err
+	}
 
 	latestRemoteUpdatedAt, err := a.store.LatestBindingRemoteUpdatedAt(account.ID, account.Provider, emailBindingObjectType)
 	if err != nil {
@@ -483,7 +519,7 @@ func (a *App) syncEmailAccountWithProvider(ctx context.Context, account store.Ex
 		if message == nil || strings.TrimSpace(message.ID) == "" {
 			continue
 		}
-		persisted, err := a.persistEmailMessage(ctx, sink, account, message, hasEmailMessageID(followUpIDs, message.ID))
+		persisted, err := a.persistEmailMessage(ctx, sink, account, message, mappings, hasEmailMessageID(followUpIDs, message.ID))
 		if err != nil {
 			return emailSyncResult{}, err
 		}
@@ -493,7 +529,7 @@ func (a *App) syncEmailAccountWithProvider(ctx context.Context, account store.Ex
 			result.ItemCount++
 		}
 	}
-	threads, err := a.persistEmailThreads(ctx, sink, account, persistedMessages)
+	threads, err := a.persistEmailThreads(ctx, sink, account, mappings, persistedMessages)
 	if err != nil {
 		return emailSyncResult{}, err
 	}
