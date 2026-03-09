@@ -161,13 +161,25 @@ type Message struct {
 	ConversationID   string      `json:"conversationId"`
 	Subject          string      `json:"subject"`
 	BodyPreview      string      `json:"bodyPreview"`
+	Body             MessageBody `json:"body"`
 	IsRead           bool        `json:"isRead"`
+	HasAttachments   bool        `json:"hasAttachments"`
+	Flag             MessageFlag `json:"flag"`
 	ParentFolderID   string      `json:"parentFolderId"`
 	ReceivedDateTime string      `json:"receivedDateTime"`
 	WebLink          string      `json:"webLink"`
 	From             *Recipient  `json:"from,omitempty"`
 	ToRecipients     []Recipient `json:"toRecipients,omitempty"`
 	CcRecipients     []Recipient `json:"ccRecipients,omitempty"`
+}
+
+type MessageBody struct {
+	ContentType string `json:"contentType"`
+	Content     string `json:"content"`
+}
+
+type MessageFlag struct {
+	FlagStatus string `json:"flagStatus"`
 }
 
 type Recipient struct {

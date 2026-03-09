@@ -46,6 +46,10 @@ func (f *fakeEmailSyncProvider) ListContacts(_ context.Context) ([]providerdata.
 	return append([]providerdata.Contact(nil), f.contacts...), nil
 }
 
+func stringPointer(value string) *string {
+	return &value
+}
+
 func TestSourceSyncRunnerPollsGmailAndIMAPAccounts(t *testing.T) {
 	app := newAuthedTestApp(t)
 
@@ -241,7 +245,7 @@ func TestSourceSyncRunnerPollsGmailAndIMAPAccounts(t *testing.T) {
 	}
 }
 
-func TestSourceSyncRunnerPollsExchangeContacts(t *testing.T) {
+func TestSourceSyncRunnerPollsExchangeEmailAccounts(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchange, "Work Exchange", map[string]any{
@@ -252,18 +256,61 @@ func TestSourceSyncRunnerPollsExchangeContacts(t *testing.T) {
 		t.Fatalf("CreateExternalAccount(exchange) error: %v", err)
 	}
 
+	project, err := app.store.CreateProject("Contracts", "contracts", filepath.Join(t.TempDir(), "contracts"), "managed", "", "", false)
+	if err != nil {
+		t.Fatalf("CreateProject() error: %v", err)
+	}
+	workspace, err := app.store.CreateWorkspace("Contracts", filepath.Join(t.TempDir(), "workspace", "contracts"), store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	if _, err := app.store.SetContainerMapping(store.ExternalProviderExchange, "label", "Contracts", &workspace.ID, &project.ID, nil); err != nil {
+		t.Fatalf("SetContainerMapping() error: %v", err)
+	}
+
+	provider := &fakeEmailSyncProvider{
+		listFunc: func(opts email.SearchOptions) ([]string, error) {
+			switch {
+			case opts.IsRead != nil && !*opts.IsRead:
+				return []string{"exchange-1"}, nil
+			case opts.IsFlagged != nil && *opts.IsFlagged:
+				return nil, nil
+			case !opts.Since.IsZero():
+				return []string{"exchange-1"}, nil
+			default:
+				return nil, nil
+			}
+		},
+		messages: map[string]*providerdata.EmailMessage{
+			"exchange-1": {
+				ID:         "exchange-1",
+				ThreadID:   "thread-exchange-1",
+				Subject:    "Budget follow-up",
+				Sender:     "Carol <carol@example.com>",
+				Recipients: []string{"finance@example.com"},
+				Date:       time.Date(2026, time.March, 9, 13, 0, 0, 0, time.UTC),
+				Labels:     []string{"Contracts"},
+				BodyText:   stringPointer("Please schedule meeting about budget by March 12."),
+			},
+		},
+		contacts: []providerdata.Contact{{
+			ProviderRef:  "exchange-contact-1",
+			Name:         "Carol",
+			Email:        "carol@example.com",
+			Organization: "Example Corp",
+		}},
+	}
+	app.newEmailSyncProvider = func(_ context.Context, externalAccount store.ExternalAccount) (emailSyncProvider, error) {
+		if externalAccount.ID != account.ID {
+			t.Fatalf("unexpected exchange email account id: %d", externalAccount.ID)
+		}
+		return provider, nil
+	}
 	app.newContactSyncProvider = func(_ context.Context, externalAccount store.ExternalAccount) (contactSyncProvider, error) {
 		if externalAccount.ID != account.ID {
-			t.Fatalf("unexpected external account id: %d", externalAccount.ID)
+			t.Fatalf("unexpected exchange contact account id: %d", externalAccount.ID)
 		}
-		return &fakeEmailSyncProvider{
-			contacts: []providerdata.Contact{{
-				ProviderRef:  "exchange-contact-1",
-				Name:         "Carol",
-				Email:        "carol@example.com",
-				Organization: "Example Corp",
-			}},
-		}, nil
+		return provider, nil
 	}
 	app.sourceSync = app.newSourceSyncRunner()
 
@@ -274,6 +321,43 @@ func TestSourceSyncRunnerPollsExchangeContacts(t *testing.T) {
 	if len(result.Accounts) != 1 {
 		t.Fatalf("len(result.Accounts) = %d, want 1", len(result.Accounts))
 	}
+	if result.Accounts[0].Skipped || result.Accounts[0].Err != nil {
+		t.Fatalf("result.Accounts[0] = %#v, want successful sync", result.Accounts[0])
+	}
+
+	item, err := app.store.GetItemBySource(store.ExternalProviderExchange, "message:exchange-1")
+	if err != nil {
+		t.Fatalf("GetItemBySource(exchange) error: %v", err)
+	}
+	if item.WorkspaceID == nil || *item.WorkspaceID != workspace.ID {
+		t.Fatalf("exchange item workspace_id = %v, want %d", item.WorkspaceID, workspace.ID)
+	}
+	if item.ProjectID == nil || *item.ProjectID != project.ID {
+		t.Fatalf("exchange item project_id = %v, want %q", item.ProjectID, project.ID)
+	}
+
+	itemArtifacts, err := app.store.ListItemArtifacts(item.ID)
+	if err != nil {
+		t.Fatalf("ListItemArtifacts(exchange) error: %v", err)
+	}
+	if len(itemArtifacts) != 2 {
+		t.Fatalf("len(exchange item artifacts) = %d, want 2", len(itemArtifacts))
+	}
+	if itemArtifacts[0].Artifact.Kind != store.ArtifactKindEmail {
+		t.Fatalf("exchange primary artifact kind = %q, want email", itemArtifacts[0].Artifact.Kind)
+	}
+	if itemArtifacts[1].Artifact.Kind != store.ArtifactKindEmailThread || itemArtifacts[1].Role != "related" {
+		t.Fatalf("exchange related artifact = %+v, want related email_thread", itemArtifacts[1])
+	}
+
+	actionItem, err := app.store.GetItemBySource(store.ExternalProviderExchange, emailActionSourceRef("thread-exchange-1", "Schedule meeting about budget"))
+	if err != nil {
+		t.Fatalf("GetItemBySource(exchange action) error: %v", err)
+	}
+	if actionItem.FollowUpAt == nil || *actionItem.FollowUpAt != "2026-03-12T09:00:00Z" {
+		t.Fatalf("exchange action follow_up_at = %v, want 2026-03-12T09:00:00Z", actionItem.FollowUpAt)
+	}
+
 	actor, err := app.store.GetActorByProviderRef(store.ExternalProviderExchange, "exchange-contact-1")
 	if err != nil {
 		t.Fatalf("GetActorByProviderRef(exchange) error: %v", err)

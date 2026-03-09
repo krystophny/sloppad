@@ -29,7 +29,7 @@ func (a *App) contactSyncProviderForAccount(ctx context.Context, account store.E
 		}
 		return email.NewGmailWithFiles(gmailCredentialsPathForAccount(cfg), gmailTokenPathForAccount(account, cfg))
 	case store.ExternalProviderExchange:
-		cfg, err := decodeExchangeContactAccountConfig(account)
+		cfg, err := decodeExchangeAccountConfig(account)
 		if err != nil {
 			return nil, err
 		}
@@ -39,12 +39,12 @@ func (a *App) contactSyncProviderForAccount(ctx context.Context, account store.E
 	}
 }
 
-func decodeExchangeContactAccountConfig(account store.ExternalAccount) (email.ExchangeConfig, error) {
+func decodeExchangeAccountConfig(account store.ExternalAccount) (email.ExchangeConfig, error) {
 	config := map[string]any{}
 	raw := strings.TrimSpace(account.ConfigJSON)
 	if raw != "" && raw != "{}" {
 		if err := json.Unmarshal([]byte(raw), &config); err != nil {
-			return email.ExchangeConfig{}, fmt.Errorf("decode exchange contact config: %w", err)
+			return email.ExchangeConfig{}, fmt.Errorf("decode exchange account config: %w", err)
 		}
 	}
 	return email.ExchangeConfigFromMap(account.Label, config)

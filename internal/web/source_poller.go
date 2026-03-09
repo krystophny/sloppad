@@ -86,7 +86,8 @@ func (a *App) newSourceSyncRunner() sourceSyncRunner {
 		},
 		{
 			name:        store.ExternalProviderExchange,
-			syncAccount: a.syncContactAccount,
+			syncAccount: a.syncManagedEmailAccount,
+			onSynced:    a.handleSourceSyncCount,
 		},
 		{
 			name:        store.ExternalProviderTodoist,

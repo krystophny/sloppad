@@ -171,6 +171,12 @@ func (a *App) emailSyncProviderForAccount(ctx context.Context, account store.Ext
 		}
 		useTLS := cfg.TLS || cfg.Port == 993
 		return email.NewIMAPClient(account.Label, cfg.Host, cfg.Port, cfg.Username, password, useTLS, cfg.StartTLS), nil
+	case store.ExternalProviderExchange:
+		exchangeConfig, err := decodeExchangeAccountConfig(account)
+		if err != nil {
+			return nil, err
+		}
+		return email.NewExchangeMailProvider(exchangeConfig)
 	default:
 		return nil, fmt.Errorf("email sync does not support provider %s", account.Provider)
 	}

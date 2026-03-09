@@ -242,6 +242,213 @@ func TestExchangeClientUsesRefreshTokenForGraphOperations(t *testing.T) {
 	}
 }
 
+func TestExchangeMailProviderSupportsSearchAndFetch(t *testing.T) {
+	tokensPath := filepath.Join(t.TempDir(), "exchange.json")
+	if err := saveExchangeTokenFile(tokensPath, exchangeToken{
+		RefreshToken: "refresh-token",
+		ExpiresAt:    time.Date(2026, time.March, 9, 8, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("saveExchangeTokenFile() error: %v", err)
+	}
+
+	var markReadIDs []string
+	var markUnreadIDs []string
+	var archiveIDs []string
+	var deleteIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/tenant/oauth2/v2.0/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("ParseForm() error: %v", err)
+			}
+			writeJSON(t, w, map[string]any{
+				"access_token":  "access-1",
+				"refresh_token": "refresh-2",
+				"token_type":    "Bearer",
+				"expires_in":    3600,
+			})
+		case r.URL.Path == "/v1.0/me/mailFolders":
+			requireBearer(t, r, "access-1")
+			writeJSON(t, w, map[string]any{
+				"value": []map[string]any{
+					{
+						"id":               "inbox-id",
+						"displayName":      "Inbox",
+						"wellKnownName":    "inbox",
+						"totalItemCount":   12,
+						"unreadItemCount":  3,
+						"childFolderCount": 0,
+					},
+					{
+						"id":               "contracts-id",
+						"displayName":      "Contracts",
+						"wellKnownName":    "",
+						"totalItemCount":   4,
+						"unreadItemCount":  1,
+						"childFolderCount": 0,
+					},
+				},
+			})
+		case r.URL.Path == "/v1.0/me/mailFolders/inbox-id/messages":
+			requireBearer(t, r, "access-1")
+			writeJSON(t, w, map[string]any{
+				"value": []map[string]any{
+					{
+						"id":               "msg-1",
+						"conversationId":   "conv-1",
+						"subject":          "Quarterly review",
+						"bodyPreview":      "Please review the budget appendix",
+						"isRead":           false,
+						"hasAttachments":   true,
+						"flag":             map[string]any{"flagStatus": "flagged"},
+						"parentFolderId":   "contracts-id",
+						"receivedDateTime": "2026-03-09T09:00:00Z",
+						"from":             map[string]any{"emailAddress": map[string]any{"name": "Ada", "address": "ada@example.com"}},
+						"toRecipients":     []map[string]any{{"emailAddress": map[string]any{"name": "Team", "address": "team@example.com"}}},
+					},
+					{
+						"id":               "msg-2",
+						"conversationId":   "conv-2",
+						"subject":          "Archive me",
+						"bodyPreview":      "No action",
+						"isRead":           true,
+						"hasAttachments":   false,
+						"flag":             map[string]any{"flagStatus": "notFlagged"},
+						"parentFolderId":   "inbox-id",
+						"receivedDateTime": "2026-03-08T09:00:00Z",
+						"from":             map[string]any{"emailAddress": map[string]any{"name": "Bob", "address": "bob@example.com"}},
+					},
+				},
+			})
+		case r.URL.Path == "/v1.0/me/messages/msg-1" && r.Method == http.MethodGet:
+			requireBearer(t, r, "access-1")
+			writeJSON(t, w, map[string]any{
+				"id":               "msg-1",
+				"conversationId":   "conv-1",
+				"subject":          "Quarterly review",
+				"bodyPreview":      "Please review the budget appendix",
+				"body":             map[string]any{"contentType": "html", "content": "<p>Please review the budget appendix by March 12.</p>"},
+				"isRead":           false,
+				"hasAttachments":   true,
+				"flag":             map[string]any{"flagStatus": "flagged"},
+				"parentFolderId":   "contracts-id",
+				"receivedDateTime": "2026-03-09T09:00:00Z",
+				"webLink":          "https://example.invalid/mail/msg-1",
+				"from":             map[string]any{"emailAddress": map[string]any{"name": "Ada", "address": "ada@example.com"}},
+				"toRecipients":     []map[string]any{{"emailAddress": map[string]any{"name": "Team", "address": "team@example.com"}}},
+				"ccRecipients":     []map[string]any{{"emailAddress": map[string]any{"name": "Ops", "address": "ops@example.com"}}},
+			})
+		case r.URL.Path == "/v1.0/me/messages/msg-1" && r.Method == http.MethodPatch:
+			requireBearer(t, r, "access-1")
+			var body map[string]bool
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("Decode(patch) error: %v", err)
+			}
+			if body["isRead"] {
+				markReadIDs = append(markReadIDs, "msg-1")
+			} else {
+				markUnreadIDs = append(markUnreadIDs, "msg-1")
+			}
+			writeJSON(t, w, map[string]any{"id": "msg-1"})
+		case r.URL.Path == "/v1.0/me/messages/msg-1/move":
+			requireBearer(t, r, "access-1")
+			archiveIDs = append(archiveIDs, "msg-1")
+			writeJSON(t, w, map[string]any{"id": "msg-1"})
+		case r.URL.Path == "/v1.0/me/messages/msg-1" && r.Method == http.MethodDelete:
+			requireBearer(t, r, "access-1")
+			deleteIDs = append(deleteIDs, "msg-1")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewExchangeMailProvider(ExchangeConfig{
+		Label:       "Work Mail",
+		ClientID:    "client-id",
+		TenantID:    "tenant",
+		BaseURL:     server.URL,
+		AuthBaseURL: server.URL,
+		TokenPath:   tokensPath,
+	}, WithExchangeClock(func() time.Time {
+		return time.Date(2026, time.March, 9, 10, 0, 0, 0, time.UTC)
+	}), WithExchangeEnvLookup(func(string) (string, bool) {
+		return "secret-value", true
+	}))
+	if err != nil {
+		t.Fatalf("NewExchangeMailProvider() error: %v", err)
+	}
+
+	labels, err := provider.ListLabels(context.Background())
+	if err != nil {
+		t.Fatalf("ListLabels() error: %v", err)
+	}
+	if len(labels) != 2 || labels[1].Name != "Contracts" {
+		t.Fatalf("ListLabels() = %+v", labels)
+	}
+
+	ids, err := provider.ListMessages(context.Background(), DefaultSearchOptions().
+		WithFolder("INBOX").
+		WithIsRead(false).
+		WithIsFlagged(true).
+		WithSubject("Quarterly").
+		WithText("budget").
+		WithHasAttachment(true).
+		WithMaxResults(10))
+	if err != nil {
+		t.Fatalf("ListMessages() error: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "msg-1" {
+		t.Fatalf("ListMessages() = %+v, want [msg-1]", ids)
+	}
+
+	message, err := provider.GetMessage(context.Background(), "msg-1", "full")
+	if err != nil {
+		t.Fatalf("GetMessage() error: %v", err)
+	}
+	if message.Subject != "Quarterly review" || message.ThreadID != "conv-1" {
+		t.Fatalf("GetMessage() = %+v", message)
+	}
+	if message.BodyText == nil || !strings.Contains(*message.BodyText, "review the budget appendix") {
+		t.Fatalf("GetMessage().BodyText = %v", message.BodyText)
+	}
+	if len(message.Labels) == 0 || message.Labels[0] != "Contracts" {
+		t.Fatalf("GetMessage().Labels = %+v, want Contracts first", message.Labels)
+	}
+	if len(message.Attachments) != 1 {
+		t.Fatalf("GetMessage().Attachments = %+v, want one attachment placeholder", message.Attachments)
+	}
+
+	messages, err := provider.GetMessages(context.Background(), []string{"msg-1"}, "full")
+	if err != nil {
+		t.Fatalf("GetMessages() error: %v", err)
+	}
+	if len(messages) != 1 || messages[0].ID != "msg-1" {
+		t.Fatalf("GetMessages() = %+v", messages)
+	}
+
+	if _, err := provider.MarkRead(context.Background(), []string{"msg-1"}); err != nil {
+		t.Fatalf("MarkRead() error: %v", err)
+	}
+	if _, err := provider.MarkUnread(context.Background(), []string{"msg-1"}); err != nil {
+		t.Fatalf("MarkUnread() error: %v", err)
+	}
+	if _, err := provider.Archive(context.Background(), []string{"msg-1"}); err != nil {
+		t.Fatalf("Archive() error: %v", err)
+	}
+	if _, err := provider.Trash(context.Background(), []string{"msg-1"}); err != nil {
+		t.Fatalf("Trash() error: %v", err)
+	}
+	if provider.ProviderName() != "exchange" {
+		t.Fatalf("ProviderName() = %q, want exchange", provider.ProviderName())
+	}
+
+	if len(markReadIDs) != 1 || len(markUnreadIDs) != 1 || len(archiveIDs) != 1 || len(deleteIDs) != 1 {
+		t.Fatalf("actions read=%v unread=%v archive=%v delete=%v", markReadIDs, markUnreadIDs, archiveIDs, deleteIDs)
+	}
+}
+
 func TestExchangeClientFallsBackToDeviceCodeFlow(t *testing.T) {
 	var promptInfo DeviceCodeInfo
 	var tokenPolls int
