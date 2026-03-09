@@ -275,12 +275,78 @@ function buildCanvasState() {
   };
 }
 
-function buildDeviceState() {
+function cleanStringList(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => safeText(value))
+    .filter(Boolean);
+}
+
+function normalizeBrandList(brands) {
+  if (!Array.isArray(brands)) return [];
+  return brands
+    .map((entry) => {
+      const brand = safeText(entry?.brand);
+      const version = safeText(entry?.version);
+      if (!brand && !version) return null;
+      return { brand, version };
+    })
+    .filter(Boolean);
+}
+
+async function readUserAgentData() {
+  const userAgentData = navigator.userAgentData;
+  if (!userAgentData || typeof userAgentData !== 'object') {
+    return {};
+  }
+  const device = {
+    mobile: Boolean(userAgentData.mobile),
+    brands: normalizeBrandList(userAgentData.brands),
+    platform: safeText(userAgentData.platform),
+  };
+  if (typeof userAgentData.getHighEntropyValues === 'function') {
+    try {
+      const detail = await userAgentData.getHighEntropyValues([
+        'architecture',
+        'fullVersionList',
+        'model',
+        'platformVersion',
+        'uaFullVersion',
+      ]);
+      device.architecture = safeText(detail?.architecture);
+      device.full_version_list = normalizeBrandList(detail?.fullVersionList);
+      device.model = safeText(detail?.model);
+      device.os_version = safeText(detail?.platformVersion);
+      device.browser_version = safeText(detail?.uaFullVersion);
+    } catch (_) {}
+  }
+  return device;
+}
+
+async function buildDeviceState() {
+  const uaData = await readUserAgentData();
+  const timeZone = safeText(Intl.DateTimeFormat().resolvedOptions?.().timeZone);
   return {
     ua: safeText(navigator.userAgent),
-    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    platform: safeText(uaData.platform || navigator.platform),
+    os_version: safeText(uaData.os_version),
+    architecture: safeText(uaData.architecture),
+    model: safeText(uaData.model),
+    mobile: Boolean(uaData.mobile),
+    brands: normalizeBrandList(uaData.brands),
+    full_version_list: normalizeBrandList(uaData.full_version_list),
+    browser_version: safeText(uaData.browser_version),
+    vendor: safeText(navigator.vendor),
     language: safeText(navigator.language),
+    languages: cleanStringList(navigator.languages),
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    screen: `${window.screen?.width || 0}x${window.screen?.height || 0}`,
+    color_depth: Number(window.screen?.colorDepth || 0),
     pixel_ratio: window.devicePixelRatio || 1,
+    timezone: timeZone,
+    hardware_concurrency: Number(navigator.hardwareConcurrency || 0),
+    device_memory_gb: Number(navigator.deviceMemory || 0),
+    max_touch_points: Number(navigator.maxTouchPoints || 0),
   };
 }
 
@@ -539,7 +605,7 @@ async function stopBugReportVoiceNote(cancel = false) {
   } catch (_) {}
 }
 
-function snapshotBugReportContext(trigger, runtime) {
+async function snapshotBugReportContext(trigger, runtime) {
   return {
     trigger,
     timestamp: formatNow(),
@@ -551,7 +617,7 @@ function snapshotBugReportContext(trigger, runtime) {
     canvasState: buildCanvasState(),
     recentEvents: recentEvents.slice(),
     browserLogs: browserLogs.slice(),
-    device: buildDeviceState(),
+    device: await buildDeviceState(),
     screenshotDataURL: '',
     strokes: [],
     voiceTranscript: '',
@@ -561,7 +627,7 @@ function snapshotBugReportContext(trigger, runtime) {
 async function openBugReport(trigger) {
   ensureBugReportUi();
   const runtime = await fetchRuntimeMeta().catch(() => ({}));
-  const report = snapshotBugReportContext(trigger, runtime);
+  const report = await snapshotBugReportContext(trigger, runtime);
   report.screenshotDataURL = await captureViewportScreenshot();
   pendingReport = report;
   const { preview, note } = bugReportNodes();

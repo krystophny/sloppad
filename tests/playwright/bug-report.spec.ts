@@ -47,6 +47,12 @@ test.describe('bug report flow', () => {
     expect(Array.isArray(request.recent_events)).toBe(true);
     expect(request.recent_events.length).toBeGreaterThan(0);
     expect(Array.isArray(request.browser_logs)).toBe(true);
+    expect(String(request.device?.ua || '')).not.toBe('');
+    expect(String(request.device?.platform || '')).not.toBe('');
+    expect(String(request.device?.screen || '')).toMatch(/^\d+x\d+$/);
+    expect(String(request.device?.timezone || '')).not.toBe('');
+    expect(Number.isFinite(Number(request.device?.hardware_concurrency))).toBe(true);
+    expect(Number.isFinite(Number(request.device?.max_touch_points))).toBe(true);
     await expect(page.locator('#bug-report-sheet')).toBeHidden();
     await expect(page.locator('#canvas-text')).toContainText('Bug report filed');
     await expect(page.locator('#canvas-text')).toContainText('#77');

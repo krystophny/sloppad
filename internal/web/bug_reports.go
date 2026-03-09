@@ -421,6 +421,11 @@ func bugReportIssueBody(bundle bugReportBundle, bundlePath string) string {
 			b.WriteString(line)
 		}
 	}
+	if deviceJSON := bugReportJSON(bundle.Device); deviceJSON != "" {
+		b.WriteString("\n## Device\n\n```json\n")
+		b.WriteString(deviceJSON)
+		b.WriteString("\n```\n")
+	}
 	if len(bundle.RecentEvents) > 0 {
 		b.WriteString("\n## Recent events\n\n")
 		for _, event := range bundle.RecentEvents {
@@ -451,6 +456,17 @@ func bugReportContextLine(label, value string) string {
 		return ""
 	}
 	return fmt.Sprintf("- %s: `%s`\n", label, clean)
+}
+
+func bugReportJSON(value any) string {
+	if value == nil {
+		return ""
+	}
+	encoded, err := json.MarshalIndent(value, "", "  ")
+	if err != nil || string(encoded) == "null" {
+		return ""
+	}
+	return string(encoded)
 }
 
 func decodeBugReportDataURL(raw string) (bugReportFile, error) {

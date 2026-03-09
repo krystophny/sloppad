@@ -50,17 +50,26 @@ func TestHandleBugReportCreateWritesBundleUnderWorkspaceArtifacts(t *testing.T) 
 	}
 
 	rr := doAuthedJSONRequest(t, app.Router(), "POST", "/api/bugs/report", map[string]any{
-		"trigger":             "button",
-		"timestamp":           "2026-03-08T15:04:05Z",
-		"page_url":            "http://127.0.0.1:8420/",
-		"version":             "0.1.8",
-		"boot_id":             "boot-123",
-		"started_at":          "2026-03-08T14:00:00Z",
-		"active_mode":         "pen",
-		"canvas_state":        map[string]any{"has_artifact": true, "artifact_title": "README.md"},
-		"recent_events":       []string{"tap at (12,18)", "report bug"},
-		"browser_logs":        []string{"warn: render slow"},
-		"device":              map[string]any{"ua": "Playwright", "viewport": "1280x720"},
+		"trigger":       "button",
+		"timestamp":     "2026-03-08T15:04:05Z",
+		"page_url":      "http://127.0.0.1:8420/",
+		"version":       "0.1.8",
+		"boot_id":       "boot-123",
+		"started_at":    "2026-03-08T14:00:00Z",
+		"active_mode":   "pen",
+		"canvas_state":  map[string]any{"has_artifact": true, "artifact_title": "README.md"},
+		"recent_events": []string{"tap at (12,18)", "report bug"},
+		"browser_logs":  []string{"warn: render slow"},
+		"device": map[string]any{
+			"ua":                   "Mozilla/5.0 Example",
+			"platform":             "macOS",
+			"os_version":           "14.4.0",
+			"browser_version":      "123.0.6312.59",
+			"viewport":             "1280x720",
+			"screen":               "1440x900",
+			"timezone":             "Europe/Vienna",
+			"hardware_concurrency": float64(8),
+		},
 		"note":                "The indicator froze after the tap.",
 		"voice_transcript":    "it stops responding after the second tap",
 		"screenshot_data_url": testPNGDataURL,
@@ -110,6 +119,19 @@ func TestHandleBugReportCreateWritesBundleUnderWorkspaceArtifacts(t *testing.T) 
 	}
 	if got := strFromAny(bundle["voice_transcript"]); got != "it stops responding after the second tap" {
 		t.Fatalf("voice_transcript = %q, want transcript to round-trip", got)
+	}
+	device, ok := bundle["device"].(map[string]any)
+	if !ok {
+		t.Fatalf("device = %#v, want object", bundle["device"])
+	}
+	if got := strFromAny(device["platform"]); got != "macOS" {
+		t.Fatalf("device.platform = %q, want %q", got, "macOS")
+	}
+	if got := strFromAny(device["os_version"]); got != "14.4.0" {
+		t.Fatalf("device.os_version = %q, want %q", got, "14.4.0")
+	}
+	if got := strFromAny(device["timezone"]); got != "Europe/Vienna" {
+		t.Fatalf("device.timezone = %q, want %q", got, "Europe/Vienna")
 	}
 	if got := strFromAny(bundle["screenshot"]); got != screenshotPath {
 		t.Fatalf("bundle screenshot = %q, want %q", got, screenshotPath)
@@ -165,7 +187,10 @@ func TestHandleBugReportCreateWritesBundleUnderWorkspaceArtifacts(t *testing.T) 
 		"--label p0",
 		"--title Bug report: The indicator froze after the tap",
 		"## Evidence",
+		"## Device",
 		".tabura/artifacts/bugs/",
+		"\"platform\": \"macOS\"",
+		"\"os_version\": \"14.4.0\"",
 	} {
 		if !strings.Contains(createCall, needle) {
 			t.Fatalf("create call = %q, missing %q", createCall, needle)
