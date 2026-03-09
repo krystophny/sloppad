@@ -146,9 +146,9 @@ func emailThreadRemoteUpdatedAt(messages []emailPersistedMessage) *string {
 	return nil
 }
 
-func emailThreadContainerRef(messages []emailPersistedMessage) *string {
+func emailThreadContainerRef(messages []emailPersistedMessage, mappings []store.ExternalContainerMapping) *string {
 	for _, persisted := range sortEmailMessagesByDate(messages) {
-		if ref := emailMessageContainerRef(persisted.Message); ref != nil {
+		if ref := emailMessageContainerRef(persisted.Message, mappings); ref != nil {
 			return ref
 		}
 	}
@@ -169,7 +169,7 @@ func emailThreadMetaJSON(threadID string, messages []emailPersistedMessage) (str
 	return string(raw), nil
 }
 
-func (a *App) persistEmailThreads(ctx context.Context, sink tabsync.Sink, account store.ExternalAccount, messages []emailPersistedMessage) ([]emailThreadRecord, error) {
+func (a *App) persistEmailThreads(ctx context.Context, sink tabsync.Sink, account store.ExternalAccount, mappings []store.ExternalContainerMapping, messages []emailPersistedMessage) ([]emailThreadRecord, error) {
 	grouped := make(map[string][]emailPersistedMessage)
 	for _, persisted := range messages {
 		threadID := emailThreadIDForMessage(persisted.Message)
@@ -205,7 +205,7 @@ func (a *App) persistEmailThreads(ctx context.Context, sink tabsync.Sink, accoun
 			Provider:        account.Provider,
 			ObjectType:      emailThreadBindingObjectType,
 			RemoteID:        threadID,
-			ContainerRef:    emailThreadContainerRef(group),
+			ContainerRef:    emailThreadContainerRef(group, mappings),
 			RemoteUpdatedAt: emailThreadRemoteUpdatedAt(group),
 		})
 		if err != nil {

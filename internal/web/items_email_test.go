@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -336,6 +337,94 @@ func TestSyncEmailAccountCreatesFollowUpItemsFromRules(t *testing.T) {
 	}
 	if item.Title != "contract review needed" {
 		t.Fatalf("rule item title = %q, want subject", item.Title)
+	}
+}
+
+func TestSyncEmailAccountUsesMappedNonPrimaryLabelForAssignment(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderGmail, "Legal Gmail", nil)
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	project, err := app.store.CreateProject("Contracts", "contracts", filepath.Join(t.TempDir(), "contracts"), "managed", "", "", false)
+	if err != nil {
+		t.Fatalf("CreateProject() error: %v", err)
+	}
+	workspace, err := app.store.CreateWorkspace("Contracts", filepath.Join(t.TempDir(), "workspace", "contracts"), store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	if _, err := app.store.SetContainerMapping(store.ExternalProviderGmail, "label", "Contracts", &workspace.ID, &project.ID, nil); err != nil {
+		t.Fatalf("SetContainerMapping() error: %v", err)
+	}
+
+	provider := &fakeEmailSyncProvider{
+		listFunc: func(opts email.SearchOptions) ([]string, error) {
+			switch {
+			case opts.IsRead != nil && !*opts.IsRead:
+				return []string{"gmail-contracts"}, nil
+			case opts.IsFlagged != nil && *opts.IsFlagged:
+				return nil, nil
+			case !opts.Since.IsZero():
+				return []string{"gmail-contracts"}, nil
+			default:
+				return nil, nil
+			}
+		},
+		messages: map[string]*providerdata.EmailMessage{
+			"gmail-contracts": {
+				ID:         "gmail-contracts",
+				ThreadID:   "thread-contracts",
+				Subject:    "Review contract terms",
+				Sender:     "Counsel <counsel@example.com>",
+				Recipients: []string{"legal@example.com"},
+				Date:       time.Date(2026, time.March, 9, 12, 0, 0, 0, time.UTC),
+				Labels:     []string{"INBOX", "Contracts"},
+			},
+		},
+	}
+	app.newEmailSyncProvider = func(context.Context, store.ExternalAccount) (emailSyncProvider, error) {
+		return provider, nil
+	}
+
+	if _, err := app.syncEmailAccount(context.Background(), account); err != nil {
+		t.Fatalf("syncEmailAccount() error: %v", err)
+	}
+
+	item, err := app.store.GetItemBySource(store.ExternalProviderGmail, "message:gmail-contracts")
+	if err != nil {
+		t.Fatalf("GetItemBySource() error: %v", err)
+	}
+	if item.WorkspaceID == nil || *item.WorkspaceID != workspace.ID {
+		t.Fatalf("item workspace_id = %v, want %d", item.WorkspaceID, workspace.ID)
+	}
+	if item.ProjectID == nil || *item.ProjectID != project.ID {
+		t.Fatalf("item project_id = %v, want %q", item.ProjectID, project.ID)
+	}
+
+	binding, err := app.store.GetBindingByRemote(account.ID, store.ExternalProviderGmail, emailBindingObjectType, "gmail-contracts")
+	if err != nil {
+		t.Fatalf("GetBindingByRemote(email) error: %v", err)
+	}
+	if binding.ContainerRef == nil || *binding.ContainerRef != "Contracts" {
+		t.Fatalf("binding container_ref = %v, want Contracts", binding.ContainerRef)
+	}
+
+	artifacts, err := app.store.ListArtifactsForWorkspace(workspace.ID)
+	if err != nil {
+		t.Fatalf("ListArtifactsForWorkspace() error: %v", err)
+	}
+	if len(artifacts) != 2 {
+		t.Fatalf("len(workspace artifacts) = %d, want 2", len(artifacts))
+	}
+
+	threadBinding, err := app.store.GetBindingByRemote(account.ID, store.ExternalProviderGmail, emailThreadBindingObjectType, "thread-contracts")
+	if err != nil {
+		t.Fatalf("GetBindingByRemote(thread) error: %v", err)
+	}
+	if threadBinding.ContainerRef == nil || *threadBinding.ContainerRef != "Contracts" {
+		t.Fatalf("thread binding container_ref = %v, want Contracts", threadBinding.ContainerRef)
 	}
 }
 
