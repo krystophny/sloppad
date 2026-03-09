@@ -38,14 +38,24 @@ func TestParseInlineItemIntent(t *testing.T) {
 	}{
 		{text: "idea: better swipe triage", wantAction: "capture_idea"},
 		{text: "new idea: add a review inbox", wantAction: "capture_idea"},
+		{text: "Idee: bessere Rückfragen für den Review-Modus", wantAction: "capture_idea"},
 		{text: "expand this idea", wantAction: "refine_idea_note", wantKind: "expand"},
+		{text: "Baue diese Idee aus", wantAction: "refine_idea_note", wantKind: "expand"},
 		{text: "add pros and cons", wantAction: "refine_idea_note", wantKind: "pros_cons"},
+		{text: "Ergänze Vor- und Nachteile", wantAction: "refine_idea_note", wantKind: "pros_cons"},
 		{text: "compare alternatives", wantAction: "refine_idea_note", wantKind: "alternatives"},
+		{text: "Vergleiche Alternativen", wantAction: "refine_idea_note", wantKind: "alternatives"},
 		{text: "outline an implementation", wantAction: "refine_idea_note", wantKind: "implementation"},
+		{text: "Skizziere eine Umsetzung", wantAction: "refine_idea_note", wantKind: "implementation"},
 		{text: "make this an item", wantAction: "make_item"},
+		{text: "Mach das zu einem Item", wantAction: "make_item"},
 		{text: "delegate this to Codex", wantAction: "delegate_item", wantActor: "Codex"},
+		{text: "Delegiere das an Codex", wantAction: "delegate_item", wantActor: "Codex"},
 		{text: "remind me tomorrow", wantAction: "snooze_item", wantWhen: "2026-03-09T09:00:00Z"},
+		{text: "Erinnere mich morgen", wantAction: "snooze_item", wantWhen: "2026-03-09T09:00:00Z"},
+		{text: "Erinnere mich am Montag", wantAction: "snooze_item", wantWhen: "2026-03-09T09:00:00Z"},
 		{text: "split this into three items", wantAction: "split_items", wantCount: 3},
+		{text: "Teile das in drei Aufgaben", wantAction: "split_items", wantCount: 3},
 	}
 
 	for _, tc := range cases {
@@ -71,6 +81,13 @@ func TestParseInlineItemIntent(t *testing.T) {
 				t.Fatalf("kind = %q, want %q", systemActionStringParam(action.Params, "kind"), tc.wantKind)
 			}
 		})
+	}
+}
+
+func TestDeriveIdeaTitlePreservesGermanText(t *testing.T) {
+	title := deriveIdeaTitle("größere Übersicht für Öl-Temperatur prüfen. Danach Details sammeln.")
+	if title != "Größere Übersicht für Öl-Temperatur prüfen." {
+		t.Fatalf("title = %q", title)
 	}
 }
 

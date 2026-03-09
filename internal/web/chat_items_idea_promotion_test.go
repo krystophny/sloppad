@@ -88,9 +88,13 @@ func TestParseInlineItemIntentIdeaPromotion(t *testing.T) {
 		wantSelected    []int
 	}{
 		{text: "make this actionable", wantAction: "promote_idea", wantTarget: ideaPromotionTargetTask},
+		{text: "Mach diese Idee umsetzbar", wantAction: "promote_idea", wantTarget: ideaPromotionTargetTask},
 		{text: "turn this idea into tasks", wantAction: "promote_idea", wantTarget: ideaPromotionTargetItems},
+		{text: "Wandle diese Idee in Aufgaben um", wantAction: "promote_idea", wantTarget: ideaPromotionTargetItems},
 		{text: "create this idea GitHub issue", wantAction: "apply_idea_promotion", wantTarget: ideaPromotionTargetGitHub, wantDisposition: ideaPromotionDispositionKeep},
+		{text: "Erstelle diese Idee GitHub Issue", wantAction: "apply_idea_promotion", wantTarget: ideaPromotionTargetGitHub, wantDisposition: ideaPromotionDispositionKeep},
 		{text: "create selected idea items 1, 3 and mark this idea done", wantAction: "apply_idea_promotion", wantTarget: ideaPromotionTargetItems, wantDisposition: ideaPromotionDispositionDone, wantSelected: []int{1, 3}},
+		{text: "Erstelle ausgewählte Idee Items 1 und 3 und markiere diese Idee als erledigt", wantAction: "apply_idea_promotion", wantTarget: ideaPromotionTargetItems, wantDisposition: ideaPromotionDispositionDone, wantSelected: []int{1, 3}},
 	}
 
 	for _, tc := range cases {

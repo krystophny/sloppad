@@ -180,6 +180,10 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	} else if resolvedSTTURL == "" {
 		resolvedSTTURL = DefaultSTTURL
 	}
+	resolvedLocaleLanguage := normalizeLanguageCodeEnv(strings.TrimSpace(os.Getenv("TABURA_LANGUAGE")))
+	if resolvedLocaleLanguage == "" {
+		resolvedLocaleLanguage = normalizeLanguageCodeEnv(strings.TrimSpace(os.Getenv("TABURA_LOCALE")))
+	}
 	resolvedSTTAllowedLanguages := parseLanguageListEnv(strings.TrimSpace(os.Getenv("TABURA_STT_ALLOWED_LANGUAGES")))
 	if len(resolvedSTTAllowedLanguages) == 0 {
 		resolvedSTTAllowedLanguages = parseLanguageListEnv(strings.TrimSpace(os.Getenv("TABURA_STT_LANGUAGE")))
@@ -187,9 +191,12 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	if len(resolvedSTTAllowedLanguages) == 0 {
 		resolvedSTTAllowedLanguages = parseLanguageListEnv(DefaultSTTAllowedLanguages)
 	}
+	resolvedSTTAllowedLanguages = prependPreferredLanguage(resolvedSTTAllowedLanguages, resolvedLocaleLanguage)
 	resolvedSTTFallbackLanguage := normalizeLanguageCodeEnv(strings.TrimSpace(os.Getenv("TABURA_STT_FALLBACK_LANGUAGE")))
 	if resolvedSTTFallbackLanguage == "" {
-		if len(resolvedSTTAllowedLanguages) > 0 {
+		if resolvedLocaleLanguage != "" {
+			resolvedSTTFallbackLanguage = resolvedLocaleLanguage
+		} else if len(resolvedSTTAllowedLanguages) > 0 {
 			resolvedSTTFallbackLanguage = resolvedSTTAllowedLanguages[0]
 		} else {
 			resolvedSTTFallbackLanguage = DefaultSTTFallbackLanguage

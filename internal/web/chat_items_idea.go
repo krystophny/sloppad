@@ -377,13 +377,13 @@ func parseInlineIdeaRefinementIntent(text string) *SystemAction {
 	}
 	kind := ""
 	switch {
-	case normalized == "expand this idea" || normalized == "expand this" || normalized == "expand on this idea" || normalized == "refine this idea":
+	case normalized == "expand this idea" || normalized == "expand this" || normalized == "expand on this idea" || normalized == "refine this idea" || normalized == "baue diese idee aus" || normalized == "baue das aus" || normalized == "verfeinere diese idee":
 		kind = "expand"
-	case strings.Contains(normalized, "pros and cons"):
+	case strings.Contains(normalized, "pros and cons") || strings.Contains(normalized, "vor und nachteile") || strings.Contains(normalized, "vor- und nachteile") || strings.Contains(normalized, "pro und contra"):
 		kind = "pros_cons"
-	case normalized == "compare alternatives" || normalized == "compare options" || normalized == "show alternatives":
+	case normalized == "compare alternatives" || normalized == "compare options" || normalized == "show alternatives" || normalized == "vergleiche alternativen" || normalized == "vergleiche optionen" || normalized == "zeige alternativen":
 		kind = "alternatives"
-	case normalized == "outline an implementation" || normalized == "outline implementation" || normalized == "draft implementation":
+	case normalized == "outline an implementation" || normalized == "outline implementation" || normalized == "draft implementation" || normalized == "skizziere eine umsetzung" || normalized == "umsetzung skizzieren" || normalized == "entwirf eine umsetzung":
 		kind = "implementation"
 	}
 	if kind == "" {
