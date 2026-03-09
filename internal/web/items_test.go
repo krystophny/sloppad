@@ -360,6 +360,83 @@ func TestItemStateViewAPI(t *testing.T) {
 	}
 }
 
+func TestItemStateViewAPIFiltersBySphere(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	workWorkspace, err := app.store.CreateWorkspace("Work", filepath.Join(t.TempDir(), "work"))
+	if err != nil {
+		t.Fatalf("CreateWorkspace(work) error: %v", err)
+	}
+	if _, err := app.store.SetWorkspaceSphere(workWorkspace.ID, store.SphereWork); err != nil {
+		t.Fatalf("SetWorkspaceSphere(work) error: %v", err)
+	}
+
+	if _, err := app.store.CreateItem("Private inbox", store.ItemOptions{
+		State: store.ItemStateInbox,
+	}); err != nil {
+		t.Fatalf("CreateItem(private) error: %v", err)
+	}
+	workItem, err := app.store.CreateItem("Work inbox", store.ItemOptions{
+		State:       store.ItemStateInbox,
+		WorkspaceID: &workWorkspace.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(work) error: %v", err)
+	}
+	if _, err := app.store.CreateItem("Private done", store.ItemOptions{
+		State: store.ItemStateDone,
+	}); err != nil {
+		t.Fatalf("CreateItem(private done) error: %v", err)
+	}
+	if _, err := app.store.CreateItem("Work done", store.ItemOptions{
+		State:       store.ItemStateDone,
+		WorkspaceID: &workWorkspace.ID,
+	}); err != nil {
+		t.Fatalf("CreateItem(work done) error: %v", err)
+	}
+
+	rrInbox := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/inbox?sphere=work", nil)
+	if rrInbox.Code != http.StatusOK {
+		t.Fatalf("work inbox status = %d, want 200: %s", rrInbox.Code, rrInbox.Body.String())
+	}
+	inboxPayload := decodeJSONResponse(t, rrInbox)
+	inboxItems, ok := inboxPayload["items"].([]any)
+	if !ok || len(inboxItems) != 1 {
+		t.Fatalf("work inbox payload = %#v", inboxPayload)
+	}
+	inboxRow, ok := inboxItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("work inbox row = %#v", inboxItems[0])
+	}
+	if got := int64(inboxRow["id"].(float64)); got != workItem.ID {
+		t.Fatalf("work inbox id = %d, want %d", got, workItem.ID)
+	}
+	if got := strFromAny(inboxRow["sphere"]); got != store.SphereWork {
+		t.Fatalf("work inbox sphere = %q, want %q", got, store.SphereWork)
+	}
+
+	rrCounts := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/counts?sphere=work", nil)
+	if rrCounts.Code != http.StatusOK {
+		t.Fatalf("work counts status = %d, want 200: %s", rrCounts.Code, rrCounts.Body.String())
+	}
+	countsPayload := decodeJSONResponse(t, rrCounts)
+	counts, ok := countsPayload["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("work counts payload = %#v", countsPayload)
+	}
+	if got := int(counts[store.ItemStateInbox].(float64)); got != 1 {
+		t.Fatalf("work counts[inbox] = %d, want 1", got)
+	}
+	if got := int(counts[store.ItemStateDone].(float64)); got != 1 {
+		t.Fatalf("work counts[done] = %d, want 1", got)
+	}
+
+	rrBad := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/inbox?sphere=office", nil)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sphere status = %d, want 400: %s", rrBad.Code, rrBad.Body.String())
+	}
+}
+
 func TestItemDomainAPIRejectsConflictAndInvalidState(t *testing.T) {
 	app := newAuthedTestApp(t)
 

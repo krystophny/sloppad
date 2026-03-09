@@ -2,7 +2,7 @@ import * as env from './app-env.js';
 import * as context from './app-context.js';
 
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
-const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
+const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES, SPHERE_OPTIONS } = context;
 
 const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
@@ -36,12 +36,17 @@ const isMeetingLiveSession = (...args) => refs.isMeetingLiveSession(...args);
 const liveSessionStatusSummary = (...args) => refs.liveSessionStatusSummary(...args);
 const readPersistedProjectID = (...args) => refs.readPersistedProjectID(...args);
 const toggleYoloMode = (...args) => refs.toggleYoloMode(...args);
+const updateRuntimePreferences = (...args) => refs.updateRuntimePreferences(...args);
+const normalizeActiveSphere = (...args) => refs.normalizeActiveSphere(...args);
+const persistActiveSpherePreference = (...args) => refs.persistActiveSpherePreference(...args);
 const activeProjectChatModelAlias = (...args) => refs.activeProjectChatModelAlias(...args);
 const activeProjectChatModelReasoningEffort = (...args) => refs.activeProjectChatModelReasoningEffort(...args);
 const normalizeProjectChatModelReasoningEffort = (...args) => refs.normalizeProjectChatModelReasoningEffort(...args);
 const reasoningEffortOptionsForAlias = (...args) => refs.reasoningEffortOptionsForAlias(...args);
 const normalizeProjectChatModelAlias = (...args) => refs.normalizeProjectChatModelAlias(...args);
 const renderToolPalette = (...args) => refs.renderToolPalette(...args);
+const loadItemSidebarView = (...args) => refs.loadItemSidebarView(...args);
+const refreshItemSidebarCounts = (...args) => refs.refreshItemSidebarCounts(...args);
 const isTemporaryProjectKind = (...args) => refs.isTemporaryProjectKind(...args);
 const shouldRenderAssistantHistoryInChat = (...args) => refs.shouldRenderAssistantHistoryInChat(...args);
 const hasLocalAssistantWork = (...args) => refs.hasLocalAssistantWork(...args);
@@ -54,6 +59,7 @@ export async function fetchProjects() {
   state.projects = projects.map((project) => ({
     ...project,
     id: String(project?.id || ''),
+    sphere: String(project?.sphere || '').trim().toLowerCase(),
     chat_mode: String(project?.chat_mode || 'chat'),
     chat_model_reasoning_effort: String(project?.chat_model_reasoning_effort || '').trim().toLowerCase(),
     run_state: normalizeProjectRunState(project?.run_state),
@@ -64,6 +70,66 @@ export async function fetchProjects() {
   state.serverActiveProjectId = String(payload?.active_project_id || '').trim();
   renderEdgeTopProjects();
   renderEdgeTopModelButtons();
+}
+
+export function projectMatchesSphere(project, sphere = state.activeSphere) {
+  if (!project) return false;
+  if (isHubProject(project)) return true;
+  const activeSphere = normalizeActiveSphere(sphere);
+  const projectSphere = String(project?.sphere || '').trim().toLowerCase();
+  return !projectSphere || projectSphere === activeSphere;
+}
+
+function visibleProjectsForSphere(sphere = state.activeSphere) {
+  return state.projects.filter((project) => projectMatchesSphere(project, sphere));
+}
+
+async function ensureVisibleActiveProject() {
+  const current = activeProject();
+  if (!current || projectMatchesSphere(current, state.activeSphere)) {
+    return;
+  }
+  const fallback = visibleProjectsForSphere().find((project) => isHubProject(project))
+    || visibleProjectsForSphere().find((project) => project.id !== current.id)
+    || null;
+  if (!fallback || fallback.id === current.id) {
+    renderEdgeTopProjects();
+    renderEdgeTopModelButtons();
+    return;
+  }
+  await switchProject(fallback.id);
+}
+
+export async function setActiveSphere(nextSphere) {
+  const sphere = normalizeActiveSphere(nextSphere);
+  if (sphere === state.activeSphere && String(state.activeSphere || '').trim()) {
+    renderEdgeTopProjects();
+    renderEdgeTopModelButtons();
+    return true;
+  }
+  const previousSphere = state.activeSphere;
+  state.activeSphere = sphere;
+  persistActiveSpherePreference(sphere);
+  renderEdgeTopProjects();
+  renderEdgeTopModelButtons();
+  try {
+    await updateRuntimePreferences({ active_sphere: sphere });
+    await ensureVisibleActiveProject();
+    if (state.prReviewDrawerOpen && state.fileSidebarMode === 'items') {
+      await loadItemSidebarView(state.itemSidebarView);
+    } else {
+      await refreshItemSidebarCounts().catch(() => false);
+    }
+    showStatus(`${sphere} sphere on`);
+    return true;
+  } catch (err) {
+    state.activeSphere = previousSphere || 'private';
+    persistActiveSpherePreference(state.activeSphere);
+    renderEdgeTopProjects();
+    renderEdgeTopModelButtons();
+    showStatus(`sphere switch failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
 }
 
 export function normalizeProjectRunState(runState) {
@@ -239,7 +305,7 @@ export function renderEdgeTopProjects() {
   const host = document.getElementById('edge-top-projects');
   if (!(host instanceof HTMLElement)) return;
   host.innerHTML = '';
-  for (const project of state.projects) {
+  for (const project of visibleProjectsForSphere()) {
     const runState = normalizeProjectRunState(project.run_state);
     const button = document.createElement('button');
     button.type = 'button';
@@ -284,6 +350,26 @@ export function renderEdgeTopModelButtons() {
   const host = document.getElementById('edge-top-models');
   if (!(host instanceof HTMLElement)) return;
   host.innerHTML = '';
+  const sphereWrap = document.createElement('div');
+  sphereWrap.className = 'edge-sphere-toggle';
+  for (const option of SPHERE_OPTIONS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'edge-project-btn edge-model-btn edge-sphere-btn';
+    button.textContent = option.label;
+    button.dataset.sphere = option.id;
+    button.setAttribute('aria-pressed', state.activeSphere === option.id ? 'true' : 'false');
+    if (state.activeSphere === option.id) {
+      button.classList.add('is-active');
+    }
+    button.disabled = state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+    button.addEventListener('click', () => {
+      void setActiveSphere(option.id);
+    });
+    sphereWrap.appendChild(button);
+  }
+  host.appendChild(sphereWrap);
+
   const project = activeProject();
   const hubActive = isHubActive();
   const selectedAlias = activeProjectChatModelAlias();

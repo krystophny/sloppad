@@ -259,6 +259,7 @@ function buildCanvasState() {
     artifact_title: safeText(getActiveArtifactTitle()),
     artifact_event_id: safeText(getActiveTextEventId()),
     chat_mode: safeText(state.chatMode),
+    active_sphere: safeText(state.activeSphere),
     input_mode: safeText(state.inputMode),
     overlay_visible: Boolean(isOverlayVisible()),
     text_input_visible: Boolean(isTextInputVisible()),

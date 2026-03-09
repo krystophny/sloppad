@@ -97,12 +97,13 @@ func (a *App) handleItemList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	sphere := strings.TrimSpace(r.URL.Query().Get("sphere"))
 	var (
 		items []store.Item
 		err   error
 	)
 	if state != "" {
-		items, err = a.store.ListItemsByState(state)
+		items, err = a.store.ListItemsByStateForSphere(state, sphere)
 	} else {
 		items, err = a.store.ListItems()
 	}
@@ -127,7 +128,7 @@ func (a *App) handleItemInbox(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	items, err := a.store.ListInboxItems(time.Now())
+	items, err := a.store.ListInboxItemsForSphere(time.Now(), strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeItemStoreError(w, err)
 		return
@@ -139,7 +140,7 @@ func (a *App) handleItemWaiting(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	items, err := a.store.ListWaitingItems()
+	items, err := a.store.ListWaitingItemsForSphere(strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeItemStoreError(w, err)
 		return
@@ -151,7 +152,7 @@ func (a *App) handleItemSomeday(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	items, err := a.store.ListSomedayItems()
+	items, err := a.store.ListSomedayItemsForSphere(strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeItemStoreError(w, err)
 		return
@@ -172,7 +173,7 @@ func (a *App) handleItemDone(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = value
 	}
-	items, err := a.store.ListDoneItems(limit)
+	items, err := a.store.ListDoneItemsForSphere(limit, strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeItemStoreError(w, err)
 		return
@@ -184,7 +185,7 @@ func (a *App) handleItemCounts(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	counts, err := a.store.CountItemsByState(time.Now())
+	counts, err := a.store.CountItemsByStateForSphere(time.Now(), strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeItemStoreError(w, err)
 		return

@@ -36,6 +36,10 @@ func (a *App) buildProjectAPIModel(project store.Project) (projectAPIModel, erro
 	if err != nil {
 		return projectAPIModel{}, err
 	}
+	sphere, err := a.projectSphere(project)
+	if err != nil {
+		return projectAPIModel{}, err
+	}
 	alias := a.effectiveProjectChatModelAlias(project)
 	effort := strings.TrimSpace(modelprofile.NormalizeReasoningEffort(alias, project.ChatModelReasoningEffort))
 	unread, reviewPending := a.projectUnreadState(project, session)
@@ -44,6 +48,7 @@ func (a *App) buildProjectAPIModel(project store.Project) (projectAPIModel, erro
 		Name:                     project.Name,
 		Kind:                     project.Kind,
 		RootPath:                 project.RootPath,
+		Sphere:                   sphere,
 		ProjectKey:               project.ProjectKey,
 		MCPURL:                   strings.TrimSpace(project.MCPURL),
 		IsDefault:                project.IsDefault,
@@ -56,6 +61,18 @@ func (a *App) buildProjectAPIModel(project store.Project) (projectAPIModel, erro
 		Unread:                   unread,
 		ReviewPending:            reviewPending,
 	}, nil
+}
+
+func (a *App) projectSphere(project store.Project) (string, error) {
+	workspaceID, err := a.store.FindWorkspaceContainingPath(project.RootPath)
+	if err != nil || workspaceID == nil {
+		return "", err
+	}
+	workspace, err := a.store.GetWorkspace(*workspaceID)
+	if err != nil {
+		return "", err
+	}
+	return workspace.Sphere, nil
 }
 
 func (a *App) buildProjectActivityItem(project store.Project) (projectActivityItem, error) {

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+
+	"github.com/krystophny/tabura/internal/store"
 )
 
 func TestWorkspaceCRUDAPI(t *testing.T) {
@@ -98,5 +100,47 @@ func TestWorkspaceCRUDAPI(t *testing.T) {
 	rrMissing := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/workspaces/"+itoa(workspaceID), nil)
 	if rrMissing.Code != http.StatusNotFound {
 		t.Fatalf("deleted workspace status = %d, want 404: %s", rrMissing.Code, rrMissing.Body.String())
+	}
+}
+
+func TestWorkspaceListFiltersBySphere(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	privateWorkspace, err := app.store.CreateWorkspace("Private", filepath.Join(t.TempDir(), "private"), store.SpherePrivate)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(private) error: %v", err)
+	}
+	workWorkspace, err := app.store.CreateWorkspace("Work", filepath.Join(t.TempDir(), "work"), store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(work) error: %v", err)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/workspaces?sphere=work", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("filter workspaces status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	payload := decodeJSONResponse(t, rr)
+	workspaces, ok := payload["workspaces"].([]any)
+	if !ok || len(workspaces) != 1 {
+		t.Fatalf("filtered workspaces payload = %#v", payload)
+	}
+	workspace, ok := workspaces[0].(map[string]any)
+	if !ok {
+		t.Fatalf("workspace payload = %#v", workspaces[0])
+	}
+	if got := int64(workspace["id"].(float64)); got != workWorkspace.ID {
+		t.Fatalf("workspace id = %d, want %d", got, workWorkspace.ID)
+	}
+	if got := workspace["sphere"]; got != store.SphereWork {
+		t.Fatalf("workspace sphere = %#v, want %q", got, store.SphereWork)
+	}
+
+	rrBad := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/workspaces?sphere=office", nil)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sphere status = %d, want 400: %s", rrBad.Code, rrBad.Body.String())
+	}
+
+	if _, err := app.store.GetWorkspace(privateWorkspace.ID); err != nil {
+		t.Fatalf("GetWorkspace(private) error: %v", err)
 	}
 }

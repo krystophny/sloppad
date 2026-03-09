@@ -28,6 +28,7 @@ type projectAPIModel struct {
 	Name                     string          `json:"name"`
 	Kind                     string          `json:"kind"`
 	RootPath                 string          `json:"root_path"`
+	Sphere                   string          `json:"sphere,omitempty"`
 	ProjectKey               string          `json:"project_key"`
 	MCPURL                   string          `json:"mcp_url,omitempty"`
 	IsDefault                bool            `json:"is_default"`

@@ -2,7 +2,7 @@ import * as env from './app-env.js';
 import * as context from './app-context.js';
 
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
-const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
+const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, ACTIVE_SPHERE_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
 
 let runtimeReloadBootID = '';
 let runtimeReloadTimer = null;
@@ -28,6 +28,7 @@ const canStartLiveDialogueListen = (...args) => refs.canStartLiveDialogueListen(
 const requestHotwordSync = (...args) => refs.requestHotwordSync(...args);
 const applyLiveSessionStateSnapshot = (...args) => refs.applyLiveSessionStateSnapshot(...args);
 const syncInputModeBodyState = (...args) => refs.syncInputModeBodyState(...args);
+const renderEdgeTopProjects = (...args) => refs.renderEdgeTopProjects(...args);
 const isLikelyIOS = (...args) => refs.isLikelyIOS(...args);
 const shouldStopInUiClick = (...args) => refs.shouldStopInUiClick(...args);
 
@@ -214,6 +215,7 @@ export function unlockAudioContext() {
 );
 
 export function initRuntimeUi() {
+  state.activeSphere = readPersistedActiveSphere();
   configureLiveSession({
     canStartDialogueListen: canStartLiveDialogueListen,
     onStateChange: (snapshot) => {
@@ -419,6 +421,24 @@ export function normalizeInputMode(modeRaw) {
   return 'pen';
 }
 
+export function normalizeActiveSphere(raw) {
+  return String(raw || '').trim().toLowerCase() === 'work' ? 'work' : 'private';
+}
+
+export function readPersistedActiveSphere() {
+  try {
+    return normalizeActiveSphere(window.localStorage.getItem(ACTIVE_SPHERE_STORAGE_KEY) || 'private');
+  } catch (_) {
+    return 'private';
+  }
+}
+
+export function persistActiveSpherePreference(sphere) {
+  try {
+    window.localStorage.setItem(ACTIVE_SPHERE_STORAGE_KEY, normalizeActiveSphere(sphere));
+  } catch (_) {}
+}
+
 export function isPenInputMode() {
   return state.inputMode === 'pen';
 }
@@ -483,7 +503,10 @@ export function applyRuntimePreferences(runtime) {
   const runtimeSilent = parseOptionalBoolean(runtime?.silent_mode);
   state.ttsSilent = runtimeSilent === true;
   state.inputMode = normalizeInputMode(runtime?.input_mode || 'pen');
+  state.activeSphere = normalizeActiveSphere(runtime?.active_sphere || state.activeSphere || readPersistedActiveSphere());
+  persistActiveSpherePreference(state.activeSphere);
   syncInputModeBodyState();
+  renderEdgeTopProjects();
   renderToolPalette();
   state.startupBehavior = String(runtime?.startup_behavior || 'hub_first').trim().toLowerCase() || 'hub_first';
   state.disclaimerVersion = String(runtime?.disclaimer_version || '').trim();
@@ -506,7 +529,10 @@ export async function updateRuntimePreferences(patch) {
     state.ttsSilent = silent;
   }
   state.inputMode = normalizeInputMode(payload?.input_mode || state.inputMode || 'pen');
+  state.activeSphere = normalizeActiveSphere(payload?.active_sphere || state.activeSphere || readPersistedActiveSphere());
+  persistActiveSpherePreference(state.activeSphere);
   syncInputModeBodyState();
+  renderEdgeTopProjects();
   renderToolPalette();
   state.startupBehavior = String(payload?.startup_behavior || state.startupBehavior || 'hub_first').trim().toLowerCase() || 'hub_first';
   renderEdgeTopModelButtons();

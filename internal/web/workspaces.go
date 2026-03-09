@@ -22,7 +22,7 @@ func (a *App) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
 	}
-	workspaces, err := a.store.ListWorkspaces()
+	workspaces, err := a.store.ListWorkspacesForSphere(strings.TrimSpace(r.URL.Query().Get("sphere")))
 	if err != nil {
 		writeDomainStoreError(w, err)
 		return

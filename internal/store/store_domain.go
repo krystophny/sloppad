@@ -173,6 +173,18 @@ func normalizeRequiredSphere(raw string) string {
 	return normalizeSphere(raw)
 }
 
+func normalizeOptionalSphereFilter(raw string) (string, error) {
+	clean := strings.TrimSpace(raw)
+	if clean == "" {
+		return "", nil
+	}
+	sphere := normalizeRequiredSphere(clean)
+	if sphere == "" {
+		return "", errors.New("sphere must be work or private")
+	}
+	return sphere, nil
+}
+
 func normalizeOptionalString(v *string) any {
 	if v == nil {
 		return nil
@@ -550,9 +562,24 @@ func (s *Store) GetWorkspaceByPath(dirPath string) (Workspace, error) {
 }
 
 func (s *Store) ListWorkspaces() ([]Workspace, error) {
+	return s.ListWorkspacesForSphere("")
+}
+
+func (s *Store) ListWorkspacesForSphere(sphere string) ([]Workspace, error) {
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT id, name, dir_path, sphere, is_active, created_at, updated_at
+		 FROM workspaces`
+	args := []any{}
+	if cleanSphere != "" {
+		query += ` WHERE sphere = ?`
+		args = append(args, cleanSphere)
+	}
 	rows, err := s.db.Query(
-		`SELECT id, name, dir_path, sphere, is_active, created_at, updated_at
-		 FROM workspaces`,
+		query,
+		args...,
 	)
 	if err != nil {
 		return nil, err
@@ -1914,15 +1941,29 @@ func (s *Store) DeleteItem(id int64) error {
 }
 
 func (s *Store) ListItemsByState(state string) ([]Item, error) {
+	return s.ListItemsByStateForSphere(state, "")
+}
+
+func (s *Store) ListItemsByStateForSphere(state, sphere string) ([]Item, error) {
 	cleanState := normalizeItemState(state)
 	if cleanState == "" {
 		return nil, errors.New("invalid item state")
 	}
-	rows, err := s.db.Query(
-		`SELECT id, title, state, workspace_id, project_id, sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, created_at, updated_at
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT id, title, state, workspace_id, project_id, sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, created_at, updated_at
 		 FROM items
-		 WHERE state = ?`,
-		cleanState,
+		 WHERE state = ?`
+	args := []any{cleanState}
+	if cleanSphere != "" {
+		query += ` AND sphere = ?`
+		args = append(args, cleanSphere)
+	}
+	rows, err := s.db.Query(
+		query,
+		args...,
 	)
 	if err != nil {
 		return nil, err
@@ -2001,46 +2042,111 @@ func (s *Store) listItemSummaries(query string, args ...any) ([]ItemSummary, err
 }
 
 func (s *Store) ListInboxItems(now time.Time) ([]ItemSummary, error) {
+	return s.ListInboxItemsForSphere(now, "")
+}
+
+func (s *Store) ListInboxItemsForSphere(now time.Time, sphere string) ([]ItemSummary, error) {
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
 	cutoff := now.UTC().Format(time.RFC3339Nano)
-	return s.listItemSummaries(
-		itemSummarySelect+`
+	query := itemSummarySelect + `
  WHERE i.state = ?
    AND (
      i.visible_after IS NULL
      OR trim(i.visible_after) = ''
      OR datetime(i.visible_after) <= datetime(?)
    )
- ORDER BY i.updated_at DESC, i.id ASC`,
-		ItemStateInbox,
-		cutoff,
-	)
+`
+	args := []any{ItemStateInbox, cutoff}
+	if cleanSphere != "" {
+		query += `   AND i.sphere = ?` + "\n"
+		args = append(args, cleanSphere)
+	}
+	query += ` ORDER BY i.updated_at DESC, i.id ASC`
+	return s.listItemSummaries(query, args...)
 }
 
 func (s *Store) ListWaitingItems() ([]ItemSummary, error) {
-	return s.listItemSummaries(itemSummarySelect+` WHERE i.state = ? ORDER BY i.updated_at DESC, i.id ASC`, ItemStateWaiting)
+	return s.ListWaitingItemsForSphere("")
+}
+
+func (s *Store) ListWaitingItemsForSphere(sphere string) ([]ItemSummary, error) {
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
+	query := itemSummarySelect + ` WHERE i.state = ?`
+	args := []any{ItemStateWaiting}
+	if cleanSphere != "" {
+		query += ` AND i.sphere = ?`
+		args = append(args, cleanSphere)
+	}
+	query += ` ORDER BY i.updated_at DESC, i.id ASC`
+	return s.listItemSummaries(query, args...)
 }
 
 func (s *Store) ListSomedayItems() ([]ItemSummary, error) {
-	return s.listItemSummaries(itemSummarySelect+` WHERE i.state = ? ORDER BY i.updated_at DESC, i.id ASC`, ItemStateSomeday)
+	return s.ListSomedayItemsForSphere("")
+}
+
+func (s *Store) ListSomedayItemsForSphere(sphere string) ([]ItemSummary, error) {
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
+	query := itemSummarySelect + ` WHERE i.state = ?`
+	args := []any{ItemStateSomeday}
+	if cleanSphere != "" {
+		query += ` AND i.sphere = ?`
+		args = append(args, cleanSphere)
+	}
+	query += ` ORDER BY i.updated_at DESC, i.id ASC`
+	return s.listItemSummaries(query, args...)
 }
 
 func (s *Store) ListDoneItems(limit int) ([]ItemSummary, error) {
+	return s.ListDoneItemsForSphere(limit, "")
+}
+
+func (s *Store) ListDoneItemsForSphere(limit int, sphere string) ([]ItemSummary, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.listItemSummaries(itemSummarySelect+` WHERE i.state = ? ORDER BY i.updated_at DESC, i.id ASC LIMIT ?`, ItemStateDone, limit)
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
+	query := itemSummarySelect + ` WHERE i.state = ?`
+	args := []any{ItemStateDone}
+	if cleanSphere != "" {
+		query += ` AND i.sphere = ?`
+		args = append(args, cleanSphere)
+	}
+	query += ` ORDER BY i.updated_at DESC, i.id ASC LIMIT ?`
+	args = append(args, limit)
+	return s.listItemSummaries(query, args...)
 }
 
 func (s *Store) CountItemsByState(now time.Time) (map[string]int, error) {
+	return s.CountItemsByStateForSphere(now, "")
+}
+
+func (s *Store) CountItemsByStateForSphere(now time.Time, sphere string) (map[string]int, error) {
 	counts := map[string]int{
 		ItemStateInbox:   0,
 		ItemStateWaiting: 0,
 		ItemStateSomeday: 0,
 		ItemStateDone:    0,
 	}
+	cleanSphere, err := normalizeOptionalSphereFilter(sphere)
+	if err != nil {
+		return nil, err
+	}
 	cutoff := now.UTC().Format(time.RFC3339Nano)
 	var inbox, waiting, someday, done int
-	if err := s.db.QueryRow(`
+	query := `
 SELECT
   COALESCE(SUM(CASE
     WHEN state = ?
@@ -2054,13 +2160,19 @@ SELECT
   COALESCE(SUM(CASE WHEN state = ? THEN 1 ELSE 0 END), 0) AS someday_count,
   COALESCE(SUM(CASE WHEN state = ? THEN 1 ELSE 0 END), 0) AS done_count
 FROM items
-`,
+`
+	args := []any{
 		ItemStateInbox,
 		cutoff,
 		ItemStateWaiting,
 		ItemStateSomeday,
 		ItemStateDone,
-	).Scan(&inbox, &waiting, &someday, &done); err != nil {
+	}
+	if cleanSphere != "" {
+		query += ` WHERE sphere = ?`
+		args = append(args, cleanSphere)
+	}
+	if err := s.db.QueryRow(query, args...).Scan(&inbox, &waiting, &someday, &done); err != nil {
 		return nil, err
 	}
 	counts[ItemStateInbox] = inbox

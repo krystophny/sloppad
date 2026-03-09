@@ -1,8 +1,11 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/krystophny/tabura/internal/store"
 )
 
 type runtimeYoloRequest struct {
@@ -17,6 +20,7 @@ type runtimePreferencesRequest struct {
 	SilentMode      *bool  `json:"silent_mode"`
 	InputMode       string `json:"input_mode"`
 	StartupBehavior string `json:"startup_behavior"`
+	ActiveSphere    string `json:"active_sphere"`
 }
 
 func normalizeRuntimeInputMode(raw string) string {
@@ -38,6 +42,17 @@ func normalizeRuntimeStartupBehavior(raw string) string {
 		return "hub_first"
 	default:
 		return "hub_first"
+	}
+}
+
+func normalizeRuntimeActiveSphere(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case store.SphereWork:
+		return store.SphereWork
+	case store.SpherePrivate:
+		return store.SpherePrivate
+	default:
+		return ""
 	}
 }
 
@@ -97,6 +112,21 @@ func (a *App) runtimeStartupBehavior() string {
 	return normalizeRuntimeStartupBehavior(value)
 }
 
+func (a *App) runtimeActiveSphere() string {
+	if a == nil || a.store == nil {
+		return store.SpherePrivate
+	}
+	value, err := a.store.ActiveSphere()
+	if err != nil {
+		return store.SpherePrivate
+	}
+	sphere := normalizeRuntimeActiveSphere(value)
+	if sphere == "" {
+		return store.SpherePrivate
+	}
+	return sphere
+}
+
 func (a *App) setSilentModeEnabled(enabled bool) error {
 	if a == nil || a.store == nil {
 		return nil
@@ -122,6 +152,17 @@ func (a *App) setRuntimeStartupBehavior(behavior string) error {
 		return nil
 	}
 	return a.store.SetAppState(appStateStartupBehaviorKey, normalizeRuntimeStartupBehavior(behavior))
+}
+
+func (a *App) setRuntimeActiveSphere(sphere string) error {
+	if a == nil || a.store == nil {
+		return nil
+	}
+	cleanSphere := normalizeRuntimeActiveSphere(sphere)
+	if cleanSphere == "" {
+		return errors.New("active sphere must be work or private")
+	}
+	return a.store.SetActiveSphere(cleanSphere)
 }
 
 func (a *App) handleRuntimePreferencesUpdate(w http.ResponseWriter, r *http.Request) {
@@ -151,11 +192,18 @@ func (a *App) handleRuntimePreferencesUpdate(w http.ResponseWriter, r *http.Requ
 			return
 		}
 	}
+	if strings.TrimSpace(req.ActiveSphere) != "" {
+		if err := a.setRuntimeActiveSphere(req.ActiveSphere); err != nil {
+			http.Error(w, "active sphere must be work or private", http.StatusBadRequest)
+			return
+		}
+	}
 	writeJSON(w, map[string]interface{}{
 		"ok":               true,
 		"silent_mode":      a.silentModeEnabled(),
 		"input_mode":       a.runtimeInputMode(),
 		"startup_behavior": a.runtimeStartupBehavior(),
+		"active_sphere":    a.runtimeActiveSphere(),
 	})
 }
 

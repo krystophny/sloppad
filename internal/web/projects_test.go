@@ -14,28 +14,31 @@ import (
 )
 
 type projectsListResponse struct {
-	OK               bool   `json:"ok"`
-	DefaultProjectID string `json:"default_project_id"`
-	ActiveProjectID  string `json:"active_project_id"`
-	Projects         []struct {
-		ID              string `json:"id"`
-		Name            string `json:"name"`
-		Kind            string `json:"kind"`
-		ProjectKey      string `json:"project_key"`
-		ChatSessionID   string `json:"chat_session_id"`
-		ChatModel       string `json:"chat_model"`
-		ReasoningEffort string `json:"chat_model_reasoning_effort"`
-		CanvasSessionID string `json:"canvas_session_id"`
-		Unread          bool   `json:"unread"`
-		ReviewPending   bool   `json:"review_pending"`
-		RunState        struct {
-			ActiveTurns  int    `json:"active_turns"`
-			QueuedTurns  int    `json:"queued_turns"`
-			IsWorking    bool   `json:"is_working"`
-			Status       string `json:"status"`
-			ActiveTurnID string `json:"active_turn_id"`
-		} `json:"run_state"`
-	} `json:"projects"`
+	OK               bool               `json:"ok"`
+	DefaultProjectID string             `json:"default_project_id"`
+	ActiveProjectID  string             `json:"active_project_id"`
+	Projects         []projectListEntry `json:"projects"`
+}
+
+type projectListEntry struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Kind            string `json:"kind"`
+	Sphere          string `json:"sphere"`
+	ProjectKey      string `json:"project_key"`
+	ChatSessionID   string `json:"chat_session_id"`
+	ChatModel       string `json:"chat_model"`
+	ReasoningEffort string `json:"chat_model_reasoning_effort"`
+	CanvasSessionID string `json:"canvas_session_id"`
+	Unread          bool   `json:"unread"`
+	ReviewPending   bool   `json:"review_pending"`
+	RunState        struct {
+		ActiveTurns  int    `json:"active_turns"`
+		QueuedTurns  int    `json:"queued_turns"`
+		IsWorking    bool   `json:"is_working"`
+		Status       string `json:"status"`
+		ActiveTurnID string `json:"active_turn_id"`
+	} `json:"run_state"`
 }
 
 type projectsActivityResponse struct {
@@ -103,6 +106,56 @@ func TestProjectsListIncludesActiveAndSessions(t *testing.T) {
 	if first.RunState.Status == "" {
 		t.Fatalf("expected project run state status")
 	}
+}
+
+func TestProjectsListIncludesWorkspaceSphere(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	workspaceRoot := filepath.Join(t.TempDir(), "work-root")
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workspaceRoot) error: %v", err)
+	}
+	if _, err := app.store.CreateWorkspace("Work Root", workspaceRoot, store.SphereWork); err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	projectPath := filepath.Join(workspaceRoot, "linked-project")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(projectPath) error: %v", err)
+	}
+
+	rrCreate := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/projects", map[string]any{
+		"name": "linked-work-project",
+		"kind": "linked",
+		"path": projectPath,
+	})
+	if rrCreate.Code != http.StatusOK {
+		t.Fatalf("create project status = %d, want 200: %s", rrCreate.Code, rrCreate.Body.String())
+	}
+
+	rrList := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("list projects status = %d, want 200: %s", rrList.Code, rrList.Body.String())
+	}
+	var payload projectsListResponse
+	if err := json.Unmarshal(rrList.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	project := findProjectByName(payload.Projects, "linked-work-project")
+	if project == nil {
+		t.Fatalf("linked project not found in payload: %#v", payload.Projects)
+	}
+	if project.Sphere != store.SphereWork {
+		t.Fatalf("project sphere = %q, want %q", project.Sphere, store.SphereWork)
+	}
+}
+
+func findProjectByName(projects []projectListEntry, name string) *projectListEntry {
+	for i := range projects {
+		if projects[i].Name == name {
+			return &projects[i]
+		}
+	}
+	return nil
 }
 
 func TestCreateActivateProjectAffectsChatSessionCreation(t *testing.T) {

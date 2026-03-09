@@ -160,6 +160,16 @@ body.panel-motion-enabled {
   overflow-y: auto;
 }
 
+.edge-sphere-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-right: 0.35rem;
+}
+
+.edge-sphere-btn {
+  text-transform: none;
+}
+
 .edge-model-btn {
   text-transform: lowercase;
 }

@@ -18,10 +18,117 @@ async function openInbox(page: Page) {
   await expect(page.locator('.sidebar-tab.is-active')).toContainText('Inbox');
 }
 
+async function refreshItemSidebarCounts(page: Page) {
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/app-item-sidebar-utils.js');
+    await mod.refreshItemSidebarCounts();
+  });
+}
+
+async function clickSphereButton(page: Page, sphere: 'work' | 'private') {
+  await page.evaluate((nextSphere) => {
+    const button = document.querySelector(`#edge-top-models .edge-sphere-btn[data-sphere="${nextSphere}"]`);
+    if (button instanceof HTMLButtonElement) button.click();
+  }, sphere);
+}
+
+async function refreshProjects(page: Page) {
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/app-projects.js');
+    await mod.fetchProjects();
+  });
+}
+
+async function projectButtonTexts(page: Page) {
+  return page.evaluate(() => {
+    return Array.from(document.querySelectorAll('#edge-top-projects .edge-project-btn'))
+      .map((button) => String(button.textContent || '').trim())
+      .filter(Boolean);
+  });
+}
+
+async function seedSphereScenario(page: Page) {
+  await page.evaluate(() => {
+    (window as any).__setProjects([
+      {
+        id: 'private-notes',
+        name: 'Private Notes',
+        kind: 'managed',
+        sphere: 'private',
+        project_key: '/tmp/private-notes',
+        root_path: '/tmp/private-notes',
+        chat_session_id: 'chat-private',
+        canvas_session_id: 'local',
+      },
+      {
+        id: 'work-tracker',
+        name: 'Work Tracker',
+        kind: 'managed',
+        sphere: 'work',
+        project_key: '/tmp/work-tracker',
+        root_path: '/tmp/work-tracker',
+        chat_session_id: 'chat-work',
+        canvas_session_id: 'local',
+      },
+      {
+        id: 'hub',
+        name: 'Hub',
+        kind: 'hub',
+        sphere: '',
+        project_key: '__hub__',
+        root_path: '/tmp/hub',
+        chat_session_id: 'chat-hub',
+        canvas_session_id: 'local',
+      },
+    ], 'private-notes');
+    (window as any).__setRuntimeState({ active_sphere: 'private' });
+    (window as any).__setItemSidebarWorkspaces([
+      { id: 1, name: 'Private Desk', dir_path: '/tmp/private', sphere: 'private', is_active: true },
+      { id: 2, name: 'Work Desk', dir_path: '/tmp/work', sphere: 'work', is_active: false },
+    ]);
+    (window as any).__setItemSidebarData({
+      inbox: [
+        {
+          id: 101,
+          title: 'Private inbox item',
+          state: 'inbox',
+          sphere: 'private',
+          artifact_id: 501,
+          artifact_title: 'Parser cleanup plan',
+          artifact_kind: 'idea_note',
+          actor_name: 'Alice',
+          created_at: '2026-03-08 09:40:00',
+          updated_at: '2026-03-08 09:58:00',
+        },
+        {
+          id: 102,
+          title: 'Work inbox item',
+          state: 'inbox',
+          sphere: 'work',
+          artifact_id: 502,
+          artifact_title: 'Re: triage follow-up',
+          artifact_kind: 'email',
+          actor_name: 'Bob',
+          created_at: '2026-03-08 09:10:00',
+          updated_at: '2026-03-08 09:12:00',
+        },
+      ],
+      waiting: [],
+      someday: [],
+      done: [],
+    });
+    localStorage.removeItem('tabura.activeSphere');
+    document.getElementById('edge-top')?.classList.add('edge-pinned');
+  });
+  await refreshProjects(page);
+  await refreshItemSidebarCounts(page);
+}
+
 const parserInboxItem = {
   id: 101,
   title: 'Review parser cleanup',
   state: 'inbox',
+  sphere: 'private',
   artifact_id: 501,
   source: 'github',
   source_ref: 'owner/repo#177',
@@ -30,6 +137,21 @@ const parserInboxItem = {
   actor_name: 'Alice',
   created_at: '2026-03-08 09:40:00',
   updated_at: '2026-03-08 09:58:00',
+};
+
+const privateEmailInboxItem = {
+  id: 102,
+  title: 'Answer triage email',
+  state: 'inbox',
+  sphere: 'private',
+  artifact_id: 502,
+  source: 'exchange',
+  source_ref: 'msg-102',
+  artifact_title: 'Re: triage follow-up',
+  artifact_kind: 'email',
+  actor_name: 'Bob',
+  created_at: '2026-03-08 09:10:00',
+  updated_at: '2026-03-08 09:12:00',
 };
 
 async function setInboxItems(page: Page, items: Array<Record<string, unknown>>) {
@@ -137,6 +259,72 @@ async function touchPhase(page: Page, selector: string, phase: 'start' | 'move' 
 }
 
 test.describe('inbox triage interactions', () => {
+  test('sphere toggle filters projects and inbox items', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+    await seedSphereScenario(page);
+
+    await expect.poll(() => projectButtonTexts(page)).toEqual(['Private Notes', 'Hub']);
+    await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '1');
+
+    await clickSphereButton(page, 'work');
+    await expect.poll(async () => {
+      const log = await page.evaluate(() => (window as any).__harnessLog || []);
+      return log.some((entry: any) => entry?.action === 'runtime_preferences' && entry?.payload?.active_sphere === 'work');
+    }).toBe(true);
+
+    await expect.poll(() => projectButtonTexts(page)).toEqual(['Work Tracker', 'Hub']);
+    await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '1');
+    await openInbox(page);
+    await expect(page.locator('#pr-file-list')).toContainText('Work inbox item');
+    await expect(page.locator('#pr-file-list')).not.toContainText('Private inbox item');
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__getRuntimeState?.().active_sphere || '');
+    }).toBe('work');
+  });
+
+  test('moving a standalone item to the other sphere hides it until the sphere changes', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+    await page.evaluate(() => {
+      (window as any).__setItemSidebarData({
+        inbox: [{
+          id: 101,
+          title: 'Private inbox item',
+          state: 'inbox',
+          sphere: 'private',
+          artifact_id: 501,
+          artifact_title: 'Parser cleanup plan',
+          artifact_kind: 'idea_note',
+          actor_name: 'Alice',
+          created_at: '2026-03-08 09:40:00',
+          updated_at: '2026-03-08 09:58:00',
+        }],
+        waiting: [],
+        someday: [],
+        done: [],
+      });
+      (window as any).__setRuntimeState({ active_sphere: 'private' });
+      document.getElementById('edge-top')?.classList.add('edge-pinned');
+      localStorage.removeItem('tabura.activeSphere');
+    });
+
+    await openInbox(page);
+    const row = page.locator('#pr-file-list .pr-file-item[data-item-id="101"]');
+    await row.click({ button: 'right' });
+    await expect(page.locator('#item-sidebar-menu')).toContainText('Move to Work');
+    await page.locator('#item-sidebar-menu .item-sidebar-menu-item', { hasText: 'Move to Work' }).click();
+
+    await expect(page.locator('#pr-file-list')).not.toContainText('Private inbox item');
+    await expect.poll(async () => {
+      const log = await page.evaluate(() => (window as any).__harnessLog || []);
+      return log.some((entry: any) => entry?.action === 'item_update' && entry?.payload?.sphere === 'work');
+    }).toBe(true);
+
+    await clickSphereButton(page, 'work');
+    await expect(page.locator('#pr-file-list')).toContainText('Private inbox item');
+  });
+
   test('tap opens the linked artifact on canvas', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await waitReady(page);
@@ -205,6 +393,7 @@ test.describe('inbox triage interactions', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await waitReady(page);
     await openInbox(page);
+    await setInboxItems(page, [parserInboxItem]);
 
     const row = '#pr-file-list .pr-file-item[data-item-id="101"]';
 
@@ -249,8 +438,8 @@ test.describe('inbox triage interactions', () => {
     await waitReady(page);
     await page.evaluate(() => {
       (window as any).__setItemSidebarWorkspaces([
-        { id: 1, name: 'Alpha', dir_path: '/tmp/alpha', is_active: true },
-        { id: 2, name: 'Beta', dir_path: '/tmp/beta', is_active: false },
+        { id: 1, name: 'Alpha', dir_path: '/tmp/alpha', sphere: 'private', is_active: true },
+        { id: 2, name: 'Beta', dir_path: '/tmp/beta', sphere: 'private', is_active: false },
       ]);
     });
     await openInbox(page);
@@ -318,6 +507,7 @@ test.describe('inbox triage interactions', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
     await openInbox(page);
+    await setInboxItems(page, [parserInboxItem, privateEmailInboxItem]);
 
     const emailRow = page.locator('#pr-file-list .pr-file-item[data-item-id="102"]');
     await emailRow.click();
@@ -350,6 +540,7 @@ test.describe('inbox triage interactions', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await waitReady(page);
     await openInbox(page);
+    await setInboxItems(page, [parserInboxItem, privateEmailInboxItem]);
 
     const rowA = '#pr-file-list .pr-file-item[data-item-id="101"]';
     await touchPhase(page, rowA, 'start');

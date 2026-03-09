@@ -9,8 +9,15 @@ const loadItemSidebarView = (...args) => refs.loadItemSidebarView(...args);
 const appendPlainMessage = (...args) => refs.appendPlainMessage(...args);
 const applyCanvasArtifactEvent = (...args) => refs.applyCanvasArtifactEvent(...args);
 const normalizeDisplayText = (...args) => refs.normalizeDisplayText(...args);
+const normalizeActiveSphere = (...args) => refs.normalizeActiveSphere(...args);
 const readSomedayReviewNudgeLastShownAt = (...args) => refs.readSomedayReviewNudgeLastShownAt(...args);
 const persistSomedayReviewNudgeLastShownAt = (...args) => refs.persistSomedayReviewNudgeLastShownAt(...args);
+
+function appendSphereQuery(path, sphere = state.activeSphere) {
+  const cleanSphere = normalizeActiveSphere(sphere);
+  const separator = String(path || '').includes('?') ? '&' : '?';
+  return `${path}${separator}sphere=${encodeURIComponent(cleanSphere)}`;
+}
 
 export function defaultItemSidebarCounts() {
   return {
@@ -29,8 +36,8 @@ export function normalizeItemSidebarView(rawView) {
 
 export function itemSidebarEndpoint(view) {
   const normalized = normalizeItemSidebarView(view);
-  if (normalized === 'done') return `items/${normalized}?limit=50`;
-  return `items/${normalized}`;
+  if (normalized === 'done') return appendSphereQuery(`items/${normalized}?limit=50`);
+  return appendSphereQuery(`items/${normalized}`);
 }
 
 export function normalizeItemSidebarCounts(rawCounts) {
@@ -82,7 +89,7 @@ export async function refreshItemSidebarCounts() {
     applyItemSidebarCounts(defaultItemSidebarCounts());
     return false;
   }
-  const resp = await fetch(apiURL('items/counts'), { cache: 'no-store' });
+  const resp = await fetch(apiURL(appendSphereQuery('items/counts')), { cache: 'no-store' });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
@@ -230,7 +237,7 @@ export async function fetchItemSidebarActors() {
 }
 
 export async function fetchItemSidebarWorkspaces() {
-  const resp = await fetch(apiURL('workspaces'), { cache: 'no-store' });
+  const resp = await fetch(apiURL(appendSphereQuery('workspaces')), { cache: 'no-store' });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
@@ -257,8 +264,36 @@ export async function fetchItemSidebarProjects() {
     .map((project) => ({
       id: String(project?.id || '').trim(),
       name: String(project?.name || '').trim(),
+      sphere: String(project?.sphere || '').trim().toLowerCase(),
     }))
-    .filter((project) => project.id && project.name && project.id !== 'hub');
+    .filter((project) => project.id
+      && project.name
+      && project.id !== 'hub'
+      && (!project.sphere || project.sphere === normalizeActiveSphere(state.activeSphere)));
+}
+
+export async function performItemSidebarSphereUpdate(item, nextSphere) {
+  const itemID = Number(item?.id || 0);
+  const sphere = normalizeActiveSphere(nextSphere);
+  if (itemID <= 0 || !sphere) return false;
+  try {
+    const resp = await fetch(apiURL(`items/${encodeURIComponent(String(itemID))}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sphere }),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    state.itemSidebarActiveItemID = itemID;
+    await loadItemSidebarView(state.itemSidebarView);
+    showStatus(`moved to ${sphere}`);
+    return true;
+  } catch (err) {
+    showStatus(`sphere move failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
 }
 
 export async function performItemSidebarWorkspaceUpdate(item, workspaceID = null, workspaceName = '') {
@@ -467,6 +502,14 @@ export async function showItemSidebarProjectMenu(item, x, y) {
 
 export function showItemSidebarActionMenu(item, x, y) {
   const view = normalizeItemSidebarView(state.itemSidebarView);
+  const nextSphere = normalizeActiveSphere(item?.sphere) === 'work' ? 'private' : 'work';
+  const sphereEntry = Number(item?.workspace_id || 0) > 0
+    ? []
+    : [{
+        label: nextSphere === 'work' ? 'Move to Work' : 'Move to Private',
+        action: 'move_sphere',
+        onClick: () => performItemSidebarSphereUpdate(item, nextSphere),
+      }];
   const entries = view === 'someday'
     ? [
       {
@@ -489,6 +532,7 @@ export function showItemSidebarActionMenu(item, x, y) {
         action: 'project',
         onClick: () => showItemSidebarProjectMenu(item, x, y),
       },
+      ...sphereEntry,
       {
         label: itemSidebarActionLabel('delete', item),
         action: 'delete',
@@ -511,6 +555,7 @@ export function showItemSidebarActionMenu(item, x, y) {
         action: 'project',
         onClick: () => showItemSidebarProjectMenu(item, x, y),
       },
+      ...sphereEntry,
       {
         label: itemSidebarActionLabel('later', item),
         action: 'later',

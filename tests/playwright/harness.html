@@ -197,6 +197,7 @@
       silent_mode: false,
       input_mode: 'pen',
       startup_behavior: 'hub_first',
+      active_sphere: 'private',
     };
     const TEST_BUG_REPORT_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W8xkAAAAASUVORK5CYII=';
     window.__taburaBugReportTestEnv = { screenshotDataURL: TEST_BUG_REPORT_PNG };
@@ -223,6 +224,9 @@
       }
       if (Object.prototype.hasOwnProperty.call(next, 'startup_behavior')) {
         runtimeState.startup_behavior = 'hub_first';
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'active_sphere')) {
+        runtimeState.active_sphere = String(next.active_sphere || '').trim().toLowerCase() === 'work' ? 'work' : 'private';
       }
     };
     window.__getRuntimeState = () => ({ ...runtimeState });
@@ -389,6 +393,7 @@
         id: 'test',
         name: 'Test',
         kind: 'managed',
+        sphere: 'private',
         project_key: '/tmp/test',
         root_path: '/tmp',
         chat_session_id: 'chat-1',
@@ -404,6 +409,7 @@
         id: 'hub',
         name: 'Hub',
         kind: 'hub',
+        sphere: '',
         project_key: '__hub__',
         root_path: '/tmp/hub',
         chat_session_id: 'chat-hub',
@@ -421,14 +427,52 @@
       test: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
       hub: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
     };
+    window.__setProjects = (projects, nextActiveProjectId = '') => {
+      const source = Array.isArray(projects) ? projects : [];
+      const normalized = source
+        .map((project) => ({
+          id: String(project?.id || '').trim(),
+          name: String(project?.name || '').trim() || 'Project',
+          kind: String(project?.kind || 'managed').trim().toLowerCase() || 'managed',
+          sphere: String(project?.sphere || '').trim().toLowerCase(),
+          project_key: String(project?.project_key || `/tmp/${String(project?.id || '').trim() || 'project'}`).trim(),
+          root_path: String(project?.root_path || `/tmp/${String(project?.id || '').trim() || 'project'}`).trim(),
+          chat_session_id: String(project?.chat_session_id || `chat-${String(project?.id || '').trim() || 'project'}`).trim(),
+          canvas_session_id: String(project?.canvas_session_id || 'local').trim(),
+          chat_mode: String(project?.chat_mode || 'chat').trim().toLowerCase() || 'chat',
+          chat_model: String(project?.chat_model || 'spark').trim().toLowerCase() || 'spark',
+          chat_model_reasoning_effort: String(project?.chat_model_reasoning_effort || 'low').trim().toLowerCase() || 'low',
+          unread: Boolean(project?.unread),
+          review_pending: Boolean(project?.review_pending),
+          run_state: {
+            active_turns: Number(project?.run_state?.active_turns || 0),
+            queued_turns: Number(project?.run_state?.queued_turns || 0),
+            is_working: Boolean(project?.run_state?.is_working),
+            status: String(project?.run_state?.status || 'idle').trim().toLowerCase() || 'idle',
+            active_turn_id: String(project?.run_state?.active_turn_id || '').trim(),
+          },
+        }))
+        .filter((project) => project.id);
+      harnessProjects.splice(0, harnessProjects.length, ...normalized);
+      harnessProjectRunStates = normalized.reduce((acc, project) => {
+        acc[project.id] = { ...project.run_state };
+        return acc;
+      }, {});
+      const preferredActive = String(nextActiveProjectId || '').trim();
+      if (preferredActive && normalized.some((project) => project.id === preferredActive)) {
+        activeProjectId = preferredActive;
+      } else if (!normalized.some((project) => project.id === activeProjectId)) {
+        activeProjectId = normalized[0]?.id || '';
+      }
+    };
     const defaultItemSidebarActors = () => ([
       { id: 1, name: 'Alice', kind: 'human' },
       { id: 2, name: 'Bob', kind: 'human' },
       { id: 3, name: 'Codex', kind: 'agent' },
     ]);
     const defaultItemSidebarWorkspaces = () => ([
-      { id: 1, name: 'Alpha', dir_path: '/tmp/alpha', is_active: true },
-      { id: 2, name: 'Beta', dir_path: '/tmp/beta', is_active: false },
+      { id: 1, name: 'Alpha', dir_path: '/tmp/alpha', sphere: 'private', is_active: true },
+      { id: 2, name: 'Beta', dir_path: '/tmp/beta', sphere: 'work', is_active: false },
     ]);
     const defaultItemSidebarArtifacts = () => ({
       501: {
@@ -475,6 +519,7 @@
           id: 101,
           title: 'Review parser cleanup',
           state: 'inbox',
+          sphere: 'private',
           artifact_id: 501,
           source: 'github',
           source_ref: 'owner/repo#177',
@@ -488,6 +533,7 @@
           id: 102,
           title: 'Answer triage email',
           state: 'inbox',
+          sphere: 'work',
           artifact_id: 502,
           source: 'exchange',
           source_ref: 'msg-102',
@@ -518,6 +564,7 @@
           id: 301,
           title: 'Sketch mobile inbox gestures',
           state: 'someday',
+          sphere: 'private',
           artifact_id: 503,
           source: '',
           source_ref: '',
@@ -533,6 +580,7 @@
           id: 401,
           title: 'Ship capture flow',
           state: 'done',
+          sphere: 'work',
           artifact_id: 504,
           source: 'github',
           source_ref: 'owner/repo#90',
@@ -744,9 +792,18 @@
       const project = harnessProjects.find((item) => item.id === id) || harnessProjects[0];
       return {
         ...project,
+        sphere: String(project?.sphere || '').trim().toLowerCase(),
         run_state: { ...(harnessProjectRunStates[project.id] || project.run_state || {}) },
       };
     };
+    function requestedSphere(url) {
+      try {
+        const parsed = new URL(url, window.location.origin);
+        const sphere = String(parsed.searchParams.get('sphere') || '').trim().toLowerCase();
+        if (sphere === 'work' || sphere === 'private') return sphere;
+      } catch (_) {}
+      return '';
+    }
     const nextHarnessProjectId = (kind) => {
       const cleanKind = String(kind || 'project').trim().toLowerCase() || 'project';
       let suffix = 1;
@@ -782,6 +839,9 @@
         if (typeof body?.startup_behavior === 'string') {
           runtimeState.startup_behavior = 'hub_first';
         }
+        if (typeof body?.active_sphere === 'string') {
+          runtimeState.active_sphere = String(body.active_sphere).trim().toLowerCase() === 'work' ? 'work' : 'private';
+        }
         window.__harnessLog.push({
           type: 'api_fetch',
           action: 'runtime_preferences',
@@ -794,6 +854,7 @@
           silent_mode: runtimeState.silent_mode,
           input_mode: runtimeState.input_mode,
           startup_behavior: runtimeState.startup_behavior,
+          active_sphere: runtimeState.active_sphere,
         }), { status: 200 });
       }
       if (u.includes('/api/bugs/report') && opts?.method === 'POST') {
@@ -1190,11 +1251,12 @@
       }
       if (u.includes('/api/items/counts')) {
         const itemData = window.__itemSidebarData || defaultItemSidebarData();
+        const sphere = requestedSphere(u);
         const counts = {
-          inbox: Array.isArray(itemData.inbox) ? itemData.inbox.length : 0,
-          waiting: Array.isArray(itemData.waiting) ? itemData.waiting.length : 0,
-          someday: Array.isArray(itemData.someday) ? itemData.someday.length : 0,
-          done: Array.isArray(itemData.done) ? itemData.done.length : 0,
+          inbox: Array.isArray(itemData.inbox) ? itemData.inbox.filter((item) => !sphere || String(item?.sphere || '').trim().toLowerCase() === sphere).length : 0,
+          waiting: Array.isArray(itemData.waiting) ? itemData.waiting.filter((item) => !sphere || String(item?.sphere || '').trim().toLowerCase() === sphere).length : 0,
+          someday: Array.isArray(itemData.someday) ? itemData.someday.filter((item) => !sphere || String(item?.sphere || '').trim().toLowerCase() === sphere).length : 0,
+          done: Array.isArray(itemData.done) ? itemData.done.filter((item) => !sphere || String(item?.sphere || '').trim().toLowerCase() === sphere).length : 0,
         };
         const delayMs = nextItemSidebarResponseDelay('counts');
         if (delayMs > 0) await sleep(delayMs);
@@ -1202,7 +1264,9 @@
       }
       if (u.includes('/api/workspaces')) {
         const workspaces = Array.isArray(window.__itemSidebarWorkspaces) ? window.__itemSidebarWorkspaces : defaultItemSidebarWorkspaces();
-        return new Response(JSON.stringify({ ok: true, workspaces }), { status: 200 });
+        const sphere = requestedSphere(u);
+        const filtered = workspaces.filter((workspace) => !sphere || String(workspace?.sphere || '').trim().toLowerCase() === sphere);
+        return new Response(JSON.stringify({ ok: true, workspaces: filtered }), { status: 200 });
       }
       if (/\/api\/items\/\d+\/triage(?:\?|$)/.test(u) && opts?.method === 'POST') {
         let body = {};
@@ -1264,6 +1328,12 @@
         if (!item) {
           return new Response('item not found', { status: 404 });
         }
+        const workspace = workspaceID === null
+          ? null
+          : workspaces.find((entry) => Number(entry?.id || 0) === workspaceID) || null;
+        if (workspace?.sphere) {
+          item.sphere = String(workspace.sphere).trim().toLowerCase();
+        }
         const warning = previousWorkspaceID === null || previousWorkspaceID === workspaceID
           ? ''
           : 'Artifact link kept: the referenced file still points into the previous workspace.';
@@ -1289,6 +1359,28 @@
         if (!item) {
           return new Response('item not found', { status: 404 });
         }
+        return new Response(JSON.stringify({ ok: true, item }), { status: 200 });
+      }
+      if (/\/api\/items\/\d+(?:\?|$)/.test(u) && opts?.method === 'PUT') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        const match = u.match(/\/api\/items\/(\d+)(?:\?|$)/);
+        const itemID = Number(match?.[1] || 0);
+        const patch = {};
+        if (typeof body?.sphere === 'string') {
+          patch.sphere = String(body.sphere).trim().toLowerCase() === 'work' ? 'work' : 'private';
+        }
+        const item = patchItemSidebarEntry(itemID, patch);
+        if (!item) {
+          return new Response('item not found', { status: 404 });
+        }
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'item_update',
+          method: opts?.method || 'PUT',
+          url: u,
+          payload: body,
+        });
         return new Response(JSON.stringify({ ok: true, item }), { status: 200 });
       }
       if (/\/api\/items\/\d+\/state(?:\?|$)/.test(u) && opts?.method === 'PUT') {
@@ -1335,7 +1427,9 @@
         if (u.includes('/api/items/waiting')) key = 'waiting';
         if (u.includes('/api/items/someday')) key = 'someday';
         if (u.includes('/api/items/done')) key = 'done';
-        const items = cloneItemSidebarEntries(itemData[key]);
+        const sphere = requestedSphere(u);
+        const items = cloneItemSidebarEntries(itemData[key])
+          .filter((item) => !sphere || String(item?.sphere || '').trim().toLowerCase() === sphere);
         const delayMs = nextItemSidebarResponseDelay(key);
         window.__harnessLog.push({
           type: 'api_fetch',

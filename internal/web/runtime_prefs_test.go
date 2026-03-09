@@ -42,6 +42,9 @@ func TestRuntimeIncludesSafetyPreferences(t *testing.T) {
 	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
 		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
 	}
+	if got := strFromAny(payload["active_sphere"]); got != "private" {
+		t.Fatalf("active_sphere = %q, want %q", got, "private")
+	}
 	if got := strFromAny(payload["disclaimer_version"]); got != disclaimerVersionCurrent {
 		t.Fatalf("disclaimer_version = %q, want %q", got, disclaimerVersionCurrent)
 	}
@@ -94,6 +97,7 @@ func TestRuntimePreferenceUpdatePersists(t *testing.T) {
 		"silent_mode":      true,
 		"input_mode":       "keyboard",
 		"startup_behavior": "hub_first",
+		"active_sphere":    "work",
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("preference update status=%d body=%s", rr.Code, rr.Body.String())
@@ -115,6 +119,19 @@ func TestRuntimePreferenceUpdatePersists(t *testing.T) {
 	}
 	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
 		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
+	}
+	if got := strFromAny(payload["active_sphere"]); got != "work" {
+		t.Fatalf("active_sphere = %q, want %q", got, "work")
+	}
+}
+
+func TestRuntimePreferenceUpdateRejectsInvalidSphere(t *testing.T) {
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPatch, "/api/runtime/preferences", map[string]any{
+		"active_sphere": "office",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sphere status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
 

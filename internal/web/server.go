@@ -679,6 +679,7 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		"silent_mode":                 a.silentModeEnabled(),
 		"input_mode":                  a.runtimeInputMode(),
 		"startup_behavior":            a.runtimeStartupBehavior(),
+		"active_sphere":               a.runtimeActiveSphere(),
 		"safety_yolo_mode":            a.yoloModeEnabled(),
 		"disclaimer_version":          disclaimerVersionCurrent,
 		"disclaimer_ack_required":     a.disclaimerAckRequired(),
