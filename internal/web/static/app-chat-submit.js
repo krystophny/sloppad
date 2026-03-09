@@ -170,7 +170,7 @@ export async function submitMessage(text, options = {}) {
     if (submitKind === 'voice_transcript') {
       state.voiceTranscriptSubmitInFlight = false;
     }
-    return;
+    return false;
   }
   cancelLiveSessionListen();
   startVoiceLifecycleOp('submit-message');
@@ -191,7 +191,7 @@ export async function submitMessage(text, options = {}) {
     if (submitKind === 'voice_transcript') {
       state.voiceTranscriptSubmitInFlight = false;
     }
-    return;
+    return true;
   }
   let finalText = trimmed;
   const anchor = getInputAnchor();
@@ -242,7 +242,7 @@ export async function submitMessage(text, options = {}) {
       appendPlainMessage('system', `Send failed: ${detail}`);
       updateOverlay(`**Send failed:** ${detail}`);
       updateAssistantActivityIndicator();
-      return;
+      return false;
     }
     const payload = await resp.json();
     if (payload?.kind === 'command') {
@@ -254,6 +254,7 @@ export async function submitMessage(text, options = {}) {
         appendPlainMessage('system', String(payload.result.message));
       }
     }
+    return true;
   } catch (err) {
     if (err && (err.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted'))) {
       state.voiceAwaitingTurn = false;
@@ -262,7 +263,7 @@ export async function submitMessage(text, options = {}) {
       trackAssistantTurnFinished('');
       showStatus('stopped');
       updateAssistantActivityIndicator();
-      return;
+      return false;
     }
     state.voiceAwaitingTurn = false;
     const pending = takePendingRow('');
@@ -271,6 +272,7 @@ export async function submitMessage(text, options = {}) {
     appendPlainMessage('system', `Send failed: ${String(err?.message || err)}`);
     updateOverlay(`**Send failed:** ${String(err?.message || err)}`);
     updateAssistantActivityIndicator();
+    return false;
   } finally {
     clearPendingSubmit(submitController);
     if (submitKind === 'voice_transcript') {

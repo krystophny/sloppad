@@ -536,6 +536,90 @@ test.describe('floating tool palette', () => {
     await expect(page.locator('#canvas-pdf .canvas-annotation-badge')).toHaveText('1');
   });
 
+  test('highlight annotations stay local until bundle send', async ({ page }) => {
+    await injectCanvasEvent(page, {
+      kind: 'text_artifact',
+      event_id: 'art-highlight-bundle-1',
+      title: 'bundle.md',
+      text: 'Alpha beta gamma delta',
+    });
+    await expect(page.locator('#canvas-text')).toBeVisible();
+    await page.locator('#surface-toggle').click();
+    await setInteractionTool(page, 'highlight');
+    await clearLog(page);
+
+    await page.evaluate(() => {
+      const textNode = document.querySelector('#canvas-text p')?.firstChild;
+      if (!(textNode instanceof Text)) {
+        throw new Error('text node unavailable for annotation bundle test');
+      }
+      const range = document.createRange();
+      range.setStart(textNode, 0);
+      range.setEnd(textNode, 5);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    });
+
+    await page.locator('#annotation-note-input').fill('Needs follow-up');
+    await page.locator('#annotation-note-save').click();
+    await expect(page.locator('#canvas-text .canvas-user-highlight.is-persistent')).toHaveCount(1);
+
+    let sentMessages = (await getLog(page)).filter((entry) => entry.type === 'message_sent');
+    expect(sentMessages).toHaveLength(0);
+
+    await page.locator('#annotation-bundle-send').click();
+    await waitForLogEntry(page, 'message_sent');
+
+    sentMessages = (await getLog(page)).filter((entry) => entry.type === 'message_sent');
+    expect(sentMessages).toHaveLength(1);
+    expect(String(sentMessages[0]?.text || '')).toContain('Revise the current artifact using these annotations.');
+    expect(String(sentMessages[0]?.text || '')).toContain('Selection: "Alpha"');
+    expect(String(sentMessages[0]?.text || '')).toContain('text: Needs follow-up');
+    await expect(page.locator('#canvas-text .canvas-user-highlight.is-persistent')).toHaveCount(0);
+  });
+
+  test('double-click on an annotation sends it immediately', async ({ page }) => {
+    await injectCanvasEvent(page, {
+      kind: 'text_artifact',
+      event_id: 'art-highlight-bundle-2',
+      title: 'immediate.md',
+      text: 'Alpha beta gamma delta',
+    });
+    await expect(page.locator('#canvas-text')).toBeVisible();
+    await page.locator('#surface-toggle').click();
+    await setInteractionTool(page, 'highlight');
+
+    await page.evaluate(() => {
+      const textNode = document.querySelector('#canvas-text p')?.firstChild;
+      if (!(textNode instanceof Text)) {
+        throw new Error('text node unavailable for immediate annotation test');
+      }
+      const range = document.createRange();
+      range.setStart(textNode, 6);
+      range.setEnd(textNode, 10);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    });
+
+    await page.locator('#annotation-note-input').fill('Ship this now');
+    await page.locator('#annotation-note-save').click();
+    await clearLog(page);
+
+    await page.locator('#canvas-text .canvas-user-highlight.is-persistent').dblclick();
+    await waitForLogEntry(page, 'message_sent');
+
+    const sentMessages = (await getLog(page)).filter((entry) => entry.type === 'message_sent');
+    expect(sentMessages).toHaveLength(1);
+    expect(String(sentMessages[0]?.text || '')).toContain('Handle this annotation immediately instead of waiting for a larger bundle.');
+    expect(String(sentMessages[0]?.text || '')).toContain('Selection: "beta"');
+    expect(String(sentMessages[0]?.text || '')).toContain('text: Ship this now');
+    await expect(page.locator('#canvas-text .canvas-user-highlight.is-persistent')).toHaveCount(0);
+  });
+
   test('email artifacts opened from the sidebar default to annotate surface', async ({ page }) => {
     await page.evaluate(() => {
       (window as any).__setItemSidebarData({

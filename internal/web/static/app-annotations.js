@@ -7,6 +7,7 @@ const sttStart = (...args) => refs.sttStart(...args);
 const sttSendBlob = (...args) => refs.sttSendBlob(...args);
 const sttStop = (...args) => refs.sttStop(...args);
 const sttCancel = (...args) => refs.sttCancel(...args);
+const submitMessage = (...args) => refs.submitMessage(...args);
 
 const ANNOTATION_STORAGE_KEY = 'tabura.annotations.v1';
 const HIGHLIGHT_COLOR = 'rgba(253, 230, 138, 0.72)';
@@ -140,6 +141,122 @@ function normalizeDescriptor(detail) {
     path: safeText(detail.path),
     event_id: safeText(detail.event_id || detail.eventId),
   };
+}
+
+function activeArtifactDescriptor() {
+  const current = state.currentCanvasArtifact || {};
+  return {
+    kind: safeText(activeDescriptor?.kind || current.kind),
+    title: safeText(activeDescriptor?.title || current.title),
+    path: safeText(activeDescriptor?.path || current.path),
+    event_id: safeText(activeDescriptor?.event_id || activeDescriptor?.eventId || current.event_id || current.eventId),
+  };
+}
+
+function activeArtifactLabel() {
+  const descriptor = activeArtifactDescriptor();
+  return descriptor.title || descriptor.path || descriptor.kind || 'current artifact';
+}
+
+function activeArtifactBundleInstruction() {
+  const descriptor = activeArtifactDescriptor();
+  const title = descriptor.title.toLowerCase();
+  const kind = descriptor.kind.toLowerCase();
+  if (state.prReviewMode || title.endsWith('.diff') || kind === 'pr_diff') {
+    return 'Draft review feedback for the current diff using these annotations.';
+  }
+  if (kind === 'email' || title.startsWith('re:') || title.startsWith('fw:')) {
+    return 'Draft an email reply using these annotations.';
+  }
+  if (kind === 'text_artifact' || kind === 'document' || kind === 'markdown') {
+    return 'Revise the current artifact using these annotations.';
+  }
+  return 'Use these annotations as instructions for the current artifact.';
+}
+
+function formatAnnotationTarget(annotation) {
+  if (annotation?.target === 'pdf') {
+    const page = Number.parseInt(safeText(annotation?.page), 10);
+    return Number.isFinite(page) && page > 0 ? `PDF page ${page}` : 'PDF selection';
+  }
+  return 'Text selection';
+}
+
+function formatAnnotationBundleText(annotations, options = {}) {
+  if (!Array.isArray(annotations) || annotations.length === 0) return '';
+  const immediate = options.immediate === true;
+  const lines = [
+    immediate
+      ? 'Handle this annotation immediately instead of waiting for a larger bundle.'
+      : activeArtifactBundleInstruction(),
+    `Artifact: ${activeArtifactLabel()}`,
+  ];
+  const descriptor = activeArtifactDescriptor();
+  if (descriptor.kind) {
+    lines.push(`Artifact kind: ${descriptor.kind}`);
+  }
+  annotations.forEach((annotation, index) => {
+    lines.push('');
+    lines.push(`Annotation ${index + 1}: ${formatAnnotationTarget(annotation)}`);
+    lines.push(`Selection: "${safeText(annotation?.text) || 'Untitled annotation'}"`);
+    const notes = Array.isArray(annotation?.notes) ? annotation.notes : [];
+    if (notes.length === 0) {
+      lines.push('Notes: none');
+      return;
+    }
+    lines.push('Notes:');
+    notes.forEach((note) => {
+      const kind = safeText(note?.kind) || 'text';
+      const content = safeText(note?.content) || '(empty)';
+      lines.push(`- ${kind}: ${content}`);
+    });
+  });
+  return lines.join('\n').trim();
+}
+
+async function submitAnnotationBundle(annotationID = '') {
+  const annotations = listActiveAnnotations();
+  if (annotations.length === 0) {
+    showStatus('no annotations to send');
+    return false;
+  }
+  const targetID = safeText(annotationID);
+  const selected = targetID
+    ? annotations.filter((annotation) => safeText(annotation?.id) === targetID)
+    : annotations;
+  if (selected.length === 0) {
+    showStatus('annotation missing');
+    return false;
+  }
+  const bundleText = formatAnnotationBundleText(selected, { immediate: Boolean(targetID) });
+  if (!bundleText) {
+    showStatus('annotation bundle empty');
+    return false;
+  }
+  const ok = await submitMessage(bundleText, {
+    kind: targetID ? 'annotation_immediate' : 'annotation_bundle',
+  });
+  if (!ok) return false;
+  if (targetID) {
+    saveActiveAnnotations(annotations.filter((annotation) => safeText(annotation?.id) !== targetID));
+  } else {
+    saveActiveAnnotations([]);
+  }
+  closeAnnotationBubble();
+  renderActiveAnnotations();
+  showStatus(targetID ? 'annotation sent' : 'annotation bundle sent');
+  return true;
+}
+
+function clearAllActiveAnnotations() {
+  if (listActiveAnnotations().length === 0) {
+    showStatus('no annotations to clear');
+    return;
+  }
+  saveActiveAnnotations([]);
+  closeAnnotationBubble();
+  renderActiveAnnotations();
+  showStatus('annotations cleared');
 }
 
 function annotationClientRects(annotation) {
@@ -326,6 +443,29 @@ function renderAnnotationBubble() {
   controls.appendChild(deleteButton);
 
   bubble.appendChild(controls);
+
+  const bundleControls = document.createElement('div');
+  bundleControls.className = 'annotation-bubble-controls';
+
+  const sendButton = document.createElement('button');
+  sendButton.id = 'annotation-bundle-send';
+  sendButton.type = 'button';
+  sendButton.textContent = listActiveAnnotations().length > 1 ? 'Send bundle' : 'Send annotation';
+  sendButton.addEventListener('click', () => {
+    void submitAnnotationBundle();
+  });
+  bundleControls.appendChild(sendButton);
+
+  const clearButton = document.createElement('button');
+  clearButton.id = 'annotation-bundle-clear';
+  clearButton.type = 'button';
+  clearButton.textContent = 'Clear all';
+  clearButton.addEventListener('click', () => {
+    clearAllActiveAnnotations();
+  });
+  bundleControls.appendChild(clearButton);
+
+  bubble.appendChild(bundleControls);
   bubble.hidden = false;
   bubble.style.left = `${Math.max(12, Math.min(window.innerWidth - 300, anchor.left))}px`;
   bubble.style.top = `${Math.max(12, Math.min(window.innerHeight - 220, anchor.top + anchor.height + 10))}px`;
@@ -347,6 +487,11 @@ function renderAnnotationBadge(root, annotation, width, height) {
     event.preventDefault();
     event.stopPropagation();
     openAnnotationBubble(annotation.id);
+  });
+  badge.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void submitAnnotationBundle(annotation.id);
   });
   root.appendChild(badge);
 }
@@ -374,6 +519,11 @@ function renderTextAnnotations(annotations) {
           event.preventDefault();
           event.stopPropagation();
           openAnnotationBubble(annotation.id);
+        });
+        node.addEventListener('dblclick', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void submitAnnotationBundle(annotation.id);
         });
         layer.appendChild(node);
       });
@@ -404,6 +554,11 @@ function renderPdfAnnotations(annotations) {
           event.preventDefault();
           event.stopPropagation();
           openAnnotationBubble(annotation.id);
+        });
+        node.addEventListener('dblclick', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void submitAnnotationBundle(annotation.id);
         });
         layer.appendChild(node);
       });
