@@ -182,6 +182,8 @@ export const state = {
   workspaceBrowserEntries: [],
   workspaceBrowserLoading: false,
   workspaceBrowserError: '',
+  workspaceBrowserActivePath: '',
+  workspaceBrowserActiveIsDir: false,
   workspaceOpenFilePath: '',
   workspaceStepInFlight: false,
   currentCanvasArtifact: {

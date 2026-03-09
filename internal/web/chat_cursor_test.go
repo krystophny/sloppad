@@ -41,6 +41,37 @@ func TestAppendChatCursorPrompt_PrependsContext(t *testing.T) {
 	}
 }
 
+func TestFormatChatCursorPromptContext_IncludesItemViewContext(t *testing.T) {
+	prompt := formatChatCursorPromptContext(&chatCursorContext{
+		View:          "inbox",
+		ItemID:        42,
+		ItemTitle:     "Fix login bug",
+		ItemState:     "inbox",
+		WorkspaceName: "tabura",
+	})
+	if !strings.Contains(prompt, "User is in: inbox view") {
+		t.Fatalf("prompt missing item view, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, `User is pointing at: item #42 "Fix login bug" (state: inbox, workspace: tabura)`) {
+		t.Fatalf("prompt missing item context, got:\n%s", prompt)
+	}
+}
+
+func TestFormatChatCursorPromptContext_IncludesWorkspacePathContext(t *testing.T) {
+	prompt := formatChatCursorPromptContext(&chatCursorContext{
+		View:          "workspace_browser",
+		WorkspaceName: "tabura",
+		Path:          "docs",
+		IsDir:         true,
+	})
+	if !strings.Contains(prompt, "User is in: workspace_browser view") {
+		t.Fatalf("prompt missing workspace view, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, `User is pointing at: folder "docs" (workspace: tabura)`) {
+		t.Fatalf("prompt missing workspace path context, got:\n%s", prompt)
+	}
+}
+
 func TestChatCursorContextTracker_ConsumesInOrder(t *testing.T) {
 	tracker := newChatCursorContextTracker()
 	tracker.enqueue("session-1", &chatCursorContext{Title: "first.txt", Line: 1})

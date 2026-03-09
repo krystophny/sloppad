@@ -85,6 +85,9 @@ const hasLocalStopCapableWork = (...args) => refs.hasLocalStopCapableWork(...arg
 const hasPendingOverlayTurn = (...args) => refs.hasPendingOverlayTurn(...args);
 const hasRemoteAssistantWork = (...args) => refs.hasRemoteAssistantWork(...args);
 const maybeHandleInlineBugReport = (...args) => refs.maybeHandleInlineBugReport(...args);
+const openSidebarItem = (...args) => refs.openSidebarItem(...args);
+const loadWorkspaceBrowserPath = (...args) => refs.loadWorkspaceBrowserPath(...args);
+const openWorkspaceSidebarFile = (...args) => refs.openWorkspaceSidebarFile(...args);
 
 export function closeChatWs() {
   state.chatWsToken += 1;
@@ -306,6 +309,24 @@ export function handleChatEvent(payload) {
         void loadItemSidebarView(state.itemSidebarView);
       } else {
         void refreshItemSidebarCounts().catch(() => {});
+      }
+    } else if (actionType === 'open_item_sidebar_item') {
+      const itemID = Number(action?.item_id || 0);
+      if (itemID > 0) {
+        const items = Array.isArray(state.itemSidebarItems) ? state.itemSidebarItems : [];
+        const item = items.find((entry) => Number(entry?.id || 0) === itemID);
+        if (item) {
+          void openSidebarItem(item);
+        }
+      }
+    } else if (actionType === 'open_workspace_path') {
+      const path = String(action?.path || '').trim();
+      if (path) {
+        if (action?.is_dir === true) {
+          void loadWorkspaceBrowserPath(path);
+        } else {
+          void openWorkspaceSidebarFile(path);
+        }
       }
     } else if (actionType === 'print_item') {
       openPrintView(String(action?.url || '').trim());
@@ -635,6 +656,12 @@ export async function switchProject(projectID) {
   clearWelcomeSurface();
   resetCompanionState();
   state.fileSidebarMode = 'items';
+  state.workspaceBrowserPath = '';
+  state.workspaceBrowserEntries = [];
+  state.workspaceBrowserLoading = false;
+  state.workspaceBrowserError = '';
+  state.workspaceBrowserActivePath = '';
+  state.workspaceBrowserActiveIsDir = false;
   state.workspaceOpenFilePath = '';
   state.workspaceStepInFlight = false;
   state.itemSidebarItems = [];

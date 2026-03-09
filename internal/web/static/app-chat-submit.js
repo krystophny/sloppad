@@ -36,6 +36,8 @@ const VOICE_TRANSCRIPT_SUBMIT_GUARD_MS = 220;
 function buildCursorPayload(anchor) {
   if (!anchor || typeof anchor !== 'object') return null;
   const payload = {
+    view: String(anchor.view || '').trim(),
+    element: String(anchor.element || '').trim(),
     title: String(anchor.title || '').trim(),
     page: Number.parseInt(String(anchor.page || ''), 10) || 0,
     line: Number.parseInt(String(anchor.line || ''), 10) || 0,
@@ -43,16 +45,70 @@ function buildCursorPayload(anchor) {
     relative_y: Number(anchor.relativeY),
     selected_text: String(anchor.selectedText || '').trim(),
     surrounding_text: String(anchor.surroundingText || '').trim(),
+    item_id: Number.parseInt(String(anchor.itemID || anchor.item_id || ''), 10) || 0,
+    item_title: String(anchor.itemTitle || anchor.item_title || '').trim(),
+    item_state: String(anchor.itemState || anchor.item_state || '').trim(),
+    workspace_id: Number.parseInt(String(anchor.workspaceID || anchor.workspace_id || ''), 10) || 0,
+    workspace_name: String(anchor.workspaceName || anchor.workspace_name || '').trim(),
+    path: String(anchor.path || '').trim(),
+    is_dir: anchor.isDir === true || anchor.is_dir === true,
   };
   if (!Number.isFinite(payload.relative_x)) delete payload.relative_x;
   if (!Number.isFinite(payload.relative_y)) delete payload.relative_y;
+  if (!payload.view) delete payload.view;
+  if (!payload.element) delete payload.element;
   if (!payload.title) delete payload.title;
   if (!payload.page) delete payload.page;
   if (!payload.line) delete payload.line;
   if (!payload.selected_text) delete payload.selected_text;
   if (!payload.surrounding_text) delete payload.surrounding_text;
+  if (!payload.item_id) delete payload.item_id;
+  if (!payload.item_title) delete payload.item_title;
+  if (!payload.item_state) delete payload.item_state;
+  if (!payload.workspace_id) delete payload.workspace_id;
+  if (!payload.workspace_name) delete payload.workspace_name;
+  if (!payload.path) delete payload.path;
+  if (!payload.is_dir) delete payload.is_dir;
   if (Object.keys(payload).length === 0) return null;
   return payload;
+}
+
+function buildSidebarSelectionCursorPayload() {
+  const activeProject = Array.isArray(state.projects)
+    ? state.projects.find((project) => String(project?.id || '') === String(state.activeProjectId || ''))
+    : null;
+  if (!state.prReviewDrawerOpen) return null;
+  if (state.fileSidebarMode === 'items') {
+    const activeID = Number(state.itemSidebarActiveItemID || 0);
+    if (activeID <= 0) return null;
+    const items = Array.isArray(state.itemSidebarItems) ? state.itemSidebarItems : [];
+    const item = items.find((entry) => Number(entry?.id || 0) === activeID);
+    if (!item) return null;
+    return buildCursorPayload({
+      view: String(state.itemSidebarView || 'items').trim().toLowerCase(),
+      element: 'item_row',
+      itemID: activeID,
+      itemTitle: String(item?.title || '').trim(),
+      itemState: String(item?.state || state.itemSidebarView || '').trim().toLowerCase(),
+      workspaceID: Number(item?.workspace_id || 0),
+      workspaceName: String(item?.workspace_name || '').trim(),
+      title: String(item?.title || '').trim(),
+    });
+  }
+  if (state.fileSidebarMode === 'workspace') {
+    const path = String(state.workspaceBrowserActivePath || '').trim();
+    if (!path) return null;
+    return buildCursorPayload({
+      view: 'workspace_browser',
+      element: state.workspaceBrowserActiveIsDir ? 'workspace_folder' : 'workspace_file',
+      workspaceID: String(activeProject?.id || '').trim(),
+      workspaceName: String(activeProject?.name || '').trim(),
+      path,
+      title: path,
+      isDir: Boolean(state.workspaceBrowserActiveIsDir),
+    });
+  }
+  return null;
 }
 
 export function setPendingSubmit(controller, kind = '') {
@@ -160,7 +216,7 @@ export async function submitMessage(text, options = {}) {
     output_mode: state.ttsSilent ? 'silent' : 'voice',
     capture_mode: submitKind === 'voice_transcript' ? 'voice' : 'text',
   };
-  const cursorPayload = buildCursorPayload(anchor);
+  const cursorPayload = buildCursorPayload(anchor) || buildSidebarSelectionCursorPayload();
   if (cursorPayload) {
     body.cursor = cursorPayload;
   }

@@ -244,6 +244,8 @@ export async function loadWorkspaceBrowserPath(path = '') {
     state.workspaceBrowserEntries = [];
     state.workspaceBrowserLoading = false;
     state.workspaceBrowserError = '';
+    state.workspaceBrowserActivePath = '';
+    state.workspaceBrowserActiveIsDir = false;
     renderPrReviewFileList();
     return false;
   }
@@ -278,6 +280,8 @@ export async function loadWorkspaceBrowserPath(path = '') {
     }
     if (projectID !== String(state.activeProjectId || '')) return false;
     state.workspaceBrowserPath = normalizeWorkspaceBrowserPath(payload?.path || requestedPath);
+    state.workspaceBrowserActivePath = state.workspaceBrowserPath;
+    state.workspaceBrowserActiveIsDir = Boolean(state.workspaceBrowserPath);
     const entriesRaw = Array.isArray(payload?.entries) ? payload.entries : [];
     state.workspaceBrowserEntries = entriesRaw.map((entry) => ({
       name: String(entry?.name || ''),
@@ -293,6 +297,8 @@ export async function loadWorkspaceBrowserPath(path = '') {
     state.workspaceBrowserLoading = false;
     state.workspaceBrowserError = String(err?.message || err || 'file list unavailable');
     state.workspaceBrowserEntries = [];
+    state.workspaceBrowserActivePath = '';
+    state.workspaceBrowserActiveIsDir = false;
     renderPrReviewFileList();
     return false;
   }
@@ -302,6 +308,8 @@ export async function openWorkspaceSidebarFile(path) {
   const filePath = normalizeWorkspaceBrowserPath(path);
   if (!filePath) return false;
   state.fileSidebarMode = 'workspace';
+  state.workspaceBrowserActivePath = filePath;
+  state.workspaceBrowserActiveIsDir = false;
   clearWelcomeSurface();
   const companionViewKind = companionViewKindForPath(filePath);
   if (companionViewKind) {

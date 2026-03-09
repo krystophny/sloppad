@@ -301,6 +301,7 @@ export function renderSidebarRow({
   subtitle = '',
   badges = [],
   item = null,
+  workspaceEntry = null,
   triageEnabled = false,
   onClick,
 }) {
@@ -458,6 +459,11 @@ export function renderSidebarRow({
     button.addEventListener('focus', () => {
       state.itemSidebarActiveItemID = Number(item?.id || 0);
     });
+  } else if (workspaceEntry) {
+    button.addEventListener('focus', () => {
+      state.workspaceBrowserActivePath = String(workspaceEntry?.path || '').trim();
+      state.workspaceBrowserActiveIsDir = Boolean(workspaceEntry?.is_dir);
+    });
   }
   button.addEventListener('click', (ev) => {
     if (Date.now() - lastTouchAt < 700) {
@@ -465,6 +471,10 @@ export function renderSidebarRow({
       return;
     }
     if (Date.now() - Number(state.sidebarEdgeTapAt || 0) < 600) return;
+    if (workspaceEntry) {
+      state.workspaceBrowserActivePath = String(workspaceEntry?.path || '').trim();
+      state.workspaceBrowserActiveIsDir = Boolean(workspaceEntry?.is_dir);
+    }
     onClick(ev);
   });
   return button;
@@ -575,12 +585,16 @@ export function renderWorkspaceFileList(list) {
   }
   const currentPath = normalizeWorkspaceBrowserPath(state.workspaceBrowserPath);
   const activeWorkspaceFilePath = normalizeWorkspaceBrowserPath(state.workspaceOpenFilePath);
+  const activeWorkspaceSelectionPath = normalizeWorkspaceBrowserPath(state.workspaceBrowserActivePath);
   if (currentPath) {
+    const parentPath = parentWorkspaceBrowserPath(currentPath);
     list.appendChild(renderSidebarRow({
       icon: 'parent',
       label: '..',
+      active: activeWorkspaceSelectionPath === parentPath,
+      workspaceEntry: { path: parentPath, is_dir: true },
       onClick: () => {
-        void loadWorkspaceBrowserPath(parentWorkspaceBrowserPath(currentPath));
+        void loadWorkspaceBrowserPath(parentPath);
       },
     }));
   }
@@ -593,7 +607,10 @@ export function renderWorkspaceFileList(list) {
     list.appendChild(renderSidebarRow({
       icon: isDir ? 'folder' : 'file',
       label: entryName,
-      active: !isDir && activeWorkspaceFilePath && entryPath === activeWorkspaceFilePath,
+      active: activeWorkspaceSelectionPath
+        ? entryPath === activeWorkspaceSelectionPath
+        : (!isDir && activeWorkspaceFilePath && entryPath === activeWorkspaceFilePath),
+      workspaceEntry: entry,
       onClick: () => {
         if (isDir) {
           void loadWorkspaceBrowserPath(entryPath);

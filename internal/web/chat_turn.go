@@ -30,7 +30,7 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 		a.runHubTurn(sessionID, session, messages, outputMode, localOnly)
 		return
 	}
-	if a.tryRunLocalSystemActionTurn(sessionID, session, messages, outputMode, localOnly) {
+	if a.tryRunLocalSystemActionTurn(sessionID, session, messages, cursorCtx, outputMode, localOnly) {
 		return
 	}
 	if a.appServerClient == nil {
@@ -276,12 +276,12 @@ func (a *App) runAssistantTurn(sessionID string, outputMode string, localOnly bo
 	_ = assistantText
 }
 
-func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSession, messages []store.ChatMessage, outputMode string, localOnly bool) bool {
+func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSession, messages []store.ChatMessage, cursorCtx *chatCursorContext, outputMode string, localOnly bool) bool {
 	userText := latestUserMessage(messages)
 	if strings.TrimSpace(userText) == "" {
 		return false
 	}
-	actionMessage, actionPayloads, handled := a.classifyAndExecuteSystemAction(context.Background(), sessionID, session, userText)
+	actionMessage, actionPayloads, handled := a.classifyAndExecuteSystemActionWithCursor(context.Background(), sessionID, session, userText, cursorCtx)
 	if !handled && !localOnly {
 		return false
 	}
