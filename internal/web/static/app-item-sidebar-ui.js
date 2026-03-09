@@ -463,7 +463,6 @@ export function renderSidebarRow({
     button.addEventListener('focus', () => {
       state.workspaceBrowserActivePath = String(workspaceEntry?.path || '').trim();
       state.workspaceBrowserActiveIsDir = Boolean(workspaceEntry?.is_dir);
-      renderPrReviewFileList();
     });
   }
   button.addEventListener('click', (ev) => {
@@ -475,7 +474,6 @@ export function renderSidebarRow({
     if (workspaceEntry) {
       state.workspaceBrowserActivePath = String(workspaceEntry?.path || '').trim();
       state.workspaceBrowserActiveIsDir = Boolean(workspaceEntry?.is_dir);
-      renderPrReviewFileList();
     }
     onClick(ev);
   });
