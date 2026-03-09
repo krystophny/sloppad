@@ -1,10 +1,19 @@
 import { staticURL } from './paths.js';
 
 const ORT_LOCAL_URL = staticURL('vad/ort.min.mjs');
+const ORT_WASM_MODULE_URL = staticURL('vad/ort-wasm-simd-threaded.mjs');
+const ORT_WASM_BINARY_URL = staticURL('vad/ort-wasm-simd-threaded.wasm');
 let ort = null;
 async function loadOrt() {
   if (!ort) ort = await import(ORT_LOCAL_URL);
   return ort;
+}
+
+export function resolveOrtWasmPaths() {
+  return {
+    mjs: ORT_WASM_MODULE_URL,
+    wasm: ORT_WASM_BINARY_URL,
+  };
 }
 
 const HOTWORD_VENDOR_BASE = staticURL('vendor/openwakeword');
@@ -400,7 +409,7 @@ async function startOnnxMonitor(stream) {
 async function initOnnxModel() {
   await loadOrt();
   if (ort.env?.wasm) {
-    ort.env.wasm.wasmPaths = staticURL('vad/');
+    ort.env.wasm.wasmPaths = resolveOrtWasmPaths();
     ort.env.wasm.numThreads = 1;
   }
 

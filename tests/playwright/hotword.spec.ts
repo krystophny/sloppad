@@ -146,6 +146,18 @@ test('hotword detection starts recording directly', async ({ page }) => {
   })).toBe(true);
 });
 
+test('hotword runtime pins explicit ONNX wasm asset URLs', async ({ page }) => {
+  await waitReady(page);
+
+  const paths = await page.evaluate(async () => {
+    const mod = await import('/internal/web/static/hotword.js');
+    return mod.resolveOrtWasmPaths();
+  });
+
+  expect(new URL(paths.mjs).pathname).toContain('/static/vad/ort-wasm-simd-threaded.mjs');
+  expect(new URL(paths.wasm).pathname).toContain('/static/vad/ort-wasm-simd-threaded.wasm');
+});
+
 test('hotword plus speech starts recording', async ({ page }) => {
   await waitReady(page);
   await setConversationListenWindowMs(page, 2_500);
