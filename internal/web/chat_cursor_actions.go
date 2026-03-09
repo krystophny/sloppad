@@ -4,10 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/krystophny/tabura/internal/store"
 )
+
+var titledItemInboxCommandPattern = regexp.MustCompile(`(?i)^(?:move|bring|put)\s+(?:the\s+)?(?:item|mail|message)\s+(?:at\s+line\s+\d+\s+of\s+)?["“]?(.+?)["”]?\s+back\s+to\s+(?:the\s+)?inbox(?:\s*[.!?])?$`)
 
 func parseInlineCursorIntent(text string, cursor *chatCursorContext) *SystemAction {
 	cursor = normalizeChatCursorContext(cursor)
@@ -106,6 +110,24 @@ func parseInlineCursorIntent(text string, cursor *chatCursorContext) *SystemActi
 	return nil
 }
 
+func parseInlineTitledItemIntent(text string) *SystemAction {
+	match := titledItemInboxCommandPattern.FindStringSubmatch(strings.TrimSpace(text))
+	if len(match) != 2 {
+		return nil
+	}
+	title := strings.TrimSpace(match[1])
+	if title == "" {
+		return nil
+	}
+	return &SystemAction{
+		Action: "triage_item_by_title",
+		Params: map[string]interface{}{
+			"title":         title,
+			"triage_action": "inbox",
+		},
+	}
+}
+
 func systemActionCursorTriage(params map[string]interface{}) string {
 	for _, key := range []string{"triage_action", "action"} {
 		if value := strings.TrimSpace(fmt.Sprint(params[key])); value != "" && value != "<nil>" {
@@ -128,6 +150,44 @@ func systemActionPathFlag(params map[string]interface{}) bool {
 	default:
 		return false
 	}
+}
+
+func systemActionTitle(params map[string]interface{}) string {
+	return strings.TrimSpace(systemActionStringParam(params, "title"))
+}
+
+func (a *App) resolveItemByTitle(title string, preferredState string) (store.Item, error) {
+	items, err := a.store.ListItemsFiltered(store.ItemListFilter{})
+	if err != nil {
+		return store.Item{}, err
+	}
+	cleanTitle := strings.TrimSpace(title)
+	if cleanTitle == "" {
+		return store.Item{}, errors.New("title is required")
+	}
+	candidates := make([]store.Item, 0, 4)
+	for _, item := range items {
+		if strings.TrimSpace(item.Title) == cleanTitle {
+			candidates = append(candidates, item)
+		}
+	}
+	if len(candidates) == 0 {
+		return store.Item{}, fmt.Errorf("could not find item %q", cleanTitle)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if preferredState != "" {
+			iPreferred := strings.EqualFold(candidates[i].State, preferredState)
+			jPreferred := strings.EqualFold(candidates[j].State, preferredState)
+			if iPreferred != jPreferred {
+				return iPreferred
+			}
+		}
+		if candidates[i].UpdatedAt == candidates[j].UpdatedAt {
+			return candidates[i].ID > candidates[j].ID
+		}
+		return candidates[i].UpdatedAt > candidates[j].UpdatedAt
+	})
+	return candidates[0], nil
 }
 
 func (a *App) executeCursorAction(ctx context.Context, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
@@ -228,5 +288,39 @@ func (a *App) executeCursorAction(ctx context.Context, session store.ChatSession
 		}, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported cursor action: %s", action.Action)
+	}
+}
+
+func (a *App) executeTitledItemAction(ctx context.Context, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
+	switch strings.ToLower(strings.TrimSpace(action.Action)) {
+	case "triage_item_by_title":
+		title := systemActionTitle(action.Params)
+		if title == "" {
+			return "", nil, errors.New("title is required")
+		}
+		triageAction := systemActionCursorTriage(action.Params)
+		item, err := a.resolveItemByTitle(title, store.ItemStateDone)
+		if err != nil {
+			return "", nil, err
+		}
+		payload := map[string]interface{}{
+			"type":    "item_state_changed",
+			"item_id": item.ID,
+			"view":    item.State,
+		}
+		switch triageAction {
+		case "inbox":
+			if err := a.syncRemoteEmailItemState(ctx, item, store.ItemStateInbox); err != nil {
+				return "", nil, err
+			}
+			if err := a.store.UpdateItemState(item.ID, store.ItemStateInbox); err != nil {
+				return "", nil, err
+			}
+			return fmt.Sprintf("Moved item %q back to inbox.", item.Title), payload, nil
+		default:
+			return "", nil, fmt.Errorf("unsupported titled item triage action: %s", triageAction)
+		}
+	default:
+		return "", nil, fmt.Errorf("unsupported titled item action: %s", action.Action)
 	}
 }

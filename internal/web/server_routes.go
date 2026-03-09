@@ -146,13 +146,23 @@ func (a *App) Router() http.Handler {
 	r.Get("/", a.serveIndex)
 	r.Get("/canvas", a.serveCanvas)
 	r.Get("/capture", a.serveCapture)
+	staticHandler := withNoStore(http.StripPrefix("/static/", http.FileServer(http.FS(staticSubFS()))))
 	if a.devRuntime {
 		diskDir := filepath.Join(a.localProjectDir, "internal", "web", "static")
-		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(diskDir))))
-	} else {
-		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSubFS()))))
+		staticHandler = withNoStore(http.StripPrefix("/static/", http.FileServer(http.Dir(diskDir))))
 	}
+	r.Handle("/static/*", staticHandler)
 	return securityHeaders(r)
+}
+
+func withNoStore(next http.Handler) http.Handler {
+	if next == nil {
+		return http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func staticSubFS() fs.FS {
