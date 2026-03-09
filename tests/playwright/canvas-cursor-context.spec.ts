@@ -216,6 +216,7 @@ test('meeting taps move the pinned cursor without starting a new recording', asy
 
   const log = await getLog(page);
   expect(log.some((entry) => entry.type === 'recorder' && entry.action === 'start')).toBe(false);
+  expect(log.filter((entry) => entry.type === 'canvas_position')).toHaveLength(2);
   expect(firstDot?.indicatorClass).toContain('is-cursor');
   expect(secondDot?.indicatorClass).toContain('is-cursor');
   expect(firstDot?.left).toBe(`${firstX}px`);
