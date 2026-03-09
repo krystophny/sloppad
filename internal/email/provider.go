@@ -1,15 +1,143 @@
 package email
 
-import "context"
+import (
+	"context"
+	"time"
+
+	"github.com/krystophny/tabura/internal/providerdata"
+)
 
 type EmailProvider interface {
-	ListFolders(ctx context.Context) ([]Folder, error)
-	ListMessages(ctx context.Context, opts ListMessageOptions) ([]Message, error)
-	GetMessage(ctx context.Context, messageID string) (Message, error)
-	ArchiveMessage(ctx context.Context, messageID string) error
-	DeleteMessage(ctx context.Context, messageID string) error
-	MarkRead(ctx context.Context, messageID string) error
-	MarkUnread(ctx context.Context, messageID string) error
+	ListLabels(ctx context.Context) ([]providerdata.Label, error)
+	ListMessages(ctx context.Context, opts SearchOptions) ([]string, error)
+	GetMessage(ctx context.Context, messageID, format string) (*providerdata.EmailMessage, error)
+	GetMessages(ctx context.Context, messageIDs []string, format string) ([]*providerdata.EmailMessage, error)
+	MarkRead(ctx context.Context, messageIDs []string) (int, error)
+	MarkUnread(ctx context.Context, messageIDs []string) (int, error)
+	Archive(ctx context.Context, messageIDs []string) (int, error)
+	Trash(ctx context.Context, messageIDs []string) (int, error)
+	Delete(ctx context.Context, messageIDs []string) (int, error)
+	ProviderName() string
+	Close() error
+}
+
+type MessageActionCapabilities struct {
+	Provider              string `json:"provider,omitempty"`
+	SupportsOpen          bool   `json:"supports_open"`
+	SupportsArchive       bool   `json:"supports_archive"`
+	SupportsDeleteToTrash bool   `json:"supports_delete_to_trash"`
+	SupportsNativeDefer   bool   `json:"supports_native_defer"`
+}
+
+type MessageActionResult struct {
+	Provider              string `json:"provider,omitempty"`
+	Action                string `json:"action"`
+	MessageID             string `json:"message_id"`
+	Status                string `json:"status"`
+	EffectiveProviderMode string `json:"effective_provider_mode"`
+	DeferredUntilAt       string `json:"deferred_until_at,omitempty"`
+	StubReason            string `json:"stub_reason,omitempty"`
+	ErrorCode             string `json:"error_code,omitempty"`
+	ErrorMessage          string `json:"error_message,omitempty"`
+}
+
+type MessageActionProvider interface {
+	Defer(ctx context.Context, messageID string, untilAt time.Time) (MessageActionResult, error)
+	SupportsNativeDefer() bool
+}
+
+type SearchOptions struct {
+	Folder           string
+	Text             string
+	Subject          string
+	From             string
+	To               string
+	After            time.Time
+	Before           time.Time
+	Since            time.Time
+	Until            time.Time
+	HasAttachment    *bool
+	IsRead           *bool
+	IsFlagged        *bool
+	SizeGreater      int64
+	SizeLess         int64
+	LabelIDs         []string
+	IncludeSpamTrash bool
+	MaxResults       int64
+}
+
+func BoolPtr(b bool) *bool {
+	return &b
+}
+
+func DefaultSearchOptions() SearchOptions {
+	return SearchOptions{MaxResults: 100}
+}
+
+func (o SearchOptions) WithFolder(folder string) SearchOptions {
+	o.Folder = folder
+	return o
+}
+
+func (o SearchOptions) WithText(text string) SearchOptions {
+	o.Text = text
+	return o
+}
+
+func (o SearchOptions) WithSubject(subject string) SearchOptions {
+	o.Subject = subject
+	return o
+}
+
+func (o SearchOptions) WithFrom(from string) SearchOptions {
+	o.From = from
+	return o
+}
+
+func (o SearchOptions) WithTo(to string) SearchOptions {
+	o.To = to
+	return o
+}
+
+func (o SearchOptions) WithDateRange(after, before time.Time) SearchOptions {
+	o.After = after
+	o.Before = before
+	return o
+}
+
+func (o SearchOptions) WithSince(since time.Time) SearchOptions {
+	o.Since = since
+	return o
+}
+
+func (o SearchOptions) WithLastDays(days int) SearchOptions {
+	o.Since = time.Now().AddDate(0, 0, -days)
+	return o
+}
+
+func (o SearchOptions) WithHasAttachment(has bool) SearchOptions {
+	o.HasAttachment = &has
+	return o
+}
+
+func (o SearchOptions) WithIsRead(read bool) SearchOptions {
+	o.IsRead = &read
+	return o
+}
+
+func (o SearchOptions) WithIsFlagged(flagged bool) SearchOptions {
+	o.IsFlagged = &flagged
+	return o
+}
+
+func (o SearchOptions) WithMaxResults(max int64) SearchOptions {
+	o.MaxResults = max
+	return o
+}
+
+func (o SearchOptions) WithIncludeSpamTrash(include bool) SearchOptions {
+	o.IncludeSpamTrash = include
+	return o
 }
 
 type ListMessageOptions struct {

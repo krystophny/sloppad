@@ -1,0 +1,55 @@
+package providerdata
+
+import "time"
+
+type EmailMessage struct {
+	ID          string
+	ThreadID    string
+	Subject     string
+	Sender      string
+	Recipients  []string
+	Date        time.Time
+	Snippet     string
+	Labels      []string
+	IsRead      bool
+	BodyText    *string
+	BodyHTML    *string
+	Attachments []Attachment
+}
+
+type Attachment struct {
+	Filename string
+	MimeType string
+	Size     int64
+}
+
+type Label struct {
+	ID             string
+	Name           string
+	Type           string
+	MessagesTotal  int
+	MessagesUnread int
+}
+
+type Calendar struct {
+	ID          string
+	Name        string
+	Description string
+	TimeZone    string
+	Primary     bool
+}
+
+type Event struct {
+	ID          string
+	CalendarID  string
+	Summary     string
+	Description string
+	Location    string
+	Start       time.Time
+	End         time.Time
+	AllDay      bool
+	Status      string
+	Organizer   string
+	Attendees   []string
+	Recurring   bool
+}
