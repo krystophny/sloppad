@@ -221,7 +221,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 			"dir_path":     workspace.DirPath,
 		}, nil
 	case "cursor_open_item", "cursor_triage_item", "cursor_open_path":
-		return a.executeCursorAction(session, action)
+		return a.executeCursorAction(context.Background(), session, action)
 	case "list_workspaces":
 		return a.executeListWorkspacesAction(session, action)
 	case "create_workspace":

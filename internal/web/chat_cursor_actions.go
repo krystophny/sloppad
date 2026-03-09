@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -77,6 +78,15 @@ func parseInlineCursorIntent(text string, cursor *chatCursorContext) *SystemActi
 					"view":          view,
 				},
 			}
+		case "move this to inbox", "move it to inbox", "move this back to inbox", "move this back to the inbox", "move this mail back to the inbox", "bring this back", "make this active":
+			return &SystemAction{
+				Action: "cursor_triage_item",
+				Params: map[string]interface{}{
+					"item_id":       cursor.ItemID,
+					"triage_action": "inbox",
+					"view":          view,
+				},
+			}
 		}
 	}
 
@@ -120,7 +130,7 @@ func systemActionPathFlag(params map[string]interface{}) bool {
 	}
 }
 
-func (a *App) executeCursorAction(session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
+func (a *App) executeCursorAction(ctx context.Context, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
 	switch strings.ToLower(strings.TrimSpace(action.Action)) {
 	case "cursor_open_item":
 		itemID := systemActionItemID(action.Params)
@@ -155,10 +165,21 @@ func (a *App) executeCursorAction(session store.ChatSession, action *SystemActio
 		}
 		switch triageAction {
 		case "done":
+			if err := a.syncRemoteEmailItemState(ctx, item, store.ItemStateDone); err != nil {
+				return "", nil, err
+			}
 			if err := a.store.TriageItemDone(item.ID); err != nil {
 				return "", nil, err
 			}
 			return fmt.Sprintf("Marked item %q done.", item.Title), payload, nil
+		case "inbox":
+			if err := a.syncRemoteEmailItemState(ctx, item, store.ItemStateInbox); err != nil {
+				return "", nil, err
+			}
+			if err := a.store.UpdateItemState(item.ID, store.ItemStateInbox); err != nil {
+				return "", nil, err
+			}
+			return fmt.Sprintf("Moved item %q back to inbox.", item.Title), payload, nil
 		case "delete":
 			if err := a.store.DeleteItem(item.ID); err != nil {
 				return "", nil, err
