@@ -55,6 +55,8 @@ Runtime and chat session management:
 - `GET /api/projects/{project_id}/references`
 - `GET /api/projects/{project_id}/meeting-items`
 - `POST /api/projects/{project_id}/meeting-items`
+- `GET /api/projects/{project_id}/items`
+- `GET /api/projects/{project_id}/workspaces`
 - `POST /api/chat/sessions`
 - `GET /api/chat/sessions/{session_id}/history`
 - `GET /api/chat/sessions/{session_id}/activity`
@@ -70,6 +72,7 @@ Domain model API:
 - `POST /api/workspaces`
 - `GET /api/workspaces/{workspace_id}`
 - `PUT /api/workspaces/{workspace_id}`
+- `PUT /api/workspaces/{workspace_id}/project`
 - `DELETE /api/workspaces/{workspace_id}`
 - `GET /api/time-entries`
 - `GET /api/time-entries/summary`
