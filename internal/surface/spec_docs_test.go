@@ -66,14 +66,16 @@ func TestInteractionGrammarDocIsIndexedAndLinked(t *testing.T) {
 		"## Allowed Tool Modalities",
 		"## Rules for Auxiliary Surfaces",
 		"## Rules for New Artifact Kinds",
+		"Tabura has exactly five primary product nouns:",
+		"Tabura exposes exactly two live runtime modes:",
 		"Project is not a product concept.",
+		"- **Workspace**",
+		"- **Artifact**",
+		"- **Item**",
+		"- **Actor**",
+		"- **Context**",
 		"- Dialogue",
 		"- Meeting",
-		"- Workspace",
-		"- Artifact",
-		"- Item",
-		"- Actor",
-		"- Label",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(content, snippet) {
