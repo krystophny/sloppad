@@ -1,8 +1,7 @@
-import { apiURL, getActiveArtifactTitle, getActiveTextEventId, getUiState, isOverlayVisible, isTextInputVisible } from './app-env.js';
-import { refs, state } from './app-context.js';
-import { showCanvasColumn } from './app-canvas-ui.js';
-import { renderCanvas } from './canvas.js';
-
+import { apiURL, getActiveArtifactTitle, getActiveTextEventId, getUiState, isOverlayVisible, isTextInputVisible } from "./app-env.js";
+import { refs, state } from "./app-context.js";
+import { showCanvasColumn } from "./app-canvas-ui.js";
+import { renderCanvas } from "./canvas.js";
 const showStatus = (...args) => refs.showStatus(...args);
 const fetchRuntimeMeta = (...args) => refs.fetchRuntimeMeta(...args);
 const acquireMicStream = (...args) => refs.acquireMicStream(...args);
@@ -13,15 +12,13 @@ const sttStop = (...args) => refs.sttStop(...args);
 const sttCancel = (...args) => refs.sttCancel(...args);
 const loadItemSidebarView = (...args) => refs.loadItemSidebarView(...args);
 const refreshItemSidebarCounts = (...args) => refs.refreshItemSidebarCounts(...args);
-
-const BUG_REPORT_SHORTCUT_KEY = 'b';
+const BUG_REPORT_SHORTCUT_KEY = "b";
 const BUG_REPORT_TOUCH_HOLD_MS = 700;
 const BUG_REPORT_EVENT_LIMIT = 24;
 const BUG_REPORT_LOG_LIMIT = 40;
-const BUG_REPORT_STROKE_COLOR = '#d92d20';
+const BUG_REPORT_STROKE_COLOR = "#d92d20";
 const BUG_REPORT_STROKE_WIDTH = 4;
 const BUG_REPORT_CAPTURE_TIMEOUT_MS = 1500;
-
 const recentEvents = [];
 const browserLogs = [];
 let bugReportUiReady = false;
@@ -31,7 +28,6 @@ let pendingReport = null;
 let activeStroke = null;
 let noteRecording = null;
 let twoFingerHold = null;
-
 function pushBounded(list, value, limit) {
   if (!Array.isArray(list)) return;
   list.push(value);
@@ -39,21 +35,17 @@ function pushBounded(list, value, limit) {
     list.shift();
   }
 }
-
 function formatNow() {
-  return new Date().toISOString();
+  return (/* @__PURE__ */ new Date()).toISOString();
 }
-
 function safeText(value) {
-  return String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+  return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
 }
-
 function bugReportTestEnv() {
   return window.__taburaBugReportTestEnv || {};
 }
-
 function stringifyConsoleArg(value) {
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   if (value instanceof Error) return value.stack || value.message || String(value);
   try {
     return JSON.stringify(value);
@@ -61,13 +53,12 @@ function stringifyConsoleArg(value) {
     return String(value);
   }
 }
-
 function bugReportIssueCanvasMarkdown(payload) {
   const issueNumber = Number(payload?.issue_number || 0);
   const issueURL = safeText(payload?.issue_url);
   const issueError = safeText(payload?.issue_error);
   const bundlePath = safeText(payload?.bundle_path);
-  const lines = ['# Bug report filed', ''];
+  const lines = ["# Bug report filed", ""];
   if (issueNumber > 0 && issueURL) {
     lines.push(`- Issue: [#${issueNumber}](${issueURL})`);
   } else if (issueURL) {
@@ -79,87 +70,80 @@ function bugReportIssueCanvasMarkdown(payload) {
   if (bundlePath) {
     lines.push(`- Bundle: \`${bundlePath}\``);
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
-
 function recordRecentEvent(label) {
   const clean = safeText(label);
   if (!clean) return;
   pushBounded(recentEvents, `${formatNow()} ${clean}`, BUG_REPORT_EVENT_LIMIT);
 }
-
 function recordBrowserLog(level, args) {
-  const message = args.map((value) => stringifyConsoleArg(value)).join(' ').trim();
+  const message = args.map((value) => stringifyConsoleArg(value)).join(" ").trim();
   if (!message) return;
   pushBounded(browserLogs, `${formatNow()} ${level}: ${message}`, BUG_REPORT_LOG_LIMIT);
 }
-
 function installBrowserLogCapture() {
   if (browserLogCaptureReady) return;
   browserLogCaptureReady = true;
-  ['log', 'warn', 'error'].forEach((level) => {
+  ["log", "warn", "error"].forEach((level) => {
     const original = console[level];
-    if (typeof original !== 'function') return;
+    if (typeof original !== "function") return;
     console[level] = (...args) => {
       recordBrowserLog(level, args);
       original.apply(console, args);
     };
   });
-  window.addEventListener('error', (event) => {
-    recordBrowserLog('error', [event?.message || event?.error || 'window error']);
+  window.addEventListener("error", (event) => {
+    recordBrowserLog("error", [event?.message || event?.error || "window error"]);
   });
-  window.addEventListener('unhandledrejection', (event) => {
-    recordBrowserLog('error', [event?.reason || 'unhandled rejection']);
+  window.addEventListener("unhandledrejection", (event) => {
+    recordBrowserLog("error", [event?.reason || "unhandled rejection"]);
   });
 }
-
 function installInteractionCapture() {
   if (interactionCaptureReady) return;
   interactionCaptureReady = true;
-  document.addEventListener('pointerdown', (event) => {
-    if (event.target instanceof Element && event.target.closest('#bug-report-sheet')) return;
-    recordRecentEvent(`pointer ${event.pointerType || 'mouse'} at (${Math.round(event.clientX)},${Math.round(event.clientY)})`);
+  document.addEventListener("pointerdown", (event) => {
+    if (event.target instanceof Element && event.target.closest("#bug-report-sheet")) return;
+    recordRecentEvent(`pointer ${event.pointerType || "mouse"} at (${Math.round(event.clientX)},${Math.round(event.clientY)})`);
   }, true);
-  document.addEventListener('keydown', (event) => {
-    if (event.target instanceof Element && event.target.closest('#bug-report-sheet')) return;
+  document.addEventListener("keydown", (event) => {
+    if (event.target instanceof Element && event.target.closest("#bug-report-sheet")) return;
     const mods = [
-      event.ctrlKey ? 'Ctrl' : '',
-      event.altKey ? 'Alt' : '',
-      event.metaKey ? 'Meta' : '',
-      event.shiftKey ? 'Shift' : '',
-    ].filter(Boolean).join('+');
-    const key = safeText(event.key) || 'unknown';
-    recordRecentEvent(`key ${mods ? `${mods}+` : ''}${key}`);
+      event.ctrlKey ? "Ctrl" : "",
+      event.altKey ? "Alt" : "",
+      event.metaKey ? "Meta" : "",
+      event.shiftKey ? "Shift" : ""
+    ].filter(Boolean).join("+");
+    const key = safeText(event.key) || "unknown";
+    recordRecentEvent(`key ${mods ? `${mods}+` : ""}${key}`);
   }, true);
 }
-
 function bugReportNodes() {
   return {
-    button: document.getElementById('bug-report-button'),
-    sheet: document.getElementById('bug-report-sheet'),
-    previewFrame: document.querySelector('#bug-report-sheet .bug-report-sheet__preview'),
-    preview: document.getElementById('bug-report-preview'),
-    ink: document.getElementById('bug-report-ink'),
-    note: document.getElementById('bug-report-note'),
-    record: document.getElementById('bug-report-record'),
-    save: document.getElementById('bug-report-save'),
-    cancel: document.getElementById('bug-report-cancel'),
-    clear: document.getElementById('bug-report-clear'),
+    button: document.getElementById("bug-report-button"),
+    sheet: document.getElementById("bug-report-sheet"),
+    previewFrame: document.querySelector("#bug-report-sheet .bug-report-sheet__preview"),
+    preview: document.getElementById("bug-report-preview"),
+    ink: document.getElementById("bug-report-ink"),
+    note: document.getElementById("bug-report-note"),
+    record: document.getElementById("bug-report-record"),
+    save: document.getElementById("bug-report-save"),
+    cancel: document.getElementById("bug-report-cancel"),
+    clear: document.getElementById("bug-report-clear")
   };
 }
-
 function ensureBugReportUi() {
-  if (document.getElementById('bug-report-button')) return;
-  const button = document.createElement('button');
-  button.id = 'bug-report-button';
-  button.type = 'button';
-  button.className = 'bug-report-button';
-  button.textContent = 'Bug';
-  button.setAttribute('aria-label', 'Report bug');
-
-  const sheet = document.createElement('section');
-  sheet.id = 'bug-report-sheet';
-  sheet.className = 'bug-report-sheet';
+  if (document.getElementById("bug-report-button")) return;
+  const button = document.createElement("button");
+  button.id = "bug-report-button";
+  button.type = "button";
+  button.className = "bug-report-button";
+  button.textContent = "Bug";
+  button.setAttribute("aria-label", "Report bug");
+  const sheet = document.createElement("section");
+  sheet.id = "bug-report-sheet";
+  sheet.className = "bug-report-sheet";
   sheet.hidden = true;
   sheet.innerHTML = `
     <div class="bug-report-sheet__backdrop"></div>
@@ -189,29 +173,26 @@ function ensureBugReportUi() {
   document.body.appendChild(button);
   document.body.appendChild(sheet);
 }
-
 function openBugReportSheet() {
   const { sheet } = bugReportNodes();
   if (!(sheet instanceof HTMLElement)) return;
   sheet.hidden = false;
-  document.body.classList.add('bug-report-open');
+  document.body.classList.add("bug-report-open");
 }
-
 function closeBugReportSheet() {
   const { sheet, note } = bugReportNodes();
   if (sheet instanceof HTMLElement) {
     sheet.hidden = true;
   }
   if (note instanceof HTMLTextAreaElement) {
-    note.value = '';
+    note.value = "";
   }
-  document.body.classList.remove('bug-report-open');
+  document.body.classList.remove("bug-report-open");
   pendingReport = null;
   activeStroke = null;
   clearBugReportInk();
   void stopBugReportVoiceNote(true);
 }
-
 function syncBugReportCanvasSize() {
   const { previewFrame, preview, ink } = bugReportNodes();
   if (!(preview instanceof HTMLImageElement) || !(ink instanceof HTMLCanvasElement)) return;
@@ -226,11 +207,10 @@ function syncBugReportCanvasSize() {
   ink.style.height = `${height}px`;
   redrawBugReportInk();
 }
-
 function drawStroke(ctx, stroke) {
   if (!ctx || !stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.strokeStyle = BUG_REPORT_STROKE_COLOR;
   ctx.lineWidth = BUG_REPORT_STROKE_WIDTH;
   ctx.beginPath();
@@ -243,11 +223,10 @@ function drawStroke(ctx, stroke) {
   });
   ctx.stroke();
 }
-
 function redrawBugReportInk() {
   const { ink } = bugReportNodes();
   if (!(ink instanceof HTMLCanvasElement)) return;
-  const ctx = ink.getContext('2d');
+  const ctx = ink.getContext("2d");
   if (!ctx) return;
   ctx.clearRect(0, 0, ink.width, ink.height);
   const strokes = Array.isArray(pendingReport?.strokes) ? pendingReport.strokes : [];
@@ -256,7 +235,6 @@ function redrawBugReportInk() {
     drawStroke(ctx, activeStroke);
   }
 }
-
 function clearBugReportInk() {
   if (pendingReport) {
     pendingReport.strokes = [];
@@ -264,7 +242,6 @@ function clearBugReportInk() {
   activeStroke = null;
   redrawBugReportInk();
 }
-
 function buildCanvasState() {
   const uiState = getUiState();
   return {
@@ -284,58 +261,51 @@ function buildCanvasState() {
     workspace_browser_path: safeText(state.workspaceBrowserPath),
     last_input_origin: safeText(state.lastInputOrigin),
     last_input_x: Number.isFinite(uiState?.lastInputX) ? Math.round(uiState.lastInputX) : null,
-    last_input_y: Number.isFinite(uiState?.lastInputY) ? Math.round(uiState.lastInputY) : null,
+    last_input_y: Number.isFinite(uiState?.lastInputY) ? Math.round(uiState.lastInputY) : null
   };
 }
-
 function cleanStringList(values) {
   if (!Array.isArray(values)) return [];
-  return values
-    .map((value) => safeText(value))
-    .filter(Boolean);
+  return values.map((value) => safeText(value)).filter(Boolean);
 }
-
 function normalizeBrandList(brands) {
   if (!Array.isArray(brands)) return [];
-  return brands
-    .map((entry) => {
-      const brand = safeText(entry?.brand);
-      const version = safeText(entry?.version);
-      if (!brand && !version) return null;
-      return { brand, version };
-    })
-    .filter(Boolean);
+  return brands.map((entry) => {
+    const brand = safeText(entry?.brand);
+    const version = safeText(entry?.version);
+    if (!brand && !version) return null;
+    return { brand, version };
+  }).filter(Boolean);
 }
-
 async function readUserAgentData() {
   const userAgentData = navigator.userAgentData;
-  if (!userAgentData || typeof userAgentData !== 'object') {
+  if (!userAgentData || typeof userAgentData !== "object") {
     return {};
   }
   const device = {
     mobile: Boolean(userAgentData.mobile),
     brands: normalizeBrandList(userAgentData.brands),
-    platform: safeText(userAgentData.platform),
+    platform: safeText(userAgentData.platform)
   };
-  if (typeof userAgentData.getHighEntropyValues === 'function') {
+  if (typeof userAgentData.getHighEntropyValues === "function") {
     try {
       const detail = await userAgentData.getHighEntropyValues([
-        'architecture',
-        'fullVersionList',
-        'model',
-        'platformVersion',
-        'uaFullVersion',
+        "architecture",
+        "fullVersionList",
+        "model",
+        "platformVersion",
+        "uaFullVersion"
       ]);
       device.architecture = safeText(detail?.architecture);
       device.full_version_list = normalizeBrandList(detail?.fullVersionList);
       device.model = safeText(detail?.model);
       device.os_version = safeText(detail?.platformVersion);
       device.browser_version = safeText(detail?.uaFullVersion);
-    } catch (_) {}
+    } catch (_) {
+    }
   }
   return device;
 }
-
 async function buildDeviceState() {
   const uaData = await readUserAgentData();
   const timeZone = safeText(Intl.DateTimeFormat().resolvedOptions?.().timeZone);
@@ -359,24 +329,23 @@ async function buildDeviceState() {
     timezone: timeZone,
     hardware_concurrency: Number(navigator.hardwareConcurrency || 0),
     device_memory_gb: Number(navigator.deviceMemory || 0),
-    max_touch_points: Number(navigator.maxTouchPoints || 0),
+    max_touch_points: Number(navigator.maxTouchPoints || 0)
   };
 }
-
 function collectStyleText() {
-  let css = '';
+  let css = "";
   for (const sheet of Array.from(document.styleSheets || [])) {
     try {
       const rules = Array.from(sheet.cssRules || []);
-      css += rules.map((rule) => rule.cssText).join('\n');
-    } catch (_) {}
+      css += rules.map((rule) => rule.cssText).join("\n");
+    } catch (_) {
+    }
   }
   return css;
 }
-
 function syncCloneInputs(sourceRoot, cloneRoot) {
-  const sourceInputs = sourceRoot.querySelectorAll('input, textarea, select');
-  const cloneInputs = cloneRoot.querySelectorAll('input, textarea, select');
+  const sourceInputs = sourceRoot.querySelectorAll("input, textarea, select");
+  const cloneInputs = cloneRoot.querySelectorAll("input, textarea, select");
   sourceInputs.forEach((source, index) => {
     const target = cloneInputs[index];
     if (!target) return;
@@ -386,12 +355,12 @@ function syncCloneInputs(sourceRoot, cloneRoot) {
       return;
     }
     if (source instanceof HTMLInputElement && target instanceof HTMLInputElement) {
-      target.setAttribute('value', source.value);
+      target.setAttribute("value", source.value);
       target.value = source.value;
       if (source.checked) {
-        target.setAttribute('checked', 'checked');
+        target.setAttribute("checked", "checked");
       } else {
-        target.removeAttribute('checked');
+        target.removeAttribute("checked");
       }
       return;
     }
@@ -403,16 +372,15 @@ function syncCloneInputs(sourceRoot, cloneRoot) {
     }
   });
 }
-
 function replaceCloneCanvases(sourceRoot, cloneRoot) {
-  const sourceCanvases = sourceRoot.querySelectorAll('canvas');
-  const cloneCanvases = cloneRoot.querySelectorAll('canvas');
+  const sourceCanvases = sourceRoot.querySelectorAll("canvas");
+  const cloneCanvases = cloneRoot.querySelectorAll("canvas");
   sourceCanvases.forEach((source, index) => {
     const target = cloneCanvases[index];
     if (!(source instanceof HTMLCanvasElement) || !(target instanceof HTMLCanvasElement)) return;
-    const img = document.createElement('img');
+    const img = document.createElement("img");
     try {
-      img.src = source.toDataURL('image/png');
+      img.src = source.toDataURL("image/png");
     } catch (_) {
       return;
     }
@@ -423,41 +391,35 @@ function replaceCloneCanvases(sourceRoot, cloneRoot) {
     target.replaceWith(img);
   });
 }
-
 function removeCloneNoise(cloneRoot) {
-  cloneRoot.querySelectorAll('#bug-report-button, #bug-report-sheet').forEach((node) => node.remove());
+  cloneRoot.querySelectorAll("#bug-report-button, #bug-report-sheet").forEach((node) => node.remove());
 }
-
 async function loadImageFromURL(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('image load failed'));
+    img.onerror = () => reject(new Error("image load failed"));
     img.src = url;
   });
 }
-
 function fallbackScreenshotReasonLabel(reason) {
-  if (reason === 'firefox') return 'Live screenshot unavailable in Firefox';
-  if (reason === 'loading') return 'Preparing bug report preview';
-  if (reason === 'timeout') return 'Live screenshot timed out';
-  if (reason === 'render-error') return 'Live screenshot failed';
-  return 'Using browser-safe preview';
+  if (reason === "firefox") return "Live screenshot unavailable in Firefox";
+  if (reason === "loading") return "Preparing bug report preview";
+  if (reason === "timeout") return "Live screenshot timed out";
+  if (reason === "render-error") return "Live screenshot failed";
+  return "Using browser-safe preview";
 }
-
 function currentBugReportUserAgent() {
   const testEnv = bugReportTestEnv();
   const forced = safeText(testEnv.userAgent || testEnv.forceUserAgent);
   return forced || safeText(navigator.userAgent);
 }
-
 function shouldPreferBrowserSafeBugReportPreview() {
   const testEnv = bugReportTestEnv();
   if (testEnv.forceLiveCapture === true) return false;
   if (testEnv.forceFallbackCapture === true) return true;
   return /(firefox|fxios)/i.test(currentBugReportUserAgent());
 }
-
 function setBugReportPreviewMode(mode) {
   const { previewFrame, preview } = bugReportNodes();
   if (previewFrame instanceof HTMLElement) {
@@ -467,7 +429,6 @@ function setBugReportPreviewMode(mode) {
     preview.dataset.captureMode = mode;
   }
 }
-
 function applyBugReportPreview(dataURL, mode) {
   const { preview } = bugReportNodes();
   setBugReportPreviewMode(mode);
@@ -475,54 +436,52 @@ function applyBugReportPreview(dataURL, mode) {
     preview.src = dataURL;
   }
 }
-
-function buildFallbackScreenshotDataURL(reason = '') {
-  const canvas = document.createElement('canvas');
+function buildFallbackScreenshotDataURL(reason = "") {
+  const canvas = document.createElement("canvas");
   canvas.width = 1280;
   canvas.height = 720;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
   const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#ede1cc');
-  gradient.addColorStop(1, '#d8ccb5');
+  gradient.addColorStop(0, "#ede1cc");
+  gradient.addColorStop(1, "#d8ccb5");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#17120f';
+  ctx.fillStyle = "#17120f";
   ctx.fillRect(36, 36, canvas.width - 72, canvas.height - 72);
-  ctx.fillStyle = '#f7f0e2';
+  ctx.fillStyle = "#f7f0e2";
   ctx.fillRect(52, 52, canvas.width - 104, canvas.height - 104);
-  ctx.fillStyle = '#8a3b12';
+  ctx.fillStyle = "#8a3b12";
   ctx.fillRect(52, 52, canvas.width - 104, 18);
-  ctx.fillStyle = '#17120f';
-  ctx.font = 'bold 34px monospace';
-  ctx.fillText('Tabura Bug Report Preview', 84, 134);
-  ctx.font = '24px monospace';
+  ctx.fillStyle = "#17120f";
+  ctx.font = "bold 34px monospace";
+  ctx.fillText("Tabura Bug Report Preview", 84, 134);
+  ctx.font = "24px monospace";
   ctx.fillText(fallbackScreenshotReasonLabel(reason), 84, 186);
-  ctx.font = '20px monospace';
+  ctx.font = "20px monospace";
   [
     `time: ${formatNow()}`,
-    `artifact: ${safeText(getActiveArtifactTitle()) || 'none'}`,
-    `tool: ${safeText(state.interaction?.tool) || 'unknown'}`,
-    `project: ${safeText(state.activeProjectId) || 'none'}`,
-    `browser: ${currentBugReportUserAgent() || 'unknown'}`,
+    `artifact: ${safeText(getActiveArtifactTitle()) || "none"}`,
+    `tool: ${safeText(state.interaction?.tool) || "unknown"}`,
+    `project: ${safeText(state.activeProjectId) || "none"}`,
+    `browser: ${currentBugReportUserAgent() || "unknown"}`
   ].forEach((line, index) => {
-    ctx.fillText(line, 84, 248 + (index * 36));
+    ctx.fillText(line, 84, 248 + index * 36);
   });
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL("image/png");
 }
-
 async function captureViewportScreenshotFromClone() {
   const testEnv = bugReportTestEnv();
   if (safeText(testEnv.screenshotDataURL)) {
-    return { dataURL: safeText(testEnv.screenshotDataURL), mode: 'test' };
+    return { dataURL: safeText(testEnv.screenshotDataURL), mode: "test" };
   }
-  const root = document.getElementById('view-main') || document.body;
+  const root = document.getElementById("view-main") || document.body;
   const rect = root.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width || window.innerWidth || 1));
   const height = Math.max(1, Math.round(rect.height || window.innerHeight || 1));
   const clone = root.cloneNode(true);
   if (!(clone instanceof HTMLElement)) {
-    throw new Error('clone failed');
+    throw new Error("clone failed");
   }
   syncCloneInputs(root, clone);
   replaceCloneCanvases(root, clone);
@@ -539,19 +498,19 @@ async function captureViewportScreenshotFromClone() {
     </svg>
   `;
   try {
-    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     try {
       const img = await loadImageFromURL(url);
-      const canvas = document.createElement('canvas');
+      const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('canvas unavailable');
-      ctx.fillStyle = '#ffffff';
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("canvas unavailable");
+      ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0);
-      return { dataURL: canvas.toDataURL('image/png'), mode: 'live' };
+      return { dataURL: canvas.toDataURL("image/png"), mode: "live" };
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -559,26 +518,25 @@ async function captureViewportScreenshotFromClone() {
     throw err;
   }
 }
-
 async function captureViewportScreenshot() {
   const testEnv = bugReportTestEnv();
   if (safeText(testEnv.screenshotDataURL)) {
-    return { dataURL: safeText(testEnv.screenshotDataURL), mode: 'test' };
+    return { dataURL: safeText(testEnv.screenshotDataURL), mode: "test" };
   }
   if (shouldPreferBrowserSafeBugReportPreview()) {
-    return { dataURL: buildFallbackScreenshotDataURL('firefox'), mode: 'fallback-firefox' };
+    return { dataURL: buildFallbackScreenshotDataURL("firefox"), mode: "fallback-firefox" };
   }
   let timer = 0;
   try {
     const result = await Promise.race([
       captureViewportScreenshotFromClone(),
       new Promise((_, reject) => {
-        timer = window.setTimeout(() => reject(new Error('timeout')), BUG_REPORT_CAPTURE_TIMEOUT_MS);
-      }),
+        timer = window.setTimeout(() => reject(new Error("timeout")), BUG_REPORT_CAPTURE_TIMEOUT_MS);
+      })
     ]);
     return result;
   } catch (err) {
-    const reason = safeText(err?.message).toLowerCase() === 'timeout' ? 'timeout' : 'render-error';
+    const reason = safeText(err?.message).toLowerCase() === "timeout" ? "timeout" : "render-error";
     return { dataURL: buildFallbackScreenshotDataURL(reason), mode: `fallback-${reason}` };
   } finally {
     if (timer) {
@@ -586,30 +544,29 @@ async function captureViewportScreenshot() {
     }
   }
 }
-
 function exportAnnotatedImageDataURL() {
   if (!pendingReport) {
-    return '';
+    return "";
   }
   if (!Array.isArray(pendingReport.strokes) || pendingReport.strokes.length === 0) {
-    return pendingReport.screenshotDataURL || '';
+    return pendingReport.screenshotDataURL || "";
   }
   const { preview, ink } = bugReportNodes();
-  if (!(preview instanceof HTMLImageElement) || !(ink instanceof HTMLCanvasElement)) return '';
+  if (!(preview instanceof HTMLImageElement) || !(ink instanceof HTMLCanvasElement)) return "";
   const width = preview.naturalWidth || ink.width || 1;
   const height = preview.naturalHeight || ink.height || 1;
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-  ctx.fillStyle = '#ffffff';
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(preview, 0, 0, width, height);
   const scaleX = width / Math.max(1, ink.width);
   const scaleY = height / Math.max(1, ink.height);
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   ctx.strokeStyle = BUG_REPORT_STROKE_COLOR;
   ctx.lineWidth = BUG_REPORT_STROKE_WIDTH * ((scaleX + scaleY) / 2);
   pendingReport.strokes.forEach((stroke) => {
@@ -626,31 +583,29 @@ function exportAnnotatedImageDataURL() {
     });
     ctx.stroke();
   });
-  return canvas.toDataURL('image/png');
+  return canvas.toDataURL("image/png");
 }
-
 function updateVoiceNoteButton() {
   const { record } = bugReportNodes();
   if (!(record instanceof HTMLButtonElement)) return;
-  record.textContent = noteRecording ? 'Stop Voice' : 'Voice Note';
-  record.classList.toggle('is-recording', Boolean(noteRecording));
+  record.textContent = noteRecording ? "Stop Voice" : "Voice Note";
+  record.classList.toggle("is-recording", Boolean(noteRecording));
 }
-
 async function startBugReportVoiceNote() {
   if (noteRecording) return;
   const stream = await acquireMicStream();
   const recorder = newMediaRecorder(stream);
-  const mimeType = safeText(recorder?.mimeType) || 'audio/webm';
+  const mimeType = safeText(recorder?.mimeType) || "audio/webm";
   await sttStart(mimeType);
   const recording = { recorder, mimeType, stream, cancelled: false };
   noteRecording = recording;
   updateVoiceNoteButton();
-  recorder.addEventListener('dataavailable', (event) => {
+  recorder.addEventListener("dataavailable", (event) => {
     if (event.data instanceof Blob && event.data.size > 0) {
       void sttSendBlob(event.data);
     }
   });
-  recorder.addEventListener('stop', async () => {
+  recorder.addEventListener("stop", async () => {
     if (recording.cancelled) {
       noteRecording = null;
       updateVoiceNoteButton();
@@ -664,22 +619,20 @@ async function startBugReportVoiceNote() {
       }
       const { note } = bugReportNodes();
       if (transcript && note instanceof HTMLTextAreaElement) {
-        note.value = note.value.trim()
-          ? `${note.value.trim()}\n${transcript}`
-          : transcript;
+        note.value = note.value.trim() ? `${note.value.trim()}
+${transcript}` : transcript;
       }
-      showStatus(transcript ? 'voice note added' : 'voice note empty');
+      showStatus(transcript ? "voice note added" : "voice note empty");
     } catch (err) {
-      showStatus(`voice note failed: ${safeText(err?.message || err) || 'unknown error'}`);
+      showStatus(`voice note failed: ${safeText(err?.message || err) || "unknown error"}`);
     } finally {
       noteRecording = null;
       updateVoiceNoteButton();
     }
   }, { once: true });
   recorder.start(250);
-  showStatus('voice note recording');
+  showStatus("voice note recording");
 }
-
 async function stopBugReportVoiceNote(cancel = false) {
   if (!noteRecording) return;
   const active = noteRecording;
@@ -690,12 +643,12 @@ async function stopBugReportVoiceNote(cancel = false) {
     sttCancel();
   }
   try {
-    if (active.recorder && active.recorder.state !== 'inactive') {
+    if (active.recorder && active.recorder.state !== "inactive") {
       active.recorder.stop();
     }
-  } catch (_) {}
+  } catch (_) {
+  }
 }
-
 async function snapshotBugReportContext(trigger, runtime) {
   return {
     trigger,
@@ -709,51 +662,47 @@ async function snapshotBugReportContext(trigger, runtime) {
     recentEvents: recentEvents.slice(),
     browserLogs: browserLogs.slice(),
     device: await buildDeviceState(),
-    screenshotDataURL: '',
+    screenshotDataURL: "",
     strokes: [],
-    voiceTranscript: '',
+    voiceTranscript: ""
   };
 }
-
 async function openBugReport(trigger) {
   ensureBugReportUi();
   const runtime = await fetchRuntimeMeta().catch(() => ({}));
   const report = await snapshotBugReportContext(trigger, runtime);
-  report.screenshotDataURL = buildFallbackScreenshotDataURL('loading');
+  report.screenshotDataURL = buildFallbackScreenshotDataURL("loading");
   pendingReport = report;
-  applyBugReportPreview(report.screenshotDataURL, 'fallback-loading');
+  applyBugReportPreview(report.screenshotDataURL, "fallback-loading");
   const { preview, note } = bugReportNodes();
   if (preview instanceof HTMLImageElement) {
     preview.onload = () => syncBugReportCanvasSize();
   }
   if (note instanceof HTMLTextAreaElement) {
-    note.value = '';
+    note.value = "";
     window.setTimeout(() => note.focus(), 0);
   }
   clearBugReportInk();
   openBugReportSheet();
   window.requestAnimationFrame(() => syncBugReportCanvasSize());
-  showStatus('bug report captured');
+  showStatus("bug report captured");
   const capture = await captureViewportScreenshot();
   if (pendingReport !== report) return;
   report.screenshotDataURL = capture.dataURL;
   applyBugReportPreview(capture.dataURL, capture.mode);
   syncBugReportCanvasSize();
 }
-
-export function isInlineBugReportTrigger(text) {
+function isInlineBugReportTrigger(text) {
   const clean = safeText(text).toLowerCase();
   return /^(report bug|bug report|report a bug|das ist kaputt)[.!?]*$/.test(clean);
 }
-
-export async function maybeHandleInlineBugReport(text, options = {}) {
+async function maybeHandleInlineBugReport(text, options = {}) {
   if (!isInlineBugReportTrigger(text)) return false;
-  const trigger = safeText(options?.trigger) || 'voice';
+  const trigger = safeText(options?.trigger) || "voice";
   recordRecentEvent(`bug report trigger ${trigger}`);
   await openBugReport(trigger);
   return true;
 }
-
 async function saveBugReport() {
   if (!pendingReport) return;
   const { note, save } = bugReportNodes();
@@ -769,19 +718,19 @@ async function saveBugReport() {
     recent_events: pendingReport.recentEvents,
     browser_logs: pendingReport.browserLogs,
     device: pendingReport.device,
-    note: note instanceof HTMLTextAreaElement ? note.value.trim() : '',
+    note: note instanceof HTMLTextAreaElement ? note.value.trim() : "",
     voice_transcript: pendingReport.voiceTranscript,
     screenshot_data_url: pendingReport.screenshotDataURL,
-    annotated_data_url: exportAnnotatedImageDataURL(),
+    annotated_data_url: exportAnnotatedImageDataURL()
   };
   if (save instanceof HTMLButtonElement) {
     save.disabled = true;
   }
   try {
-    const resp = await fetch(apiURL('bugs/report'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const resp = await fetch(apiURL("bugs/report"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
     });
     if (!resp.ok) {
       const detail = safeText(await resp.text()) || `HTTP ${resp.status}`;
@@ -790,43 +739,41 @@ async function saveBugReport() {
     const payload = await resp.json();
     closeBugReportSheet();
     renderCanvas({
-      kind: 'text_artifact',
+      kind: "text_artifact",
       event_id: `bug-report-${Date.now()}`,
-      title: safeText(payload?.issue_title) || 'Bug report filed',
-      text: bugReportIssueCanvasMarkdown(payload),
+      title: safeText(payload?.issue_title) || "Bug report filed",
+      text: bugReportIssueCanvasMarkdown(payload)
     });
-    showCanvasColumn('canvas-text');
+    showCanvasColumn("canvas-text");
     const issueNumber = Number(payload?.issue_number || 0);
     try {
       await refreshBugReportInboxState();
     } catch (refreshErr) {
-      console.warn('bug report inbox refresh failed', refreshErr);
+      console.warn("bug report inbox refresh failed", refreshErr);
     }
     const issueError = safeText(payload?.issue_error);
     if (issueNumber > 0) {
       showStatus(`bug report filed: #${issueNumber}`);
     } else if (issueError) {
-      showStatus(`bug bundle saved (issue filing failed): ${safeText(payload?.bundle_path) || 'ok'}`);
+      showStatus(`bug bundle saved (issue filing failed): ${safeText(payload?.bundle_path) || "ok"}`);
     } else {
-      showStatus(`bug bundle saved: ${safeText(payload?.bundle_path) || 'ok'}`);
+      showStatus(`bug bundle saved: ${safeText(payload?.bundle_path) || "ok"}`);
     }
   } catch (err) {
-    showStatus(`bug bundle failed: ${safeText(err?.message || err) || 'unknown error'}`);
+    showStatus(`bug bundle failed: ${safeText(err?.message || err) || "unknown error"}`);
   } finally {
     if (save instanceof HTMLButtonElement) {
       save.disabled = false;
     }
   }
 }
-
 async function refreshBugReportInboxState() {
-  if (!String(state.activeProjectId || '').trim()) return false;
-  if (state.prReviewDrawerOpen && state.fileSidebarMode === 'items' && String(state.itemSidebarView || '').trim().toLowerCase() === 'inbox') {
-    return loadItemSidebarView('inbox');
+  if (!String(state.activeProjectId || "").trim()) return false;
+  if (state.prReviewDrawerOpen && state.fileSidebarMode === "items" && String(state.itemSidebarView || "").trim().toLowerCase() === "inbox") {
+    return loadItemSidebarView("inbox");
   }
   return refreshItemSidebarCounts();
 }
-
 function onBugReportPointerDown(event) {
   if (!pendingReport) return;
   const { ink } = bugReportNodes();
@@ -840,7 +787,6 @@ function onBugReportPointerDown(event) {
   redrawBugReportInk();
   event.preventDefault();
 }
-
 function onBugReportPointerMove(event) {
   if (!activeStroke) return;
   const { ink } = bugReportNodes();
@@ -852,7 +798,6 @@ function onBugReportPointerMove(event) {
   redrawBugReportInk();
   event.preventDefault();
 }
-
 function finishBugReportStroke() {
   if (!activeStroke || !pendingReport) return;
   if (!Array.isArray(pendingReport.strokes)) {
@@ -862,16 +807,14 @@ function finishBugReportStroke() {
   activeStroke = null;
   redrawBugReportInk();
 }
-
 function cancelTwoFingerHold() {
   if (!twoFingerHold) return;
   window.clearTimeout(twoFingerHold.timer);
   twoFingerHold = null;
 }
-
 function installTwoFingerHold() {
-  document.addEventListener('touchstart', (event) => {
-    if (document.body.classList.contains('bug-report-open')) return;
+  document.addEventListener("touchstart", (event) => {
+    if (document.body.classList.contains("bug-report-open")) return;
     if (event.touches.length !== 2) {
       cancelTwoFingerHold();
       return;
@@ -879,11 +822,11 @@ function installTwoFingerHold() {
     const points = Array.from(event.touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
     const timer = window.setTimeout(() => {
       cancelTwoFingerHold();
-      void openBugReport('gesture');
+      void openBugReport("gesture");
     }, BUG_REPORT_TOUCH_HOLD_MS);
     twoFingerHold = { timer, points };
   }, { passive: true });
-  document.addEventListener('touchmove', (event) => {
+  document.addEventListener("touchmove", (event) => {
     if (!twoFingerHold || event.touches.length !== 2) {
       cancelTwoFingerHold();
       return;
@@ -897,28 +840,27 @@ function installTwoFingerHold() {
       cancelTwoFingerHold();
     }
   }, { passive: true });
-  ['touchend', 'touchcancel'].forEach((type) => {
+  ["touchend", "touchcancel"].forEach((type) => {
     document.addEventListener(type, () => cancelTwoFingerHold(), { passive: true });
   });
 }
-
 function bindBugReportUi() {
   const { button, preview, ink, record, cancel, save, clear } = bugReportNodes();
   if (!(button instanceof HTMLButtonElement) || !(preview instanceof HTMLImageElement) || !(ink instanceof HTMLCanvasElement)) {
     return;
   }
-  button.addEventListener('click', () => {
-    recordRecentEvent('bug report button');
-    void openBugReport('button');
+  button.addEventListener("click", () => {
+    recordRecentEvent("bug report button");
+    void openBugReport("button");
   });
-  preview.addEventListener('load', () => syncBugReportCanvasSize());
-  ink.addEventListener('pointerdown', onBugReportPointerDown);
-  ink.addEventListener('pointermove', onBugReportPointerMove);
-  ink.addEventListener('pointerup', finishBugReportStroke);
-  ink.addEventListener('pointercancel', finishBugReportStroke);
-  window.addEventListener('resize', () => syncBugReportCanvasSize());
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && document.body.classList.contains('bug-report-open')) {
+  preview.addEventListener("load", () => syncBugReportCanvasSize());
+  ink.addEventListener("pointerdown", onBugReportPointerDown);
+  ink.addEventListener("pointermove", onBugReportPointerMove);
+  ink.addEventListener("pointerup", finishBugReportStroke);
+  ink.addEventListener("pointercancel", finishBugReportStroke);
+  window.addEventListener("resize", () => syncBugReportCanvasSize());
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("bug-report-open")) {
       event.preventDefault();
       closeBugReportSheet();
       return;
@@ -926,11 +868,11 @@ function bindBugReportUi() {
     if (safeText(event.key).toLowerCase() !== BUG_REPORT_SHORTCUT_KEY) return;
     if (!(event.ctrlKey && event.altKey) || event.metaKey) return;
     event.preventDefault();
-    recordRecentEvent('bug report shortcut');
-    void openBugReport('shortcut');
+    recordRecentEvent("bug report shortcut");
+    void openBugReport("shortcut");
   }, true);
   if (record instanceof HTMLButtonElement) {
-    record.addEventListener('click', () => {
+    record.addEventListener("click", () => {
       if (noteRecording) {
         void stopBugReportVoiceNote(false);
         return;
@@ -938,24 +880,23 @@ function bindBugReportUi() {
       void startBugReportVoiceNote().catch((err) => {
         noteRecording = null;
         updateVoiceNoteButton();
-        showStatus(`voice note failed: ${safeText(err?.message || err) || 'unknown error'}`);
+        showStatus(`voice note failed: ${safeText(err?.message || err) || "unknown error"}`);
       });
     });
   }
   if (cancel instanceof HTMLButtonElement) {
-    cancel.addEventListener('click', () => closeBugReportSheet());
+    cancel.addEventListener("click", () => closeBugReportSheet());
   }
   if (save instanceof HTMLButtonElement) {
-    save.addEventListener('click', () => {
+    save.addEventListener("click", () => {
       void saveBugReport();
     });
   }
   if (clear instanceof HTMLButtonElement) {
-    clear.addEventListener('click', () => clearBugReportInk());
+    clear.addEventListener("click", () => clearBugReportInk());
   }
 }
-
-export function initBugReportUi() {
+function initBugReportUi() {
   if (bugReportUiReady) return;
   bugReportUiReady = true;
   ensureBugReportUi();
@@ -964,3 +905,10 @@ export function initBugReportUi() {
   installTwoFingerHold();
   bindBugReportUi();
 }
+export {
+  initBugReportUi,
+  isInlineBugReportTrigger,
+  maybeHandleInlineBugReport
+};
+
+//# sourceMappingURL=app-bug-report.js.map

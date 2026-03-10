@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["paths.ts"],
+  "sourcesContent": ["// @ts-nocheck\nfunction trimLeadingSlashes(value) {\n  return String(value || '').replace(/^\\/+/, '');\n}\n\nfunction joinRelative(prefix, value) {\n  const clean = trimLeadingSlashes(value);\n  if (!clean) return `./${prefix}`;\n  return `./${prefix}/${clean}`;\n}\n\nexport function appURL(path) {\n  return new URL(String(path || './'), document.baseURI || window.location.href).toString();\n}\n\nexport function apiURL(path) {\n  return appURL(joinRelative('api', path));\n}\n\nexport function wsURL(path) {\n  const url = new URL(joinRelative('ws', path), document.baseURI || window.location.href);\n  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';\n  return url.toString();\n}\n\nexport function staticURL(path) {\n  return appURL(joinRelative('static', path));\n}\n"],
+  "mappings": "AACA,SAAS,mBAAmB,OAAO;AACjC,SAAO,OAAO,SAAS,EAAE,EAAE,QAAQ,QAAQ,EAAE;AAC/C;AAEA,SAAS,aAAa,QAAQ,OAAO;AACnC,QAAM,QAAQ,mBAAmB,KAAK;AACtC,MAAI,CAAC,MAAO,QAAO,KAAK,MAAM;AAC9B,SAAO,KAAK,MAAM,IAAI,KAAK;AAC7B;AAEO,SAAS,OAAO,MAAM;AAC3B,SAAO,IAAI,IAAI,OAAO,QAAQ,IAAI,GAAG,SAAS,WAAW,OAAO,SAAS,IAAI,EAAE,SAAS;AAC1F;AAEO,SAAS,OAAO,MAAM;AAC3B,SAAO,OAAO,aAAa,OAAO,IAAI,CAAC;AACzC;AAEO,SAAS,MAAM,MAAM;AAC1B,QAAM,MAAM,IAAI,IAAI,aAAa,MAAM,IAAI,GAAG,SAAS,WAAW,OAAO,SAAS,IAAI;AACtF,MAAI,WAAW,IAAI,aAAa,WAAW,SAAS;AACpD,SAAO,IAAI,SAAS;AACtB;AAEO,SAAS,UAAU,MAAM;AAC9B,SAAO,OAAO,aAAa,UAAU,IAAI,CAAC;AAC5C;",
+  "names": []
+}

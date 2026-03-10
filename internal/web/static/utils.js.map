@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["utils.ts"],
+  "sourcesContent": ["// @ts-nocheck\nexport function esc(str) {\n  const d = document.createElement('span');\n  d.textContent = str;\n  return d.innerHTML;\n}\n"],
+  "mappings": "AACO,SAAS,IAAI,KAAK;AACvB,QAAM,IAAI,SAAS,cAAc,MAAM;AACvC,IAAE,cAAc;AAChB,SAAO,EAAE;AACX;",
+  "names": []
+}

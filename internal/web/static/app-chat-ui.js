@@ -1,9 +1,7 @@
-import * as env from './app-env.js';
-import * as context from './app-context.js';
-
+import * as env from "./app-env.js";
+import * as context from "./app-context.js";
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
-
 const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const openWorkspaceSidebarFile = (...args) => refs.openWorkspaceSidebarFile(...args);
@@ -17,24 +15,23 @@ const setTTSSilentMode = (...args) => refs.setTTSSilentMode(...args);
 const sendChatWsJSON = (...args) => refs.sendChatWsJSON(...args);
 const parseOptionalBoolean = (...args) => refs.parseOptionalBoolean(...args);
 const updateRuntimePreferences = (...args) => refs.updateRuntimePreferences(...args);
-
-const MATH_SEGMENT_TOKEN_PREFIX = '@@TABURA_CHAT_MATH_SEGMENT_';
+const MATH_SEGMENT_TOKEN_PREFIX = "@@TABURA_CHAT_MATH_SEGMENT_";
 let localMessageSeq = 0;
 const renderer = new marked.Renderer();
 renderer.code = ({ text, lang }) => {
-  const safeLang = escapeHtml((lang || 'plaintext').toLowerCase());
-  return `<pre><code class="language-${safeLang}">${escapeHtml(text || '')}</code></pre>\n`;
+  const safeLang = escapeHtml((lang || "plaintext").toLowerCase());
+  return `<pre><code class="language-${safeLang}">${escapeHtml(text || "")}</code></pre>
+`;
 };
 marked.setOptions({ breaks: true, renderer });
-
-export function extractMathSegments(markdownSource) {
-  const source = String(markdownSource || '');
+function extractMathSegments(markdownSource) {
+  const source = String(markdownSource || "");
   const stash = [];
   let text = source;
   const patterns = [
     /\$\$[\s\S]+?\$\$/g,
     /\\\[[\s\S]+?\\\]/g,
-    /\\\([\s\S]+?\\\)/g,
+    /\\\([\s\S]+?\\\)/g
   ];
   for (const pattern of patterns) {
     text = text.replace(pattern, (segment) => {
@@ -45,20 +42,18 @@ export function extractMathSegments(markdownSource) {
   }
   return { text, stash };
 }
-
-export function restoreMathSegments(renderedHtml, mathSegments) {
-  let output = String(renderedHtml || '');
+function restoreMathSegments(renderedHtml, mathSegments) {
+  let output = String(renderedHtml || "");
   for (let i = 0; i < mathSegments.length; i += 1) {
     const token = `${MATH_SEGMENT_TOKEN_PREFIX}${i}@@`;
-    output = output.replaceAll(token, escapeHtml(String(mathSegments[i] || '')));
+    output = output.replaceAll(token, escapeHtml(String(mathSegments[i] || "")));
   }
   return output;
 }
-
-export function typesetMath(root, attempt = 0) {
+function typesetMath(root, attempt = 0) {
   if (!(root instanceof Element) || !root.isConnected) return Promise.resolve();
   const mj = window.MathJax;
-  if (!mj || typeof mj.typesetPromise !== 'function') {
+  if (!mj || typeof mj.typesetPromise !== "function") {
     if (attempt >= 40) return Promise.resolve();
     return new Promise((resolve) => {
       window.setTimeout(() => {
@@ -66,21 +61,17 @@ export function typesetMath(root, attempt = 0) {
       }, 75);
     });
   }
-  const startupReady = mj.startup?.promise && typeof mj.startup.promise.then === 'function'
-    ? mj.startup.promise
-    : Promise.resolve();
-  return startupReady
-    .then(() => {
-      if (!root.isConnected) return undefined;
-      return mj.typesetPromise([root]);
-    })
-    .catch(() => {});
+  const startupReady = mj.startup?.promise && typeof mj.startup.promise.then === "function" ? mj.startup.promise : Promise.resolve();
+  return startupReady.then(() => {
+    if (!root.isConnected) return void 0;
+    return mj.typesetPromise([root]);
+  }).catch(() => {
+  });
 }
-
-export function trackAssistantTurnStarted(turnID) {
-  state.assistantLastError = '';
+function trackAssistantTurnStarted(turnID) {
+  state.assistantLastError = "";
   state.assistantLastStartedAt = Date.now();
-  const key = String(turnID || '').trim();
+  const key = String(turnID || "").trim();
   if (key) {
     state.assistantActiveTurns.add(key);
   } else {
@@ -88,9 +79,8 @@ export function trackAssistantTurnStarted(turnID) {
   }
   updateAssistantActivityIndicator();
 }
-
-export function trackAssistantTurnFinished(turnID) {
-  const key = String(turnID || '').trim();
+function trackAssistantTurnFinished(turnID) {
+  const key = String(turnID || "").trim();
   if (key) {
     state.voiceTurns.delete(key);
     if (!state.assistantActiveTurns.delete(key) && state.assistantUnknownTurns > 0) {
@@ -99,12 +89,10 @@ export function trackAssistantTurnFinished(turnID) {
   } else if (state.assistantUnknownTurns > 0) {
     state.assistantUnknownTurns -= 1;
   } else if (state.assistantActiveTurns.size > 0) {
-    if ((Date.now() - state.assistantLastStartedAt) < ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS) {
+    if (Date.now() - state.assistantLastStartedAt < ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS) {
       updateAssistantActivityIndicator();
       return;
     }
-    // Some cancel/error events can arrive without turn_id. In that case, clear
-    // one active local turn so the stop indicator cannot get stuck indefinitely.
     const firstActiveTurn = state.assistantActiveTurns.values().next().value;
     if (firstActiveTurn) {
       state.voiceTurns.delete(firstActiveTurn);
@@ -113,142 +101,128 @@ export function trackAssistantTurnFinished(turnID) {
   }
   updateAssistantActivityIndicator();
 }
-
-export function takePendingRow(turnID) {
-  const key = String(turnID || '').trim();
+function takePendingRow(turnID) {
+  const key = String(turnID || "").trim();
   if (key && state.pendingByTurn.has(key)) {
-    const row = state.pendingByTurn.get(key);
+    const row2 = state.pendingByTurn.get(key);
     state.pendingByTurn.delete(key);
     updateAssistantActivityIndicator();
-    return row;
+    return row2;
   }
   const row = state.pendingQueue.shift() || null;
   updateAssistantActivityIndicator();
   return row;
 }
-
-export function takeAnyPendingRow() {
+function takeAnyPendingRow() {
   if (state.pendingByTurn.size > 0) {
     const first = state.pendingByTurn.entries().next().value;
     if (Array.isArray(first) && first.length >= 2) {
-      const key = String(first[0] || '').trim();
-      const row = first[1] || null;
+      const key = String(first[0] || "").trim();
+      const row2 = first[1] || null;
       if (key) state.pendingByTurn.delete(key);
       updateAssistantActivityIndicator();
-      return row;
+      return row2;
     }
   }
   const row = state.pendingQueue.shift() || null;
   updateAssistantActivityIndicator();
   return row;
 }
-
-export function nextLocalMessageId() {
+function nextLocalMessageId() {
   localMessageSeq += 1;
   return `local-msg-${Date.now()}-${localMessageSeq}`;
 }
-
-// Chat history log (diagnostics pane)
-export function appendPlainMessage(role, text, options = {}) {
+function appendPlainMessage(role, text, options = {}) {
   const host = chatHistoryEl();
   if (!host) return null;
-  const row = document.createElement('div');
+  const row = document.createElement("div");
   row.className = `chat-message chat-${role}`;
-  if (options.pending) row.classList.add('is-pending');
+  if (options.pending) row.classList.add("is-pending");
   row.dataset.role = role;
   if (options.turnId) row.dataset.turnId = options.turnId;
   if (options.localId) row.dataset.localId = options.localId;
-
-  const meta = document.createElement('div');
-  meta.className = 'chat-message-meta';
+  const meta = document.createElement("div");
+  meta.className = "chat-message-meta";
   meta.textContent = role;
-
-  const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble';
-  bubble.textContent = String(text || '');
-
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble";
+  bubble.textContent = String(text || "");
   row.appendChild(meta);
   row.appendChild(bubble);
   host.appendChild(row);
   syncChatScroll(host);
   return row;
 }
-
-export function approvalDecisionLabel(decision) {
-  const value = String(decision || '').trim().toLowerCase();
-  if (value === 'accept' || value === 'approve') return 'Approved';
-  if (value === 'decline' || value === 'reject') return 'Rejected';
-  return 'Cancelled';
+function approvalDecisionLabel(decision) {
+  const value = String(decision || "").trim().toLowerCase();
+  if (value === "accept" || value === "approve") return "Approved";
+  if (value === "decline" || value === "reject") return "Rejected";
+  return "Cancelled";
 }
-
-export function setApprovalButtonsDisabled(row, disabled) {
+function setApprovalButtonsDisabled(row, disabled) {
   if (!(row instanceof HTMLElement)) return;
-  row.querySelectorAll('button[data-approval-decision]').forEach((button) => {
+  row.querySelectorAll("button[data-approval-decision]").forEach((button) => {
     if (button instanceof HTMLButtonElement) {
       button.disabled = disabled;
     }
   });
 }
-
-export function renderApprovalRequestCard(payload) {
-  const requestID = String(payload?.request_id || '').trim();
+function renderApprovalRequestCard(payload) {
+  const requestID = String(payload?.request_id || "").trim();
   if (!requestID) return null;
   let row = state.pendingApprovals.get(requestID) || null;
   if (!(row instanceof HTMLElement)) {
-    row = appendPlainMessage('system', '', { localId: requestID });
+    row = appendPlainMessage("system", "", { localId: requestID });
     if (!(row instanceof HTMLElement)) return null;
-    row.classList.add('chat-approval-request');
+    row.classList.add("chat-approval-request");
     state.pendingApprovals.set(requestID, row);
   }
-  const bubble = row.querySelector('.chat-bubble');
+  const bubble = row.querySelector(".chat-bubble");
   if (!(bubble instanceof HTMLElement)) return row;
-  const description = String(payload?.description || 'Approval required').trim();
-  const action = String(payload?.action || payload?.request_kind || '').trim().replace(/_/g, ' ');
-  const reason = String(payload?.reason || '').trim();
-  const grantRoot = String(payload?.grant_root || '').trim();
-  bubble.innerHTML = '';
-
-  const title = document.createElement('div');
-  title.className = 'chat-approval-title';
+  const description = String(payload?.description || "Approval required").trim();
+  const action = String(payload?.action || payload?.request_kind || "").trim().replace(/_/g, " ");
+  const reason = String(payload?.reason || "").trim();
+  const grantRoot = String(payload?.grant_root || "").trim();
+  bubble.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "chat-approval-title";
   title.textContent = description;
   bubble.appendChild(title);
-
   if (action) {
-    const meta = document.createElement('div');
-    meta.className = 'chat-approval-meta';
+    const meta = document.createElement("div");
+    meta.className = "chat-approval-meta";
     meta.textContent = action;
     bubble.appendChild(meta);
   }
   if (reason) {
-    const detail = document.createElement('div');
-    detail.className = 'chat-approval-detail';
+    const detail = document.createElement("div");
+    detail.className = "chat-approval-detail";
     detail.textContent = reason;
     bubble.appendChild(detail);
   }
   if (grantRoot) {
-    const scope = document.createElement('div');
-    scope.className = 'chat-approval-detail';
+    const scope = document.createElement("div");
+    scope.className = "chat-approval-detail";
     scope.textContent = `scope: ${grantRoot}`;
     bubble.appendChild(scope);
   }
-
-  const actions = document.createElement('div');
-  actions.className = 'chat-approval-actions';
+  const actions = document.createElement("div");
+  actions.className = "chat-approval-actions";
   [
-    ['Approve', 'accept'],
-    ['Reject', 'decline'],
-    ['Cancel', 'cancel'],
+    ["Approve", "accept"],
+    ["Reject", "decline"],
+    ["Cancel", "cancel"]
   ].forEach(([label, decision]) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'chat-approval-btn';
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-approval-btn";
     button.dataset.approvalDecision = decision;
     button.textContent = label;
-    button.addEventListener('click', () => {
+    button.addEventListener("click", () => {
       setApprovalButtonsDisabled(row, true);
-      if (!sendChatWsJSON({ type: 'approval_response', request_id: requestID, decision })) {
+      if (!sendChatWsJSON({ type: "approval_response", request_id: requestID, decision })) {
         setApprovalButtonsDisabled(row, false);
-        showStatus('approval send failed');
+        showStatus("approval send failed");
       }
     });
     actions.appendChild(button);
@@ -257,47 +231,43 @@ export function renderApprovalRequestCard(payload) {
   syncChatScroll(chatHistoryEl());
   return row;
 }
-
-export function resolveApprovalRequestCard(requestID, decision) {
-  const key = String(requestID || '').trim();
+function resolveApprovalRequestCard(requestID, decision) {
+  const key = String(requestID || "").trim();
   if (!key) return;
   const row = state.pendingApprovals.get(key);
   if (!(row instanceof HTMLElement)) return;
   setApprovalButtonsDisabled(row, true);
-  row.classList.add('is-resolved');
-  const bubble = row.querySelector('.chat-bubble');
+  row.classList.add("is-resolved");
+  const bubble = row.querySelector(".chat-bubble");
   if (!(bubble instanceof HTMLElement)) return;
-  let status = row.querySelector('.chat-approval-status');
+  let status = row.querySelector(".chat-approval-status");
   if (!(status instanceof HTMLElement)) {
-    status = document.createElement('div');
-    status.className = 'chat-approval-status';
+    status = document.createElement("div");
+    status.className = "chat-approval-status";
     bubble.appendChild(status);
   }
   status.textContent = approvalDecisionLabel(decision);
 }
-
-export function appendRenderedAssistant(markdownText, options = {}) {
+function appendRenderedAssistant(markdownText, options = {}) {
   const host = chatHistoryEl();
   if (!host) return null;
-  const row = document.createElement('div');
-  row.className = 'chat-message chat-assistant';
-  if (options.pending) row.classList.add('is-pending');
-  row.dataset.role = 'assistant';
+  const row = document.createElement("div");
+  row.className = "chat-message chat-assistant";
+  if (options.pending) row.classList.add("is-pending");
+  row.dataset.role = "assistant";
   if (options.turnId) row.dataset.turnId = options.turnId;
   if (options.localId) row.dataset.localId = options.localId;
-
-  const meta = document.createElement('div');
-  meta.className = 'chat-message-meta';
-  meta.textContent = 'assistant';
-
-  const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble markdown';
-  const progress = document.createElement('div');
-  progress.className = 'chat-bubble-progress';
-  const body = document.createElement('div');
-  body.className = 'chat-bubble-body';
+  const meta = document.createElement("div");
+  meta.className = "chat-message-meta";
+  meta.textContent = "assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble markdown";
+  const progress = document.createElement("div");
+  progress.className = "chat-bubble-progress";
+  const body = document.createElement("div");
+  body.className = "chat-bubble-body";
   const { text: markdownBody, stash: mathSegments } = extractMathSegments(markdownText);
-  const rendered = marked.parse(markdownBody || '');
+  const rendered = marked.parse(markdownBody || "");
   body.innerHTML = restoreMathSegments(sanitizeHtml(rendered), mathSegments);
   bubble.appendChild(progress);
   bubble.appendChild(body);
@@ -308,23 +278,21 @@ export function appendRenderedAssistant(markdownText, options = {}) {
   void typesetMath(body).finally(() => syncChatScroll(host));
   return row;
 }
-
-export function assistantRowBodyEl(row) {
+function assistantRowBodyEl(row) {
   if (!(row instanceof HTMLElement)) return null;
-  const body = row.querySelector('.chat-bubble-body');
+  const body = row.querySelector(".chat-bubble-body");
   if (body instanceof HTMLElement) return body;
-  const bubble = row.querySelector('.chat-bubble');
+  const bubble = row.querySelector(".chat-bubble");
   return bubble instanceof HTMLElement ? bubble : null;
 }
-
-export function ensureAssistantProgressEl(row) {
+function ensureAssistantProgressEl(row) {
   if (!(row instanceof HTMLElement)) return null;
-  const bubble = row.querySelector('.chat-bubble');
+  const bubble = row.querySelector(".chat-bubble");
   if (!(bubble instanceof HTMLElement)) return null;
-  let progress = bubble.querySelector('.chat-bubble-progress');
+  let progress = bubble.querySelector(".chat-bubble-progress");
   if (progress instanceof HTMLElement) return progress;
-  progress = document.createElement('div');
-  progress.className = 'chat-bubble-progress';
+  progress = document.createElement("div");
+  progress.className = "chat-bubble-progress";
   const body = assistantRowBodyEl(row);
   if (body && body !== bubble && body.parentElement === bubble) {
     bubble.insertBefore(progress, body);
@@ -333,86 +301,76 @@ export function ensureAssistantProgressEl(row) {
   }
   return progress;
 }
-
-export function appendAssistantProgressLine(row, text) {
+function appendAssistantProgressLine(row, text) {
   if (!(row instanceof HTMLElement)) return;
-  const lineText = String(text || '').trim();
+  const lineText = String(text || "").trim();
   if (!lineText) return;
   const progress = ensureAssistantProgressEl(row);
   if (!(progress instanceof HTMLElement)) return;
-  const line = document.createElement('div');
-  line.className = 'chat-bubble-progress-line';
+  const line = document.createElement("div");
+  line.className = "chat-bubble-progress-line";
   line.textContent = lineText;
   progress.appendChild(line);
   const host = chatHistoryEl();
   syncChatScroll(host);
 }
-
-export function findAssistantRowForTurn(turnID) {
-  const key = String(turnID || '').trim();
+function findAssistantRowForTurn(turnID) {
+  const key = String(turnID || "").trim();
   if (key && state.pendingByTurn.has(key)) {
     return state.pendingByTurn.get(key);
   }
   const host = chatHistoryEl();
   if (!host) return null;
-  const rows = host.querySelectorAll('.chat-message.chat-assistant');
+  const rows = host.querySelectorAll(".chat-message.chat-assistant");
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const row = rows[i];
     if (!(row instanceof HTMLElement)) continue;
     if (key && row.dataset.turnId === key) return row;
-    if (!key && row.classList.contains('is-pending')) return row;
+    if (!key && row.classList.contains("is-pending")) return row;
   }
   return null;
 }
-
-export function humanizeItemTypeLabel(raw) {
-  const value = String(raw || '').trim();
-  if (!value) return '';
-  return value
-    .replace(/[._-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+function humanizeItemTypeLabel(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  return value.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
 }
-
-export function formatItemCompletedLabel(payload) {
+function formatItemCompletedLabel(payload) {
   const label = humanizeItemTypeLabel(payload?.item_type);
-  const detail = String(payload?.detail || '').trim();
-  if (!label && !detail) return '';
+  const detail = String(payload?.detail || "").trim();
+  if (!label && !detail) return "";
   if (!label) return detail;
   if (!detail) return label;
   return `${label}: ${detail}`;
 }
-
-export function appendAssistantProgressForTurn(turnID, text) {
-  const line = String(text || '').trim();
+function appendAssistantProgressForTurn(turnID, text) {
+  const line = String(text || "").trim();
   if (!line) return;
   const existing = findAssistantRowForTurn(turnID);
   const row = existing || ensurePendingForTurn(turnID);
   if (!(row instanceof HTMLElement)) return;
   appendAssistantProgressLine(row, line);
 }
-
-export function updateAssistantRow(row, markdownText, pending = true) {
+function updateAssistantRow(row, markdownText, pending = true) {
   if (!row) return;
   const host = chatHistoryEl();
-  row.classList.toggle('is-pending', pending);
+  row.classList.toggle("is-pending", pending);
   const body = assistantRowBodyEl(row);
   if (!(body instanceof HTMLElement)) return;
   const { text: markdownBody, stash: mathSegments } = extractMathSegments(markdownText);
-  const rendered = marked.parse(markdownBody || '');
+  const rendered = marked.parse(markdownBody || "");
   body.innerHTML = restoreMathSegments(sanitizeHtml(rendered), mathSegments);
   syncChatScroll(host);
   void typesetMath(body).finally(() => syncChatScroll(host));
 }
-
-export function ensurePendingForTurn(turnID) {
-  const key = String(turnID || '').trim();
+function ensurePendingForTurn(turnID) {
+  const key = String(turnID || "").trim();
   if (key && state.pendingByTurn.has(key)) {
     return state.pendingByTurn.get(key);
   }
   let row = state.pendingQueue.shift() || null;
   if (!row) {
-    row = appendRenderedAssistant('_Thinking..._', { pending: true, localId: nextLocalMessageId() });
+    row = appendRenderedAssistant("_Thinking..._", { pending: true, localId: nextLocalMessageId() });
   }
   if (key) {
     row.dataset.turnId = key;
@@ -421,8 +379,7 @@ export function ensurePendingForTurn(turnID) {
   updateAssistantActivityIndicator();
   return row;
 }
-
-export function resetAssistantTurnTracking({ clearError = false } = {}) {
+function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.pendingByTurn.clear();
   state.pendingApprovals.clear();
   state.pendingQueue = [];
@@ -436,38 +393,34 @@ export function resetAssistantTurnTracking({ clearError = false } = {}) {
   state.voiceAwaitingTurn = false;
   state.indicatorSuppressedByCanvasUpdate = false;
   if (clearError) {
-    state.assistantLastError = '';
+    state.assistantLastError = "";
   }
   updateAssistantActivityIndicator();
 }
-
-export function clearChatHistory() {
+function clearChatHistory() {
   const host = chatHistoryEl();
-  if (host) host.innerHTML = '';
+  if (host) host.innerHTML = "";
   state.pendingApprovals.clear();
 }
-
-export function clearWelcomeSurface() {
+function clearWelcomeSurface() {
   state.welcomeSurface = null;
-  const canvasText = document.getElementById('canvas-text');
+  const canvasText = document.getElementById("canvas-text");
   if (canvasText instanceof HTMLElement) {
-    canvasText.classList.remove('welcome-surface');
+    canvasText.classList.remove("welcome-surface");
   }
 }
-
-export function activeWelcomeProjectID() {
-  if (state.welcomeSurface && typeof state.welcomeSurface === 'object') {
-    return String(state.welcomeSurface.project_id || '').trim();
+function activeWelcomeProjectID() {
+  if (state.welcomeSurface && typeof state.welcomeSurface === "object") {
+    return String(state.welcomeSurface.project_id || "").trim();
   }
-  return '';
+  return "";
 }
-
-export async function handleWelcomeAction(action) {
-  const type = String(action?.type || '').trim();
+async function handleWelcomeAction(action) {
+  const type = String(action?.type || "").trim();
   if (!type) return;
-  if (type === 'switch_project') {
-    const projectID = String(action?.project_id || '').trim();
-    if (!projectID || projectID === 'hub') {
+  if (type === "switch_project") {
+    const projectID = String(action?.project_id || "").trim();
+    if (!projectID || projectID === "hub") {
       const hub = hubProject();
       if (hub?.id) {
         await switchProject(hub.id);
@@ -477,14 +430,14 @@ export async function handleWelcomeAction(action) {
     await switchProject(projectID);
     return;
   }
-  if (type === 'open_file') {
-    const filePath = String(action?.path || '').trim();
+  if (type === "open_file") {
+    const filePath = String(action?.path || "").trim();
     if (filePath) {
       await openWorkspaceSidebarFile(filePath);
     }
     return;
   }
-  if (type === 'set_silent_mode') {
+  if (type === "set_silent_mode") {
     const next = parseOptionalBoolean(action?.silent_mode);
     if (next !== null) {
       await updateRuntimePreferences({ silent_mode: next });
@@ -492,22 +445,19 @@ export async function handleWelcomeAction(action) {
     }
     return;
   }
-  if (type === 'set_startup_behavior') {
-    await updateRuntimePreferences({ startup_behavior: 'hub_first' });
+  if (type === "set_startup_behavior") {
+    await updateRuntimePreferences({ startup_behavior: "hub_first" });
   }
 }
-
-export function renderWelcomeSurface(payload) {
-  const canvasText = document.getElementById('canvas-text');
+function renderWelcomeSurface(payload) {
+  const canvasText = document.getElementById("canvas-text");
   if (!(canvasText instanceof HTMLElement)) return;
   const sections = Array.isArray(payload?.sections) ? payload.sections : [];
-  const title = String(payload?.title || 'Welcome').trim() || 'Welcome';
-  const subtitle = isHubActive()
-    ? 'Choose a workspace or change a global runtime preference.'
-    : 'Pick up a recent file, open docs, or switch modes before asking.';
+  const title = String(payload?.title || "Welcome").trim() || "Welcome";
+  const subtitle = isHubActive() ? "Choose a workspace or change a global runtime preference." : "Pick up a recent file, open docs, or switch modes before asking.";
   const normalizedSections = sections.map((section, index) => ({
     ...section,
-    _sectionIndex: index,
+    _sectionIndex: index
   }));
   const sectionHtml = normalizedSections.map((section) => {
     const cards = Array.isArray(section?.cards) ? section.cards : [];
@@ -518,23 +468,23 @@ export function renderWelcomeSurface(payload) {
         data-section-index="${Number(section?._sectionIndex ?? 0)}"
         data-card-index="${index}"
       >
-        <span class="welcome-card-title">${escapeHtml(String(card?.title || 'Open'))}</span>
-        ${card?.subtitle ? `<span class="welcome-card-subtitle">${escapeHtml(String(card.subtitle || ''))}</span>` : ''}
-        ${card?.description ? `<span class="welcome-card-description">${escapeHtml(String(card.description || ''))}</span>` : ''}
+        <span class="welcome-card-title">${escapeHtml(String(card?.title || "Open"))}</span>
+        ${card?.subtitle ? `<span class="welcome-card-subtitle">${escapeHtml(String(card.subtitle || ""))}</span>` : ""}
+        ${card?.description ? `<span class="welcome-card-description">${escapeHtml(String(card.description || ""))}</span>` : ""}
       </button>
-    `).join('');
+    `).join("");
     return `
       <section class="welcome-section">
-        <div class="welcome-section-title">${escapeHtml(String(section?.title || 'Section'))}</div>
+        <div class="welcome-section-title">${escapeHtml(String(section?.title || "Section"))}</div>
         <div class="welcome-card-grid">${cardsHtml}</div>
       </section>
     `;
-  }).join('');
+  }).join("");
   state.welcomeSurface = {
     ...payload,
-    sections: normalizedSections,
+    sections: normalizedSections
   };
-  canvasText.classList.add('welcome-surface');
+  canvasText.classList.add("welcome-surface");
   canvasText.innerHTML = `
     <div class="welcome-surface-root">
       <div>
@@ -544,12 +494,12 @@ export function renderWelcomeSurface(payload) {
       ${sectionHtml}
     </div>
   `;
-  canvasText.querySelectorAll('.welcome-card').forEach((node) => {
-    node.addEventListener('click', (event) => {
+  canvasText.querySelectorAll(".welcome-card").forEach((node) => {
+    node.addEventListener("click", (event) => {
       const target = event.currentTarget;
       if (!(target instanceof HTMLElement)) return;
-      const sectionIndex = Number.parseInt(target.dataset.sectionIndex || '', 10);
-      const cardIndex = Number.parseInt(target.dataset.cardIndex || '', 10);
+      const sectionIndex = Number.parseInt(target.dataset.sectionIndex || "", 10);
+      const cardIndex = Number.parseInt(target.dataset.cardIndex || "", 10);
       if (!Number.isFinite(sectionIndex) || !Number.isFinite(cardIndex)) return;
       const section = state.welcomeSurface?.sections?.[sectionIndex];
       const card = section?.cards?.[cardIndex];
@@ -557,52 +507,85 @@ export function renderWelcomeSurface(payload) {
       void handleWelcomeAction(card.action);
     });
   });
-  showCanvasColumn('canvas-text');
+  showCanvasColumn("canvas-text");
 }
-
-export async function fetchProjectWelcome(projectID = 'active') {
-  const resp = await fetch(apiURL(`projects/${encodeURIComponent(projectID)}/welcome`), { cache: 'no-store' });
+async function fetchProjectWelcome(projectID = "active") {
+  const resp = await fetch(apiURL(`projects/${encodeURIComponent(projectID)}/welcome`), { cache: "no-store" });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
   }
   return resp.json();
 }
-
-export async function showWelcomeForActiveProject(force = false) {
+async function showWelcomeForActiveProject(force = false) {
   void force;
   clearWelcomeSurface();
 }
-
-export function shouldUseBottomComposer() {
-  return window.matchMedia('(max-width: 767px)').matches;
+function shouldUseBottomComposer() {
+  return window.matchMedia("(max-width: 767px)").matches;
 }
-
-export function openComposerAt(x, y, anchor = null, initialText = '') {
-  const text = String(initialText || '');
+function openComposerAt(x, y, anchor = null, initialText = "") {
+  const text = String(initialText || "");
   if (shouldUseBottomComposer()) {
-    const edgeRight = document.getElementById('edge-right');
-    const input = document.getElementById('chat-pane-input');
+    const edgeRight = document.getElementById("edge-right");
+    const input2 = document.getElementById("chat-pane-input");
     setInputAnchor(anchor);
     if (edgeRight instanceof HTMLElement) {
-      edgeRight.classList.add('edge-active', 'edge-pinned');
+      edgeRight.classList.add("edge-active", "edge-pinned");
     }
-    if (input instanceof HTMLTextAreaElement) {
-      input.focus();
-      input.value = text;
+    if (input2 instanceof HTMLTextAreaElement) {
+      input2.focus();
+      input2.value = text;
       const caret = text.length;
-      input.setSelectionRange(caret, caret);
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input2.setSelectionRange(caret, caret);
+      input2.dispatchEvent(new Event("input", { bubbles: true }));
     }
     return;
   }
   showTextInput(x, y, anchor);
   if (!text) return;
-  const input = document.getElementById('floating-input');
+  const input = document.getElementById("floating-input");
   if (input instanceof HTMLTextAreaElement) {
     input.value = text;
     const caret = text.length;
     input.setSelectionRange(caret, caret);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
+export {
+  activeWelcomeProjectID,
+  appendAssistantProgressForTurn,
+  appendAssistantProgressLine,
+  appendPlainMessage,
+  appendRenderedAssistant,
+  approvalDecisionLabel,
+  assistantRowBodyEl,
+  clearChatHistory,
+  clearWelcomeSurface,
+  ensureAssistantProgressEl,
+  ensurePendingForTurn,
+  extractMathSegments,
+  fetchProjectWelcome,
+  findAssistantRowForTurn,
+  formatItemCompletedLabel,
+  handleWelcomeAction,
+  humanizeItemTypeLabel,
+  nextLocalMessageId,
+  openComposerAt,
+  renderApprovalRequestCard,
+  renderWelcomeSurface,
+  resetAssistantTurnTracking,
+  resolveApprovalRequestCard,
+  restoreMathSegments,
+  setApprovalButtonsDisabled,
+  shouldUseBottomComposer,
+  showWelcomeForActiveProject,
+  takeAnyPendingRow,
+  takePendingRow,
+  trackAssistantTurnFinished,
+  trackAssistantTurnStarted,
+  typesetMath,
+  updateAssistantRow
+};
+
+//# sourceMappingURL=app-chat-ui.js.map
