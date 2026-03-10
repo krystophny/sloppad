@@ -4,6 +4,7 @@ import * as interactionModule from './app-interaction.js';
 import * as runtimeUiModule from './app-runtime-ui.js';
 import * as voiceModule from './app-voice.js';
 import * as itemSidebarUtilsModule from './app-item-sidebar-utils.js';
+import * as itemSidebarArtifactsModule from './app-item-sidebar-artifacts.js';
 import * as itemSidebarUiModule from './app-item-sidebar-ui.js';
 import * as prReviewModule from './app-pr-review.js';
 import * as chatUiModule from './app-chat-ui.js';
@@ -26,6 +27,7 @@ setAppRefs({
   ...runtimeUiModule,
   ...voiceModule,
   ...itemSidebarUtilsModule,
+  ...itemSidebarArtifactsModule,
   ...itemSidebarUiModule,
   ...prReviewModule,
   ...chatUiModule,

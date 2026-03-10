@@ -517,6 +517,7 @@ var WebRouteSections = []RouteSection{
 			"PUT /api/items/{item_id}/complete",
 			"PUT /api/items/{item_id}/workspace",
 			"PUT /api/items/{item_id}/project",
+			"POST /api/items/{item_id}/dispatch-review",
 			"POST /api/items/{item_id}/triage",
 			"GET /api/items/{item_id}/print",
 		},

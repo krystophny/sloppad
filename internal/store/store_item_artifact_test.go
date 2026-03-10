@@ -110,6 +110,11 @@ func TestStoreItemArtifactLinkLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem() error: %v", err)
 	}
+	reviewTarget := ItemReviewTargetGitHub
+	reviewer := "octocat"
+	if err := s.UpdateItemReviewDispatch(item.ID, &reviewTarget, &reviewer); err != nil {
+		t.Fatalf("UpdateItemReviewDispatch() error: %v", err)
+	}
 
 	initialArtifacts, err := s.ListItemArtifacts(item.ID)
 	if err != nil {
@@ -151,6 +156,15 @@ func TestStoreItemArtifactLinkLifecycle(t *testing.T) {
 	}
 	if len(itemsForRelated) != 1 || itemsForRelated[0].ID != item.ID {
 		t.Fatalf("ListArtifactItems() = %+v, want item %d", itemsForRelated, item.ID)
+	}
+	if itemsForRelated[0].ReviewTarget == nil || *itemsForRelated[0].ReviewTarget != reviewTarget {
+		t.Fatalf("ListArtifactItems().ReviewTarget = %v, want %q", itemsForRelated[0].ReviewTarget, reviewTarget)
+	}
+	if itemsForRelated[0].Reviewer == nil || *itemsForRelated[0].Reviewer != reviewer {
+		t.Fatalf("ListArtifactItems().Reviewer = %v, want %q", itemsForRelated[0].Reviewer, reviewer)
+	}
+	if itemsForRelated[0].ReviewedAt == nil || *itemsForRelated[0].ReviewedAt == "" {
+		t.Fatalf("ListArtifactItems().ReviewedAt = %v, want timestamp", itemsForRelated[0].ReviewedAt)
 	}
 
 	if err := s.UnlinkItemArtifact(item.ID, outputArtifact.ID); err != nil {
