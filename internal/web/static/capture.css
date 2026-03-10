@@ -85,6 +85,14 @@ body::before {
   color: var(--capture-muted);
 }
 
+.capture-boundary {
+  margin: 12px 0 0;
+  max-width: 34ch;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--capture-ink);
+}
+
 .capture-alert {
   margin: 18px 0 0;
   padding: 12px 14px;
@@ -124,6 +132,7 @@ body::before {
 .capture-retry:focus-visible,
 .capture-fallback:focus-visible,
 .capture-reset:focus-visible,
+.capture-return a:focus-visible,
 #capture-note:focus-visible {
   outline: 3px solid rgba(29, 122, 82, 0.24);
   outline-offset: 2px;
@@ -252,6 +261,21 @@ body::before {
 
 .capture-status[data-tone="error"] {
   color: var(--capture-accent-strong);
+}
+
+.capture-return {
+  margin: 18px 0 0;
+  font-size: 0.88rem;
+}
+
+.capture-return a {
+  color: var(--capture-accent-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.capture-return a:hover {
+  text-decoration: underline;
 }
 
 body[data-capture-state="recording"] .capture-record {

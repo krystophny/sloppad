@@ -20,10 +20,11 @@ Read in this order:
 2. `gesture-truth-table.md`
 3. `approval-execution-policy.md`
 4. `interfaces.md`
-5. `architecture.md`
-6. `live-runtime-whitepaper.md`
-7. `meeting-notes-privacy.md`
-8. `codex-app-server-pivot.md`
+5. `auxiliary-surfaces.md`
+6. `architecture.md`
+7. `live-runtime-whitepaper.md`
+8. `meeting-notes-privacy.md`
+9. `codex-app-server-pivot.md`
 
 Integrated protocol reference:
 
