@@ -2502,6 +2502,20 @@
               output_mode: msg.output_mode,
               cursor: msg.cursor || null,
             });
+          } else if (msg.type === 'canvas_ink') {
+            window.__harnessLog.push({
+              type: 'canvas_ink',
+              request_response: Boolean(msg.request_response),
+              output_mode: msg.output_mode,
+              artifact_kind: msg.artifact_kind,
+              cursor: msg.cursor || null,
+              total_strokes: Number(msg.total_strokes || 0),
+              bounding_box: msg.bounding_box || null,
+              overlapping_lines: msg.overlapping_lines || null,
+              overlapping_text: String(msg.overlapping_text || ''),
+              snapshot_data_url: String(msg.snapshot_data_url || ''),
+              strokes: Array.isArray(msg.strokes) ? msg.strokes : [],
+            });
           }
         } catch (_) {}
       }

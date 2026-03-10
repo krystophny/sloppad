@@ -302,6 +302,43 @@ test.describe('canvas - tabula rasa', () => {
     const img = page.locator('#canvas-img');
     await expect(img).toHaveAttribute('src', /test-ink\.png/);
   });
+
+  test('live dialogue pen stroke emits structured canvas ink context', async ({ page }) => {
+    await clearLog(page);
+    await renderTestArtifact(page, 'alpha\nbeta\ngamma\ndelta\nepsilon');
+    await setInteractionTool(page, 'ink');
+    await page.evaluate(() => {
+      const app = (window as any)._taburaApp;
+      const state = app?.getState?.();
+      if (!state) throw new Error('missing app state');
+      state.liveSessionActive = true;
+      state.liveSessionMode = 'dialogue';
+    });
+
+    await dispatchPenStroke(page, [
+      { x: 220, y: 215, pressure: 0.5 },
+      { x: 255, y: 240, pressure: 0.7 },
+      { x: 290, y: 262, pressure: 0.65 },
+    ]);
+
+    await expect.poll(async () => {
+      const log = await getLog(page);
+      return log.find((entry) => entry.type === 'canvas_ink') || null;
+    }, { timeout: 5_000 }).not.toBeNull();
+
+    const entry = await page.evaluate(() => {
+      const log = (window as any).__harnessLog || [];
+      return log.find((item: any) => item.type === 'canvas_ink') || null;
+    });
+    expect(entry?.request_response).toBe(true);
+    expect(entry?.artifact_kind).toBe('text');
+    expect(entry?.total_strokes).toBe(1);
+    expect(typeof entry?.snapshot_data_url).toBe('string');
+    expect(String(entry?.snapshot_data_url || '')).toMatch(/^data:image\/png;base64,/);
+    expect(Number(entry?.overlapping_lines?.start || 0)).toBeGreaterThan(0);
+    expect(String(entry?.overlapping_text || '').length).toBeGreaterThan(0);
+    expect(Number(entry?.bounding_box?.relative_width || 0)).toBeGreaterThan(0);
+  });
 });
 
 test.describe('canvas - response overlay', () => {

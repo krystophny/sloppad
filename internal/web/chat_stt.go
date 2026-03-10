@@ -119,16 +119,23 @@ func handleSTTCancel(conn *chatWSConn) {
 
 func handleChatWSTextMessage(a *App, conn *chatWSConn, sessionID string, data []byte) {
 	var msg struct {
-		Type            string             `json:"type"`
-		MimeType        string             `json:"mime_type"`
-		Text            string             `json:"text"`
-		Lang            string             `json:"lang"`
-		RequestID       string             `json:"request_id"`
-		Decision        string             `json:"decision"`
-		OutputMode      string             `json:"output_mode"`
-		Gesture         string             `json:"gesture"`
-		RequestResponse bool               `json:"request_response"`
-		Cursor          *chatCursorContext `json:"cursor"`
+		Type             string                    `json:"type"`
+		MimeType         string                    `json:"mime_type"`
+		Text             string                    `json:"text"`
+		Lang             string                    `json:"lang"`
+		RequestID        string                    `json:"request_id"`
+		Decision         string                    `json:"decision"`
+		OutputMode       string                    `json:"output_mode"`
+		Gesture          string                    `json:"gesture"`
+		RequestResponse  bool                      `json:"request_response"`
+		Cursor           *chatCursorContext        `json:"cursor"`
+		ArtifactKind     string                    `json:"artifact_kind"`
+		SnapshotDataURL  string                    `json:"snapshot_data_url"`
+		TotalStrokes     int                       `json:"total_strokes"`
+		BoundingBox      *chatCanvasInkBoundingBox `json:"bounding_box"`
+		OverlappingLines *chatCanvasInkLineRange   `json:"overlapping_lines"`
+		OverlappingText  string                    `json:"overlapping_text"`
+		Strokes          []inkSubmitStroke         `json:"strokes"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
@@ -166,7 +173,41 @@ func handleChatWSTextMessage(a *App, conn *chatWSConn, sessionID string, data []
 			return
 		}
 		if msg.RequestResponse {
+			if a.activeChatTurnCount(sessionID) > 0 || a.queuedChatTurnCount(sessionID) > 0 {
+				return
+			}
+			a.enqueueAssistantTurn(sessionID, normalizeTurnOutputMode(msg.OutputMode))
+		}
+	case "canvas_ink":
+		snapshotPath := a.persistChatCanvasInkSnapshot(sessionID, msg.SnapshotDataURL)
+		if !a.chatCanvasInk.enqueue(sessionID, &chatCanvasInkEvent{
+			Cursor:           msg.Cursor,
+			Gesture:          recognizeChatCanvasInkGesture(msg.Strokes),
+			ArtifactKind:     msg.ArtifactKind,
+			StrokeCount:      maxCanvasInkStrokeCount(msg.TotalStrokes, len(msg.Strokes)),
+			Requested:        msg.RequestResponse,
+			BoundingBox:      msg.BoundingBox,
+			OverlappingLines: msg.OverlappingLines,
+			OverlappingText:  msg.OverlappingText,
+			SnapshotPath:     snapshotPath,
+		}) {
+			return
+		}
+		if msg.RequestResponse {
+			if a.activeChatTurnCount(sessionID) > 0 || a.queuedChatTurnCount(sessionID) > 0 {
+				return
+			}
 			a.enqueueAssistantTurn(sessionID, normalizeTurnOutputMode(msg.OutputMode))
 		}
 	}
+}
+
+func maxCanvasInkStrokeCount(total, current int) int {
+	if total > current {
+		return total
+	}
+	if current > 0 {
+		return current
+	}
+	return 1
 }

@@ -4,6 +4,7 @@ export {
   renderCanvas,
   clearCanvas,
   resolveCanvasApprovalRequest,
+  getLocationFromPoint,
   getLocationFromSelection,
   clearLineHighlight,
   escapeHtml,
