@@ -1,4 +1,5 @@
 import * as context from './app-context.js';
+import { artifactKindPreferredTool } from './artifact-taxonomy.js';
 
 const {
   refs,
@@ -196,10 +197,19 @@ export function canToggleInteractionSurface() {
   return state.hasArtifact && currentCanvasPaneId() === 'canvas-text' && !state.prReviewMode;
 }
 
+function interactionToolDefaultForCurrentArtifact(paneId) {
+  const descriptor: Record<string, any> = state.currentCanvasArtifact || {};
+  const artifactKind = String(descriptor.artifactKind || '').trim().toLowerCase();
+  if (artifactKind) return artifactKindPreferredTool(artifactKind);
+  if (paneId === 'canvas-pdf' || paneId === 'canvas-image') return 'highlight';
+  return 'pointer';
+}
+
 function shouldAnnotateTextArtifactByDefault() {
   if (state.prReviewMode) return true;
   const descriptor: Record<string, any> = state.currentCanvasArtifact || {};
   if (descriptor.surfaceDefault === 'annotate') return true;
+  if (interactionToolDefaultForCurrentArtifact('canvas-text') !== 'pointer') return true;
   const title = String(descriptor.title || '').trim().toLowerCase();
   return title.startsWith('.tabura/artifacts/pr/') && title.endsWith('.diff');
 }
@@ -212,8 +222,15 @@ export function interactionSurfaceDefaultForPane(paneId) {
 
 export function applyInteractionDefaultsForPane(paneId) {
   const nextSurface = interactionSurfaceDefaultForPane(paneId);
+  const defaultTool = interactionToolDefaultForCurrentArtifact(paneId);
   state.interaction.surface = nextSurface;
-  state.interaction.conversation = interactionConversationMode({ surface: nextSurface });
+  if (!state.interaction.toolPinned) {
+    state.interaction.tool = defaultTool;
+  }
+  state.interaction.conversation = interactionConversationMode({
+    surface: nextSurface,
+    tool: state.interaction.tool,
+  });
   if (nextSurface !== 'annotate') {
     clearInkDraft();
   }
@@ -227,7 +244,10 @@ export function setInteractionSurface(surface) {
   const nextSurface = normalizeInteractionSurface(surface);
   if (state.interaction.surface === nextSurface) return;
   state.interaction.surface = nextSurface;
-  state.interaction.conversation = interactionConversationMode({ surface: nextSurface });
+  state.interaction.conversation = interactionConversationMode({
+    surface: nextSurface,
+    tool: state.interaction.tool,
+  });
   if (nextSurface !== 'annotate') {
     clearInkDraft();
   }
@@ -259,6 +279,29 @@ export async function selectInteractionTool(tool) {
     state.interaction.surface = 'annotate';
   }
   await updateRuntimePreferences({ tool: nextTool });
+}
+
+export function setInteractionToolLocal(tool) {
+  const nextTool = normalizeInteractionTool(tool);
+  if (state.interaction.tool === nextTool && state.interaction.conversation === interactionConversationMode({
+    surface: state.interaction.surface,
+    tool: nextTool,
+  })) {
+    state.interaction.toolPinned = true;
+    return;
+  }
+  state.interaction.tool = nextTool;
+  state.interaction.toolPinned = true;
+  state.interaction.conversation = interactionConversationMode({
+    surface: state.interaction.surface,
+    tool: nextTool,
+  });
+  if (nextTool !== 'ink') {
+    clearInkDraft();
+  }
+  syncInteractionBodyState();
+  renderInkControls();
+  renderToolPalette();
 }
 
 export function renderToolPalette() {
