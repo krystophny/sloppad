@@ -1,0 +1,65 @@
+#canvas-text.mail-draft-canvas {
+  padding: 1rem;
+}
+
+.canvas-mail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.canvas-mail-actions-label {
+  color: var(--fg-muted);
+  font-size: 0.82rem;
+  margin-right: 0.2rem;
+}
+
+.mail-draft-editor {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mail-draft-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.mail-draft-header h1 {
+  margin: 0.2rem 0 0;
+}
+
+.mail-draft-kicker,
+.mail-draft-account,
+.mail-draft-status,
+.mail-draft-key {
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.mail-draft-row,
+.mail-draft-body-row {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.mail-draft-editor input,
+.mail-draft-editor textarea {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  font: inherit;
+}
+
+.mail-draft-body {
+  min-height: 18rem;
+  resize: vertical;
+}
