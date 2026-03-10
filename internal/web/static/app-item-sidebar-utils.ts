@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -359,7 +358,7 @@ export async function performItemSidebarReviewDispatch(item, target, value = '')
   const itemID = Number(item?.id || 0);
   const cleanTarget = String(target || '').trim().toLowerCase();
   if (itemID <= 0 || !cleanTarget) return false;
-  const body = { target: cleanTarget };
+  const body: Record<string, any> = { target: cleanTarget };
   let label = cleanTarget;
   if (cleanTarget === 'github') {
     const reviewer = String(value || window.prompt('GitHub reviewer', '') || '').trim();
@@ -443,12 +442,12 @@ export async function performItemSidebarProjectUpdate(item, projectID = '', proj
   }
 }
 
-export async function performItemSidebarTriage(item, action, options = {}) {
+export async function performItemSidebarTriage(item, action, options: Record<string, any> = {}) {
   const itemID = Number(item?.id || 0);
   if (itemID <= 0) return false;
   const normalizedAction = String(action || '').trim().toLowerCase();
   if (!normalizedAction) return false;
-  const body = { action: normalizedAction };
+  const body: Record<string, any> = { action: normalizedAction };
   let actorName = '';
   if (normalizedAction === 'later') {
     body.visible_after = defaultItemSidebarLaterVisibleAfter(options.now || new Date());

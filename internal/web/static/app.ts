@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { getState, setAppRefs } from './app-context.js';
 import * as ttsModule from './app-tts.js';
 import * as interactionModule from './app-interaction.js';

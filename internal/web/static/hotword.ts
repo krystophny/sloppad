@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { staticURL } from './paths.js';
 
 const ORT_LOCAL_URL = staticURL('vad/ort.min.mjs');
@@ -38,7 +37,7 @@ const HOTWORD_MEL_BUFFER_MAX = 10 * 97;
 const HOTWORD_FEATURE_BUFFER_MAX = 120;
 const HOTWORD_RING_BUFFER_SIZE = HOTWORD_TARGET_SAMPLE_RATE * 2;
 
-const listeners = new Set();
+const listeners = new Set<() => void>();
 
 const state = {
   initialized: false,
@@ -329,7 +328,7 @@ function onAudioProcess(event) {
   void processFrameQueue();
 }
 
-function stopOnnxNodes(options = {}) {
+function stopOnnxNodes(options: Record<string, any> = {}) {
   const closeContext = Boolean(options && options.closeContext);
   if (state.processorNode) {
     state.processorNode.onaudioprocess = null;
@@ -430,7 +429,7 @@ async function initOnnxModel() {
   };
 }
 
-export async function initHotword(options = {}) {
+export async function initHotword(options: Record<string, any> = {}) {
   const force = Boolean(options && options.force);
   if (state.initialized && !force) return state.available;
   if (force) {

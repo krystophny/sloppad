@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 import {
@@ -139,7 +138,7 @@ export function buildIdeaNoteMarkdown(title, artifactMeta) {
   return detail.join('\n');
 }
 
-function sidebarEmailBody(meta = {}) {
+function sidebarEmailBody(meta: Record<string, any> = {}) {
   return String(
     meta.body
     || meta.body_text
@@ -205,7 +204,7 @@ function buildEmailThreadArtifactMarkdown(title, artifactMeta) {
   return detail.join('\n');
 }
 
-const escapeHtml = (...args) => env.escapeHtml(...args);
+const escapeHtml = (...args: any[]) => (env.escapeHtml as any)(...args);
 
 export function buildEmailThreadHTML(title, artifactMeta) {
   const subject = String(artifactMeta?.subject || title || 'Email thread').trim() || 'Email thread';
@@ -322,7 +321,7 @@ export async function openSidebarArtifactItem(item) {
     return openMailDraftArtifact(artifactID);
   }
   if (artifactID <= 0) {
-    const noArtifactEvent = {
+    const noArtifactEvent: Record<string, any> = {
       kind: 'text_artifact',
       event_id: `sidebar-item-${Number(item?.id || 0)}-${Date.now()}`,
       title: String(item?.title || 'Item'),
@@ -365,7 +364,7 @@ export async function openSidebarArtifactItem(item) {
       return true;
     }
   }
-  const textEvent = {
+  const textEvent: Record<string, any> = {
     kind: 'text_artifact',
     event_id: `sidebar-item-${artifactID}-${Date.now()}`,
     title: String(artifact?.title || item?.artifact_title || item?.title || 'Item'),

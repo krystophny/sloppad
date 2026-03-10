@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -484,7 +483,7 @@ export function updateMeetingSummaryItemsSelection(panel) {
 export async function submitMeetingSummaryItems(projectID, panel) {
   if (!(panel instanceof HTMLElement)) return false;
   const selected = Array.from(panel.querySelectorAll('.meeting-summary-items-list input[type="checkbox"]:checked'))
-    .map((node) => Number(node.value || '-1'))
+    .map((node) => Number((node as HTMLInputElement).value || '-1'))
     .filter((value) => Number.isInteger(value) && value >= 0);
   if (selected.length === 0) {
     showStatus('select at least one action item');

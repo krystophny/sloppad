@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 

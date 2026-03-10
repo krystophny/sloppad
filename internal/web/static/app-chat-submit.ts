@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -169,7 +168,7 @@ export function waitWithAbort(delayMs, signal) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
   if (signal.aborted) return Promise.reject(abortError());
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       window.clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
@@ -183,7 +182,7 @@ export function waitWithAbort(delayMs, signal) {
   });
 }
 
-export async function submitMessage(text, options = {}) {
+export async function submitMessage(text, options: Record<string, any> = {}) {
   const trimmed = String(text || '').trim();
   const submitKind = String(options?.kind || '').trim();
   if (!trimmed || !state.chatSessionId) {
@@ -238,7 +237,7 @@ export async function submitMessage(text, options = {}) {
     updateAssistantActivityIndicator();
   }
 
-  const body = {
+  const body: Record<string, any> = {
     text: finalText,
     output_mode: state.ttsSilent ? 'silent' : 'voice',
     capture_mode: submitKind === 'voice_transcript' ? 'voice' : 'text',

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { marked } from './vendor/marked.esm.js';
 import {
   getLocationFromPoint,
@@ -161,7 +160,7 @@ export function showIndicatorMode(mode, x, y) {
   el.style.transform = '';
   el.style.translate = '';
   // Recording dot appears at tap point; stop square stays in top-right (CSS default).
-  const dot = el.querySelector('.record-dot');
+  const dot = el.querySelector('.record-dot') as HTMLElement | null;
   if (dot) {
     if ((nextMode === 'recording' || nextMode === 'cursor') && Number.isFinite(x) && Number.isFinite(y)) {
       dot.style.top = `${Math.round(y)}px`;
@@ -209,7 +208,7 @@ export function showTextInput(x, y, anchor) {
   el.style.display = '';
   el.style.left = `${Math.min(x, window.innerWidth - 280)}px`;
   el.style.top = `${Math.min(y, window.innerHeight - 60)}px`;
-  el.value = '';
+  (el as HTMLInputElement).value = '';
   el.focus();
 }
 

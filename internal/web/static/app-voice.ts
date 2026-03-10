@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -518,7 +517,7 @@ export function stopChatVoiceMediaAndFlush(capture) {
     stopChatVoiceMedia(capture);
     return Promise.resolve();
   }
-  return new Promise((resolve) => {
+  return new Promise<void>((resolve) => {
     let done = false;
     let timeoutId = null;
     const finish = () => {
@@ -554,7 +553,7 @@ export function stopChatVoiceMediaAndFlush(capture) {
   });
 }
 
-export async function beginVoiceCapture(x, y, anchor, options = {}) {
+export async function beginVoiceCapture(x, y, anchor, options: Record<string, any> = {}) {
   if (state.chatVoiceCapture) return;
   if (!canUseMicrophoneCapture()) {
     showVoiceCaptureNotice(microphoneUnavailableMessage(), x, y);
@@ -577,7 +576,7 @@ export async function beginVoiceCapture(x, y, anchor, options = {}) {
     } catch (_) {}
   }
 
-  const capture = {
+  const capture: Record<string, any> = {
     active: false,
     stopping: false,
     stopRequested: false,

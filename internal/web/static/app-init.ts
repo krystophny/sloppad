@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 import {
@@ -175,13 +174,13 @@ export function bindUi() {
     const captureAnchor = anchor || captureAnchorAtPoint(x, y);
     return beginVoiceCapture(x, y, captureAnchor);
   };
-  const buildCanvasPositionPayload = (anchor, options = {}) => {
+  const buildCanvasPositionPayload = (anchor, options: Record<string, any> = {}) => {
     if (!anchor || typeof anchor !== 'object') return null;
-    const payload = {
+    const payload: Record<string, any> = {
       type: 'canvas_position',
       gesture: String(options?.gesture || 'tap').trim().toLowerCase() || 'tap',
       output_mode: state.ttsSilent ? 'silent' : 'voice',
-      cursor: {},
+      cursor: {} as Record<string, any>,
     };
     const cursor = payload.cursor;
     const setTextField = (key, value) => {

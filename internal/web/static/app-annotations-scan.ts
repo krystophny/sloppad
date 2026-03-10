@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { apiURL } from './app-env.js';
 import { refs, state } from './app-context.js';
 
@@ -21,7 +20,7 @@ function normalizeScanBounds(bounds, clamp01) {
   };
 }
 
-function normalizedRectFromClientRect(rect, rootRect, options = {}, clamp01) {
+function normalizedRectFromClientRect(rect, rootRect, options: Record<string, any> = {}, clamp01) {
   const width = Math.max(Number(options.width || rootRect.width || 1), 1);
   const height = Math.max(Number(options.height || rootRect.height || 1), 1);
   return {
@@ -182,7 +181,7 @@ export function createScanAnnotationController(deps) {
   } = deps;
   let scanUploadInFlight = false;
 
-  function importScanAnnotations(payload = {}) {
+  function importScanAnnotations(payload: Record<string, any> = {}) {
     const incoming = Array.isArray(payload?.annotations) ? payload.annotations : [];
     if (incoming.length === 0) {
       showStatus('scan imported: no annotations found');
@@ -212,7 +211,7 @@ export function createScanAnnotationController(deps) {
       showStatus('select an item before importing a scan');
       return false;
     }
-    let input = document.getElementById('scan-upload-input');
+    let input = document.getElementById('scan-upload-input') as HTMLInputElement | null;
     if (!(input instanceof HTMLInputElement)) {
       input = document.createElement('input');
       input.id = 'scan-upload-input';
@@ -220,8 +219,8 @@ export function createScanAnnotationController(deps) {
       input.accept = 'image/*';
       input.hidden = true;
       input.addEventListener('change', () => {
-        const [file] = Array.from(input.files || []);
-        input.value = '';
+        const [file] = Array.from(input!.files || []);
+        input!.value = '';
         if (file) {
           void uploadScanFile(file);
         }

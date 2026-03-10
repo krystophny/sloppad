@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   initHotword, startHotwordMonitor, stopHotwordMonitor,
   isHotwordActive, onHotwordDetected, setHotwordThreshold,
@@ -7,9 +6,9 @@ import {
 const statusEl = document.getElementById('status');
 const detectionEl = document.getElementById('detection');
 const logEl = document.getElementById('log');
-const btnStart = document.getElementById('btn-start');
-const btnStop = document.getElementById('btn-stop');
-const thresholdInput = document.getElementById('threshold');
+const btnStart = document.getElementById('btn-start') as HTMLButtonElement;
+const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
+const thresholdInput = document.getElementById('threshold') as HTMLInputElement;
 const thresholdVal = document.getElementById('threshold-val');
 
 let detectionCount = 0;

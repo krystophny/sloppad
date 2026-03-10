@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { AnnotationLayer, GlobalWorkerOptions, TextLayer, getDocument } from './vendor/pdf.mjs';
 import { apiURL } from './paths.js';
 import { renderTextArtifact, sanitizeHtml } from './canvas-content.js';
@@ -15,7 +14,7 @@ export { resolveCanvasApprovalRequest } from './canvas-actions.js';
 const PDFJS_WORKER_URL = new URL('./vendor/pdf.worker.mjs', import.meta.url).toString();
 const PDFJS_STANDARD_FONTS_URL = new URL('./vendor/standard_fonts/', import.meta.url).toString();
 
-const els = {};
+const els: Record<string, HTMLElement | null> = {};
 let activeTextEventId = null;
 let activeArtifactTitle = '';
 let activePdfEvent = null;
@@ -36,8 +35,8 @@ const pdfRenderState = {
   resizeObserver: null,
   resizeTimer: null,
   lastWidth: 0,
-  renderTasks: new Set(),
-  textLayers: new Set(),
+  renderTasks: new Set<any>(),
+  textLayers: new Set<any>(),
 };
 
 function dispatchCanvasRendered(event) {
@@ -790,7 +789,7 @@ async function renderPdfPages(pdfDoc, pagesHost, statusNode, token) {
   statusNode.classList.add('is-hidden');
 }
 
-async function renderPdfSurface(event, options = {}) {
+async function renderPdfSurface(event, options: Record<string, any> = {}) {
   const e = getEls();
   if (!e.pdf) return;
   const { sid, path, url } = getPdfURL(event);
@@ -853,7 +852,7 @@ export function renderCanvas(event) {
       e.text.querySelectorAll('.thread-draft-open').forEach((link) => {
         link.addEventListener('click', (ev) => {
           ev.preventDefault();
-          const draftId = Number(link.dataset.draftId || 0);
+          const draftId = Number((link as HTMLElement).dataset.draftId || 0);
           if (draftId > 0) void openMailDraftArtifact(draftId);
         });
       });
@@ -895,8 +894,8 @@ export function renderCanvas(event) {
     e.image.classList.add('is-active');
     const state = (window._taburaApp || {}).getState ? window._taburaApp.getState() : {};
     const sid = state.sessionId || '';
-    e.img.src = apiURL(`files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`);
-    e.img.alt = event.title || 'Image';
+    (e.img as HTMLImageElement).src = apiURL(`files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`);
+    (e.img as HTMLImageElement).alt = event.title || 'Image';
     activeTextEventId = null;
     activeArtifactTitle = event.title || '';
     activePdfEvent = null;

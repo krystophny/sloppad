@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -43,8 +42,8 @@ export function showCanvasColumn(paneId) {
   }
   const viewport = col.querySelector('#canvas-viewport');
   if (viewport) {
-    viewport.querySelectorAll('.canvas-pane').forEach((p) => {
-      p.style.display = 'none';
+    viewport.querySelectorAll('.canvas-pane').forEach((p: Element) => {
+      (p as HTMLElement).style.display = 'none';
       p.classList.remove('is-active');
     });
     const target = document.getElementById(paneId);
@@ -58,7 +57,7 @@ export function showCanvasColumn(paneId) {
     ? 'image_artifact'
     : (paneId === 'canvas-pdf' ? 'pdf_artifact' : 'text_artifact');
   const artifactTitle = String(getActiveArtifactTitle() || '').trim();
-  const currentArtifact = state.currentCanvasArtifact || {};
+  const currentArtifact: Record<string, any> = state.currentCanvasArtifact || {};
   state.currentCanvasArtifact = {
     kind: artifactKind,
     title: artifactTitle,
@@ -96,8 +95,8 @@ export function hideCanvasColumn() {
   persistLastView({ mode: 'rasa' });
   const viewport = document.getElementById('canvas-viewport');
   if (viewport) {
-    viewport.querySelectorAll('.canvas-pane').forEach((p) => {
-      p.style.display = 'none';
+    viewport.querySelectorAll('.canvas-pane').forEach((p: Element) => {
+      (p as HTMLElement).style.display = 'none';
       p.classList.remove('is-active');
     });
   }

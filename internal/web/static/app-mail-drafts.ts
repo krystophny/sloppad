@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -236,7 +235,7 @@ export async function openMailDraftArtifact(artifactID) {
   }
 }
 
-async function saveActiveMailDraft(options = {}) {
+async function saveActiveMailDraft(options: Record<string, any> = {}) {
   const artifactID = Number(state.mailDraft?.artifactId || 0);
   const form = readMailDraftForm();
   const allowWhileSending = Boolean(options?.allowWhileSending);

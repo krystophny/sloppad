@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { marked } from './vendor/marked.esm.js';
 
 const SOURCE_LANGUAGE_BY_EXT = {

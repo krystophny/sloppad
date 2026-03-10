@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { apiURL, getActiveArtifactTitle, getActiveTextEventId, getUiState, isOverlayVisible, isTextInputVisible } from './app-env.js';
 import { refs, state } from './app-context.js';
 import { showCanvasColumn } from './app-canvas-ui.js';
@@ -308,12 +307,12 @@ function normalizeBrandList(brands) {
     .filter(Boolean);
 }
 
-async function readUserAgentData() {
-  const userAgentData = navigator.userAgentData;
+async function readUserAgentData(): Promise<Record<string, any>> {
+  const userAgentData = (navigator as any).userAgentData;
   if (!userAgentData || typeof userAgentData !== 'object') {
     return {};
   }
-  const device = {
+  const device: Record<string, any> = {
     mobile: Boolean(userAgentData.mobile),
     brands: normalizeBrandList(userAgentData.brands),
     platform: safeText(userAgentData.platform),
@@ -359,7 +358,7 @@ async function buildDeviceState() {
     pixel_ratio: window.devicePixelRatio || 1,
     timezone: timeZone,
     hardware_concurrency: Number(navigator.hardwareConcurrency || 0),
-    device_memory_gb: Number(navigator.deviceMemory || 0),
+    device_memory_gb: Number((navigator as any).deviceMemory || 0),
     max_touch_points: Number(navigator.maxTouchPoints || 0),
   };
 }
@@ -551,7 +550,7 @@ async function captureViewportScreenshotFromClone() {
       if (!ctx) throw new Error('canvas unavailable');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img as CanvasImageSource, 0, 0);
       return { dataURL: canvas.toDataURL('image/png'), mode: 'live' };
     } finally {
       URL.revokeObjectURL(url);
@@ -735,7 +734,7 @@ async function openBugReport(trigger) {
   openBugReportSheet();
   window.requestAnimationFrame(() => syncBugReportCanvasSize());
   showStatus('bug report captured');
-  const capture = await captureViewportScreenshot();
+  const capture = await captureViewportScreenshot() as any;
   if (pendingReport !== report) return;
   report.screenshotDataURL = capture.dataURL;
   applyBugReportPreview(capture.dataURL, capture.mode);
@@ -747,7 +746,7 @@ export function isInlineBugReportTrigger(text) {
   return /^(report bug|bug report|report a bug|das ist kaputt)[.!?]*$/.test(clean);
 }
 
-export async function maybeHandleInlineBugReport(text, options = {}) {
+export async function maybeHandleInlineBugReport(text, options: Record<string, any> = {}) {
   if (!isInlineBugReportTrigger(text)) return false;
   const trigger = safeText(options?.trigger) || 'voice';
   recordRecentEvent(`bug report trigger ${trigger}`);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -105,7 +104,7 @@ export function isIPhoneStandalone() {
   const isIPhone = /iphone/.test(ua) || plat === 'iphone' || (plat === 'macintel' && navigator.maxTouchPoints > 1);
   if (!isIPhone) return false;
   try {
-    return navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    return (navigator as any).standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   } catch (_) {
     return false;
   }
@@ -524,7 +523,7 @@ export async function updateRuntimePreferences(patch) {
 }
 
 export async function acknowledgeDisclaimer(version) {
-  const payload = {};
+  const payload: Record<string, any> = {};
   if (String(version || '').trim()) {
     payload.version = String(version || '').trim();
   }
@@ -547,7 +546,7 @@ export function closeDisclaimerModal() {
 export function showDisclaimerModal() {
   if (!state.disclaimerAckRequired) return Promise.resolve();
   closeDisclaimerModal();
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     const root = document.createElement('div');
     root.id = 'liability-modal';
     root.className = 'liability-modal';
@@ -759,7 +758,7 @@ export function applyArtifactEditorText(text) {
   }
 }
 
-export function exitArtifactEditMode(options = {}) {
+export function exitArtifactEditMode(options: Record<string, any> = {}) {
   const applyChanges = options.applyChanges !== false;
   const editor = artifactEditorEl();
   if (!editor || !isArtifactEditorActive()) return false;
@@ -868,7 +867,7 @@ export function syncCompanionIdleSurface() {
   updateAssistantActivityIndicator();
 }
 
-export function applyCompanionState(payload = {}) {
+export function applyCompanionState(payload: Record<string, any> = {}) {
   const config = payload?.config && typeof payload.config === 'object' ? payload.config : {};
   state.companionEnabled = Boolean(
     payload?.companion_enabled ?? config?.companion_enabled ?? state.companionEnabled,
@@ -931,7 +930,7 @@ export function normalizeReasoningEffortOptions(rawEfforts) {
 
 export function normalizeReasoningEffortOptionsByAlias(rawEfforts) {
   const source = rawEfforts && typeof rawEfforts === 'object' ? rawEfforts : {};
-  const out = {};
+  const out: Record<string, any> = {};
   for (const alias of PROJECT_CHAT_MODEL_ALIASES) {
     const configured = normalizeReasoningEffortOptions(source[alias]);
     if (configured.length > 0) {
@@ -945,7 +944,7 @@ export function normalizeReasoningEffortOptionsByAlias(rawEfforts) {
 }
 
 export function applyRuntimeReasoningEffortOptions(rawEfforts) {
-  state.reasoningEffortsByAlias = normalizeReasoningEffortOptionsByAlias(rawEfforts);
+  state.reasoningEffortsByAlias = normalizeReasoningEffortOptionsByAlias(rawEfforts) as any;
 }
 
 export function normalizeProjectChatModelAlias(value) {

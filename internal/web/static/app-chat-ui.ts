@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -150,7 +149,7 @@ export function nextLocalMessageId() {
 }
 
 // Chat history log (diagnostics pane)
-export function appendPlainMessage(role, text, options = {}) {
+export function appendPlainMessage(role, text, options: Record<string, any> = {}) {
   const host = chatHistoryEl();
   if (!host) return null;
   const row = document.createElement('div');
@@ -277,7 +276,7 @@ export function resolveApprovalRequestCard(requestID, decision) {
   status.textContent = approvalDecisionLabel(decision);
 }
 
-export function appendRenderedAssistant(markdownText, options = {}) {
+export function appendRenderedAssistant(markdownText, options: Record<string, any> = {}) {
   const host = chatHistoryEl();
   if (!host) return null;
   const row = document.createElement('div');
