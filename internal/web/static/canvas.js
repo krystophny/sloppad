@@ -6,10 +6,10 @@ import { buildEmailThreadHTML } from './app-item-sidebar-artifacts.js';
 import {
   renderCanvasApprovalActions,
   renderCanvasMailActions,
-  resolveCanvasApprovalRequest,
 } from './canvas-actions.js';
 
 export { escapeHtml, sanitizeHtml } from './canvas-content.js';
+export { resolveCanvasApprovalRequest } from './canvas-actions.js';
 
 const PDFJS_WORKER_URL = new URL('./vendor/pdf.worker.mjs', import.meta.url).toString();
 const PDFJS_STANDARD_FONTS_URL = new URL('./vendor/standard_fonts/', import.meta.url).toString();
