@@ -262,69 +262,64 @@ func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Tas
 	followUpAt := todoistTaskFollowUpAt(task)
 	desiredState := todoistItemState(task)
 	if existing, err := a.store.GetItemBySource(source, sourceRef); err == nil {
-		updates := store.ItemUpdate{
-			Title:      &title,
-			FollowUpAt: followUpAt,
-		}
-		if mapping != nil {
-			updates.WorkspaceID = mappedWorkspaceUpdate(mapping)
-			updates.ProjectID = mappedProjectUpdate(mapping)
-		} else if existing.WorkspaceID != nil {
-			clear := int64(0)
-			updates.WorkspaceID = &clear
-		}
-		if mapping == nil || mapping.WorkspaceID == nil {
-			sphere := account.Sphere
-			updates.Sphere = &sphere
-		}
-		if err := a.store.UpdateItem(existing.ID, updates); err != nil {
-			return store.Item{}, err
-		}
-		item, err := a.store.GetItem(existing.ID)
-		if err != nil {
-			return store.Item{}, err
-		}
-		switch {
-		case desiredState == store.ItemStateDone && item.State != store.ItemStateDone:
-			if err := a.store.CompleteItemBySource(source, sourceRef); err != nil {
-				return store.Item{}, err
-			}
-			item, err = a.store.GetItem(existing.ID)
-			if err != nil {
-				return store.Item{}, err
-			}
-		case desiredState == store.ItemStateInbox && item.State == store.ItemStateDone:
-			if err := a.store.SyncItemStateBySource(source, sourceRef, store.ItemStateInbox); err != nil {
-				return store.Item{}, err
-			}
-			item, err = a.store.GetItem(existing.ID)
-			if err != nil {
-				return store.Item{}, err
-			}
-		}
-		if err := a.syncTodoistTaskArtifact(item, task, projectNames, comments); err != nil {
-			return store.Item{}, err
-		}
-		item, err = a.store.GetItem(existing.ID)
-		if err != nil {
-			return store.Item{}, err
-		}
-		containerRef := strings.TrimSpace(projectName)
-		if _, err := a.store.UpsertExternalBinding(store.ExternalBinding{
-			AccountID:    account.ID,
-			Provider:     store.ExternalProviderTodoist,
-			ObjectType:   "task",
-			RemoteID:     strings.TrimSpace(task.ID),
-			ItemID:       &item.ID,
-			ContainerRef: optionalStringPointer(containerRef),
-		}); err != nil {
-			return store.Item{}, err
-		}
-		return item, nil
+		return a.updatePersistedTodoistTask(existing, account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return store.Item{}, err
 	}
+	return a.createPersistedTodoistTask(account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt)
+}
 
+func (a *App) updatePersistedTodoistTask(existing store.Item, account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt *string) (store.Item, error) {
+	updates := store.ItemUpdate{
+		Title:      &title,
+		FollowUpAt: followUpAt,
+	}
+	if mapping != nil {
+		updates.WorkspaceID = mappedWorkspaceUpdate(mapping)
+		updates.ProjectID = mappedProjectUpdate(mapping)
+	} else if existing.WorkspaceID != nil {
+		clear := int64(0)
+		updates.WorkspaceID = &clear
+	}
+	if mapping == nil || mapping.WorkspaceID == nil {
+		sphere := account.Sphere
+		updates.Sphere = &sphere
+	}
+	if err := a.store.UpdateItem(existing.ID, updates); err != nil {
+		return store.Item{}, err
+	}
+	item, err := a.store.GetItem(existing.ID)
+	if err != nil {
+		return store.Item{}, err
+	}
+	switch {
+	case desiredState == store.ItemStateDone && item.State != store.ItemStateDone:
+		if err := a.store.CompleteItemBySource(source, sourceRef); err != nil {
+			return store.Item{}, err
+		}
+	case desiredState == store.ItemStateInbox && item.State == store.ItemStateDone:
+		if err := a.store.SyncItemStateBySource(source, sourceRef, store.ItemStateInbox); err != nil {
+			return store.Item{}, err
+		}
+	}
+	item, err = a.store.GetItem(existing.ID)
+	if err != nil {
+		return store.Item{}, err
+	}
+	if err := a.syncTodoistTaskArtifact(item, task, projectNames, comments); err != nil {
+		return store.Item{}, err
+	}
+	item, err = a.store.GetItem(existing.ID)
+	if err != nil {
+		return store.Item{}, err
+	}
+	if err := a.upsertTodoistTaskBinding(account.ID, task.ID, item.ID, projectName); err != nil {
+		return store.Item{}, err
+	}
+	return item, nil
+}
+
+func (a *App) createPersistedTodoistTask(account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt *string) (store.Item, error) {
 	opts := store.ItemOptions{
 		State:      desiredState,
 		ProjectID:  mappingProjectID(mapping),
@@ -347,18 +342,22 @@ func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Tas
 	if err != nil {
 		return store.Item{}, err
 	}
-	containerRef := strings.TrimSpace(projectName)
-	if _, err := a.store.UpsertExternalBinding(store.ExternalBinding{
-		AccountID:    account.ID,
-		Provider:     store.ExternalProviderTodoist,
-		ObjectType:   "task",
-		RemoteID:     strings.TrimSpace(task.ID),
-		ItemID:       &item.ID,
-		ContainerRef: optionalStringPointer(containerRef),
-	}); err != nil {
+	if err := a.upsertTodoistTaskBinding(account.ID, task.ID, item.ID, projectName); err != nil {
 		return store.Item{}, err
 	}
 	return item, nil
+}
+
+func (a *App) upsertTodoistTaskBinding(accountID int64, taskID string, itemID int64, projectName string) error {
+	_, err := a.store.UpsertExternalBinding(store.ExternalBinding{
+		AccountID:    accountID,
+		Provider:     store.ExternalProviderTodoist,
+		ObjectType:   "task",
+		RemoteID:     strings.TrimSpace(taskID),
+		ItemID:       &itemID,
+		ContainerRef: optionalStringPointer(projectName),
+	})
+	return err
 }
 
 func mappingProjectID(mapping *store.ExternalContainerMapping) *string {
