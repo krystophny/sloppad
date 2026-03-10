@@ -832,7 +832,7 @@ test.describe('canvas - edge panels', () => {
     await expect(cpInput).toBeVisible();
   });
 
-  test('touch tap on right edge opens chat panel without recording', async ({ page }) => {
+  test('touch tap on right edge toggles a full-width chat panel without recording', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await clearLog(page);
 
@@ -841,24 +841,26 @@ test.describe('canvas - edge panels', () => {
     expect(initialClasses).not.toContain('edge-pinned');
 
     // Dispatch synthetic touch events at right edge (x=372, well inside 30px zone)
-    await page.evaluate(() => {
-      const x = window.innerWidth - 3;
-      const y = Math.floor(window.innerHeight / 2);
-      const target = document.elementFromPoint(x, y) || document.body;
-      const touchInit = { clientX: x, clientY: y, pageX: x, pageY: y, identifier: 0, target };
-      const touch = new Touch(touchInit);
-      target.dispatchEvent(new TouchEvent('touchstart', { touches: [touch], changedTouches: [touch], bubbles: true }));
-      target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch], bubbles: true, cancelable: true }));
-    });
+    await dispatchTouchTap(page, 372, 333);
     await page.waitForTimeout(300);
 
     // Panel should be pinned
     await expect(edgeRight).toHaveClass(/edge-pinned/);
+    const width = await edgeRight.evaluate(el => getComputedStyle(el).width);
+    expect(parseInt(width, 10)).toBeGreaterThanOrEqual(370);
 
     // No recording should have started
     const log = await getLog(page);
     const sttStart = log.find(e => e.type === 'stt' && e.action === 'start');
     expect(sttStart).toBeFalsy();
+
+    // Same edge tap should hide the panel again.
+    await dispatchTouchTap(page, 372, 333);
+    await page.waitForTimeout(200);
+
+    const classes = await edgeRight.getAttribute('class');
+    expect(classes).not.toContain('edge-pinned');
+    expect(classes).not.toContain('edge-active');
   });
 
   test('touch tap inside pinned chat panel does not cancel default focus flow', async ({ page }) => {

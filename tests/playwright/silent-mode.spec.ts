@@ -75,6 +75,27 @@ async function injectCanvasEvent(page: Page, payload: Record<string, unknown>) {
   }, payload);
 }
 
+async function tapRightEdgeToggle(page: Page, identifier: number) {
+  await page.evaluate((touchIdentifier) => {
+    const tap = document.getElementById('edge-right-tap');
+    if (!(tap instanceof HTMLElement)) return;
+    const rect = tap.getBoundingClientRect();
+    const x = Math.floor(rect.left + rect.width / 2);
+    const y = Math.floor(rect.top + rect.height / 2);
+    const target = document.elementFromPoint(x, y) || tap;
+    const touch = new Touch({
+      clientX: x,
+      clientY: y,
+      pageX: x,
+      pageY: y,
+      identifier: touchIdentifier,
+      target,
+    });
+    target.dispatchEvent(new TouchEvent('touchstart', { touches: [touch], changedTouches: [touch], bubbles: true }));
+    target.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [touch], bubbles: true, cancelable: true }));
+  }, identifier);
+}
+
 test.describe('silent mode mobile', () => {
   test.use({ viewport: { width: 375, height: 667 } });
 
@@ -89,6 +110,25 @@ test.describe('silent mode mobile', () => {
   test('body has silent-mode class', async ({ page }) => {
     const hasSilent = await page.evaluate(() => document.body.classList.contains('silent-mode'));
     expect(hasSilent).toBe(true);
+  });
+
+  test('right edge tap toggles the silent chat panel while keeping it full width', async ({ page }) => {
+    const edgeRight = page.locator('#edge-right');
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+
+    const width = await edgeRight.evaluate(el => getComputedStyle(el).width);
+    expect(parseInt(width, 10)).toBeGreaterThanOrEqual(370);
+
+    await tapRightEdgeToggle(page, 0);
+    await page.waitForTimeout(200);
+    await expect(edgeRight).not.toHaveClass(/edge-pinned/);
+
+    await tapRightEdgeToggle(page, 1);
+    await page.waitForTimeout(200);
+
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+    const reopenedWidth = await edgeRight.evaluate(el => getComputedStyle(el).width);
+    expect(parseInt(reopenedWidth, 10)).toBeGreaterThanOrEqual(370);
   });
 
   test('chat pane stays focused for autoCanvas temp response artifacts', async ({ page }) => {
