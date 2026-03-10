@@ -1,0 +1,128 @@
+.command-center {
+  position: fixed;
+  inset: 0;
+  z-index: 1210;
+  display: grid;
+  place-items: start center;
+  padding:
+    calc(8vh + var(--safe-area-top))
+    calc(1rem + var(--safe-area-right))
+    calc(1rem + var(--safe-area-bottom))
+    calc(1rem + var(--safe-area-left));
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.command-center[hidden] {
+  display: none;
+}
+
+.command-center__panel {
+  width: min(680px, 100%);
+  max-height: min(72vh, 720px);
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid #111111;
+  border-radius: 18px;
+  background: #f7f4ed;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.22);
+}
+
+.command-center__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.command-center__header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.command-center__header p {
+  margin: 0.2rem 0 0;
+  color: #444444;
+}
+
+.command-center__close {
+  min-width: 5rem;
+}
+
+.command-center__input {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #111111;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111111;
+  font: inherit;
+}
+
+.command-center__input:focus {
+  outline: 2px solid rgba(17, 17, 17, 0.15);
+  outline-offset: 1px;
+}
+
+.command-center__list {
+  display: grid;
+  gap: 0.55rem;
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+
+.command-center__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #111111;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111111;
+  text-align: left;
+}
+
+.command-center__item:hover,
+.command-center__item:focus-visible,
+.command-center__item.is-selected {
+  background: #111111;
+  color: #f7f4ed;
+}
+
+.command-center__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.command-center__item-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.command-center__item-copy strong {
+  font-size: 0.98rem;
+}
+
+.command-center__item-detail {
+  color: inherit;
+  opacity: 0.76;
+}
+
+.command-center__shortcut {
+  flex: none;
+  padding: 0.14rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.command-center__empty {
+  padding: 1.25rem 0.25rem;
+  color: #444444;
+  text-align: center;
+}
