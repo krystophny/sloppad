@@ -17,3 +17,5 @@ services/intent-classifier/checkpoints/
 tools/
 .env
 internal/web/static/vad/
+internal/web/static/*.js
+internal/web/static/*.js.map

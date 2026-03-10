@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { initVAD, float32ToWav } from './vad.js';
 
 export const LIVE_SESSION_MODE_DIALOGUE = 'dialogue';
@@ -166,7 +165,7 @@ function resetMeetingState(capture = null) {
   state.meetingSessionID = '';
 }
 
-export function configureLiveSession(config = {}) {
+export function configureLiveSession(config: Record<string, any> = {}) {
   hooks.canStartDialogueListen = config.canStartDialogueListen || null;
   hooks.onStateChange = config.onStateChange || null;
   hooks.onDialogueListenTimeout = config.onDialogueListenTimeout || null;
@@ -305,7 +304,22 @@ export function handleLiveSessionMessage(message) {
 }
 
 export class MeetingLiveCapture {
-  constructor(options = {}) {
+  _ws: any;
+  _stream: any;
+  _vadInstance: any;
+  _active: boolean;
+  _sessionId: any;
+  _onSegment: any;
+  _onStarted: any;
+  _onStopped: any;
+  _onError: any;
+  _sampleRate: number;
+  _maxSegmentDurationMS: number;
+  _sessionRamCapBytes: number;
+  _rollingSamples: Float32Array | null;
+  _sessionChunks: Uint8Array[];
+  _sessionBufferedBytes: number;
+  constructor(options: Record<string, any> = {}) {
     this._ws = null;
     this._stream = null;
     this._vadInstance = null;

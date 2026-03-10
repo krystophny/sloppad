@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { staticURL } from './paths.js';
 
 // VAD assets are served from the app's static mount, which may sit behind a proxy prefix.
@@ -63,7 +62,7 @@ export async function ensureVADLoaded() {
   return state.available;
 }
 
-export async function initVAD(options = {}) {
+export async function initVAD(options: Record<string, any> = {}) {
   await loadRuntime();
   if (!state.available) return null;
 
@@ -87,7 +86,7 @@ export async function initVAD(options = {}) {
   }
 
   try {
-    const micVADOptions = {
+    const micVADOptions: Record<string, any> = {
       model: 'v5',
       baseAssetPath: VAD_ASSET_PATH,
       onnxWASMBasePath: VAD_ASSET_PATH,

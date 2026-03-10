@@ -1,4 +1,3 @@
-// @ts-nocheck
 export { marked } from './vendor/marked.esm.js';
 export { apiURL, wsURL } from './paths.js';
 export {

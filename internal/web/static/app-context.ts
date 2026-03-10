@@ -1,7 +1,6 @@
-// @ts-nocheck
 import { LIVE_SESSION_HOTWORD_DEFAULT } from './live-session.js';
 
-export const refs = {};
+export const refs: Record<string, any> = {};
 
 export function setAppRefs(next) {
   Object.assign(refs, next || {});

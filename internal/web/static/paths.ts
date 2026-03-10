@@ -1,4 +1,3 @@
-// @ts-nocheck
 function trimLeadingSlashes(value) {
   return String(value || '').replace(/^\/+/, '');
 }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { refs, state } from './app-context.js';
 
 const openItemSidebarView = (...args) => refs.openItemSidebarView(...args);
@@ -11,7 +10,7 @@ const selectInteractionTool = (...args) => refs.selectInteractionTool(...args);
 const COMMAND_CENTER_ID = 'command-center';
 const COMMAND_CENTER_INPUT_ID = 'command-center-input';
 const COMMAND_CENTER_LIST_ID = 'command-center-list';
-const COMMAND_CENTER_COMMANDS = [
+const COMMAND_CENTER_COMMANDS: Array<{ id: string; title: string; detail: string; shortcut: string; keywords: string; run: () => any; disabled?: boolean }> = [
   {
     id: 'view-inbox',
     title: 'Open Inbox',

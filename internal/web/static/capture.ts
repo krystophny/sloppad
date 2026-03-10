@@ -1,15 +1,14 @@
-// @ts-nocheck
 (function () {
   const page = document.getElementById('capture-page');
   const alertNode = document.getElementById('capture-alert');
-  const noteInput = document.getElementById('capture-note');
-  const recordButton = document.getElementById('capture-record');
+  const noteInput = document.getElementById('capture-note') as HTMLInputElement | null;
+  const recordButton = document.getElementById('capture-record') as HTMLButtonElement | null;
   const recordLabel = recordButton ? recordButton.querySelector('.capture-record-label') : null;
   const recordHint = recordButton ? recordButton.querySelector('.capture-record-hint') : null;
-  const saveButton = document.getElementById('capture-save');
-  const retryButton = document.getElementById('capture-retry');
-  const fallbackButton = document.getElementById('capture-fallback');
-  const resetButton = document.getElementById('capture-reset');
+  const saveButton = document.getElementById('capture-save') as HTMLButtonElement | null;
+  const retryButton = document.getElementById('capture-retry') as HTMLButtonElement | null;
+  const fallbackButton = document.getElementById('capture-fallback') as HTMLButtonElement | null;
+  const resetButton = document.getElementById('capture-reset') as HTMLButtonElement | null;
   const statusNode = document.getElementById('capture-status');
 
   if (!page || !alertNode || !noteInput || !recordButton || !recordLabel || !recordHint || !saveButton || !retryButton || !fallbackButton || !resetButton || !statusNode) {
@@ -291,7 +290,7 @@
       },
       body: JSON.stringify(payload),
     });
-    let data = {};
+    let data: Record<string, any> = {};
     try {
       data = await response.json();
     } catch (_) {
@@ -312,7 +311,7 @@
       method: 'POST',
       body: payload,
     });
-    let data = {};
+    let data: Record<string, any> = {};
     try {
       data = await response.json();
     } catch (_) {
@@ -371,7 +370,7 @@
     return !isOnline() || message.includes('failed to fetch') || message.includes('networkerror');
   }
 
-  function holdVoiceMemoInMemory(statusMessage) {
+  function holdVoiceMemoInMemory(statusMessage?) {
     if (!state.audioBlob) {
       return false;
     }

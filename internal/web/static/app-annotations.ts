@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { refs, state } from './app-context.js';
 import { createScanAnnotationController } from './app-annotations-scan.js';
 const acquireMicStream = (...args) => refs.acquireMicStream(...args);
@@ -125,7 +124,7 @@ const scanController = createScanAnnotationController({
   showStatus,
 });
 
-function collectNormalizedClientRects(range, root, options = {}) {
+function collectNormalizedClientRects(range, root, options: Record<string, any> = {}) {
   if (!(range instanceof Range) || !(root instanceof HTMLElement)) return [];
   const rootRect = root.getBoundingClientRect();
   const width = options.scrollable
@@ -156,7 +155,7 @@ function normalizeDescriptor(detail) {
 }
 
 function activeArtifactDescriptor() {
-  const current = state.currentCanvasArtifact || {};
+  const current: Record<string, any> = state.currentCanvasArtifact || {};
   return {
     kind: safeText(activeDescriptor?.kind || current.kind),
     title: safeText(activeDescriptor?.title || current.title),
@@ -216,7 +215,7 @@ function annotationPreviewText(annotation) {
   return 'Highlight';
 }
 
-function formatAnnotationBundleText(annotations, options = {}) {
+function formatAnnotationBundleText(annotations, options: Record<string, any> = {}) {
   if (!Array.isArray(annotations) || annotations.length === 0) return '';
   const immediate = options.immediate === true;
   const lines = [
@@ -299,7 +298,7 @@ function clearAllActiveAnnotations() {
   showStatus('annotations cleared');
 }
 
-export function importScanAnnotations(payload = {}) {
+export function importScanAnnotations(payload: Record<string, any> = {}) {
   return scanController.importScanAnnotations(payload);
 }
 export function openScanImportPicker() { return scanController.openScanImportPicker(); }
@@ -354,8 +353,8 @@ function ensureTextAnnotationLayer() {
     layer.className = 'canvas-annotation-layer canvas-annotation-layer-text';
     pane.appendChild(layer);
   }
-  layer.style.width = `${Math.max(pane.scrollWidth, pane.clientWidth, 1)}px`;
-  layer.style.height = `${Math.max(pane.scrollHeight, pane.clientHeight, 1)}px`;
+  (layer as HTMLElement).style.width = `${Math.max(pane.scrollWidth, pane.clientWidth, 1)}px`;
+  (layer as HTMLElement).style.height = `${Math.max(pane.scrollHeight, pane.clientHeight, 1)}px`;
   return layer;
 }
 function ensurePdfAnnotationLayer(pageNumber) {
@@ -565,7 +564,7 @@ export function pdfPageAnchorAtPoint(clientX, clientY) {
     if (!(hit instanceof Element)) continue;
     const page = hit.closest('.canvas-pdf-page');
     const pageInner = page?.querySelector('.canvas-pdf-page-inner');
-    const pageNumber = Number.parseInt(safeText(page?.dataset?.page), 10);
+    const pageNumber = Number.parseInt(safeText((page as HTMLElement)?.dataset?.page), 10);
     if (!(pageInner instanceof HTMLElement) || !Number.isFinite(pageNumber) || pageNumber <= 0) {
       continue;
     }
@@ -974,7 +973,7 @@ export function initAnnotationUi() {
   if (annotationsReady) return;
   annotationsReady = true;
   document.addEventListener('tabura:canvas-rendered', (event) => {
-    activeDescriptor = normalizeDescriptor(event?.detail);
+    activeDescriptor = normalizeDescriptor((event as CustomEvent)?.detail);
     renderActiveAnnotations();
   });
   document.addEventListener('tabura:canvas-cleared', () => {
@@ -985,7 +984,7 @@ export function initAnnotationUi() {
   document.addEventListener('pointerdown', (event) => {
     const bubble = document.getElementById('annotation-bubble');
     if (!(bubble instanceof HTMLElement) || bubble.hidden) return;
-    const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+    const target = event.target instanceof Element ? event.target : (event.target as any)?.parentElement;
     if (target && (bubble.contains(target) || target.closest('.canvas-user-highlight') || target.closest('.canvas-annotation-badge') || target.closest('.canvas-sticky-note') || target.closest('.canvas-ink-annotation'))) return;
     closeAnnotationBubble();
   }, true);

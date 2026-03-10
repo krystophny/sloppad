@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { refs, state } from './app-context.js';
 import { artifactSupportsMailActions } from './artifact-taxonomy.js';
 import {

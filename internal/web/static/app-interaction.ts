@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as context from './app-context.js';
 
 const {
@@ -199,7 +198,7 @@ export function canToggleInteractionSurface() {
 
 function shouldAnnotateTextArtifactByDefault() {
   if (state.prReviewMode) return true;
-  const descriptor = state.currentCanvasArtifact || {};
+  const descriptor: Record<string, any> = state.currentCanvasArtifact || {};
   if (descriptor.surfaceDefault === 'annotate') return true;
   const title = String(descriptor.title || '').trim().toLowerCase();
   return title.startsWith('.tabura/artifacts/pr/') && title.endsWith('.diff');

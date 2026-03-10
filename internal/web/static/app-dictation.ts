@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -93,7 +92,7 @@ async function requestDictation(path, options = {}) {
   return normalizeDictationResponse(payload);
 }
 
-export async function startDictationMode(options = {}) {
+export async function startDictationMode(options: Record<string, any> = {}) {
   const prompt = String(options?.prompt || '').trim();
   if (!prompt) return false;
   const targetKind = String(options?.targetKind || '').trim();

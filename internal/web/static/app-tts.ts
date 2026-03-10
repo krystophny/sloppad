@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -112,6 +111,9 @@ export function extractTTSText(markdown) {
 
 
 export class SentenceChunker {
+  _buffer: string;
+  _onSentence: any;
+  _timer: any;
   constructor(onSentence) {
     this._buffer = '';
     this._onSentence = onSentence;
@@ -155,6 +157,12 @@ export class SentenceChunker {
 }
 
 export class TTSPlayer {
+  _queue: any[];
+  _playing: boolean;
+  _stopped: boolean;
+  _ctx: any;
+  _currentSource: any;
+  _nextStartTime: number;
   constructor() {
     this._queue = [];
     this._playing = false;
@@ -448,7 +456,7 @@ export async function initHotwordLifecycle() {
   return initHotwordLifecycleWithOptions();
 }
 
-export async function initHotwordLifecycleWithOptions(options = {}) {
+export async function initHotwordLifecycleWithOptions(options: Record<string, any> = {}) {
   const force = Boolean(options && options.force);
   if (hotwordInitAttempted && !force) return state.hotwordEnabled;
   if (force) {

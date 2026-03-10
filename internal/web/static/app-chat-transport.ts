@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -48,6 +47,7 @@ const cancelChatVoiceCapture = (...args) => refs.cancelChatVoiceCapture(...args)
 const activateLiveSession = (...args) => refs.activateLiveSession(...args);
 const deactivateLiveSession = (...args) => refs.deactivateLiveSession(...args);
 const normalizeItemSidebarView = (...args) => refs.normalizeItemSidebarView(...args);
+const buildCursorPayload = (...args) => refs.buildCursorPayload(...args);
 const toggleTTSSilentMode = (...args) => refs.toggleTTSSilentMode(...args);
 const canSpeakTTS = (...args) => refs.canSpeakTTS(...args);
 const applyLiveSessionStateSnapshot = (...args) => refs.applyLiveSessionStateSnapshot(...args);
@@ -106,10 +106,10 @@ export function sendChatWsJSON(payload) {
   return true;
 }
 
-export function sendCanvasPositionEvent(anchor, options = {}) {
+export function sendCanvasPositionEvent(anchor, options: Record<string, any> = {}) {
   const cursor = buildCursorPayload(anchor);
   if (!cursor) return false;
-  const payload = {
+  const payload: Record<string, any> = {
     type: 'canvas_position',
     cursor,
     gesture: String(options?.gesture || 'tap').trim().toLowerCase() || 'tap',

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as context from './app-context.js';
 
 const { refs, state, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY } = context;

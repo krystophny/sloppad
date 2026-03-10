@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { apiURL, clearCanvas } from './app-env.js';
 import { refs, state } from './app-context.js';
 import { bindUi } from './app-init.js';
@@ -132,9 +131,9 @@ async function authGate() {
     return;
   }
   const loginForm = document.getElementById('login-form');
-  const loginPassword = document.getElementById('login-password');
+  const loginPassword = document.getElementById('login-password') as HTMLInputElement | null;
   const loginError = document.getElementById('login-error');
-  const loginBtn = document.getElementById('btn-login');
+  const loginBtn = document.getElementById('btn-login') as HTMLButtonElement | null;
 
   if (!data.has_password) {
     loginPassword.style.display = 'none';

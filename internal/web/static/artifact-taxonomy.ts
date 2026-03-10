@@ -1,4 +1,3 @@
-// @ts-nocheck
 const IMAGE_EXTENSIONS = new Set([
   '.apng',
   '.avif',

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -202,11 +201,12 @@ function buildInkEventPayload() {
     .map((clientPoint) => getLocationFromPoint(clientPoint.x, clientPoint.y))
     .filter((location) => location && typeof location === 'object');
 
-  const lineNumbers = rawLocations
+  const locations: any[] = rawLocations;
+  const lineNumbers = locations
     .map((location) => Number(location?.line || 0))
     .filter((line) => Number.isFinite(line) && line > 0);
-  const surroundingTexts = uniqueTextSamples(rawLocations.map((location) => location?.surroundingText));
-  const cursor = rawLocations.find((location) => location && (location.line || location.page || Number.isFinite(location.relativeX) || location.title)) || null;
+  const surroundingTexts = uniqueTextSamples(locations.map((location) => location?.surroundingText));
+  const cursor = locations.find((location) => location && (location.line || location.page || Number.isFinite(location.relativeX) || location.title)) || null;
 
   const width = state.inkDraft.target === 'pdf'
     ? Math.max(1, Number(state.inkDraft.pageWidth) || 1)

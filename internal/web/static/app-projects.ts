@@ -1,4 +1,3 @@
-// @ts-nocheck
 import * as env from './app-env.js';
 import * as context from './app-context.js';
 
@@ -271,7 +270,7 @@ export async function activateLiveSession(mode) {
   return started;
 }
 
-export async function deactivateLiveSession(options = {}) {
+export async function deactivateLiveSession(options: Record<string, any> = {}) {
   const silent = Boolean(options?.silent);
   const disableMeetingConfig = Boolean(options?.disableMeetingConfig);
   const wasMeeting = isMeetingLiveSession();
@@ -590,7 +589,7 @@ export async function switchProjectChatModel(modelAlias, reasoningEffort = '') {
   renderEdgeTopModelButtons();
   showStatus(`switching model to ${nextAlias}...`);
   try {
-    const payload = { model: nextAlias };
+    const payload: Record<string, any> = { model: nextAlias };
     if (includeEffort) {
       payload.reasoning_effort = nextEffort;
     }
@@ -624,7 +623,7 @@ export async function createTemporaryProject(kind, sourceProjectID = '') {
   if (!isTemporaryProjectKind(projectKind)) return;
   if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return;
   showStatus(`starting ${projectKind}...`);
-  const payload = {
+  const payload: Record<string, any> = {
     kind: projectKind,
     activate: true,
   };
