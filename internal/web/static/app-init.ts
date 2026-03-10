@@ -145,7 +145,7 @@ export function bindUi() {
   const isVoiceInteractionTarget = (target, x, y) => (
     isInEdgeZone(x, y)
     || (target instanceof Element
-      && target.closest('button,a,input,textarea,select,[contenteditable="true"],.overlay,.floating-input,.edge-panel,#canvas-pdf .canvas-pdf-page,#canvas-pdf .textLayer,#canvas-pdf .annotationLayer'))
+      && target.closest('button,a,input,textarea,select,[contenteditable="true"],.overlay,.floating-input,.edge-panel,.canvas-embedded-ui,#canvas-pdf .canvas-pdf-page,#canvas-pdf .textLayer,#canvas-pdf .annotationLayer'))
   );
   const rememberMousePosition = (x, y) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -257,7 +257,7 @@ export function bindUi() {
     const isTapOnInteractiveUi = (ev) => {
       const t = ev.target;
       if (!(t instanceof Element)) return false;
-      return Boolean(t.closest('button, a, input, textarea, select, #edge-left-tap, #edge-right-tap, #edge-top-tap, #edge-top, #edge-right, #pr-file-pane, #pr-file-drawer-backdrop'));
+      return Boolean(t.closest('button, a, input, textarea, select, .canvas-embedded-ui, #edge-left-tap, #edge-right-tap, #edge-top-tap, #edge-top, #edge-right, #pr-file-pane, #pr-file-drawer-backdrop'));
     };
     const handleIndicatorTap = (ev, x, y, isTouch = false) => {
       if (!isIndicatorArmed()) return;
@@ -547,6 +547,7 @@ export function bindUi() {
         return;
       }
       if (ev.target instanceof Element && ev.target.closest('.edge-panel')) return;
+      if (isEditableTarget(ev.target)) return;
       if (canEnterArtifactEditModeFromTarget(ev.target)) {
         ev.preventDefault();
         enterArtifactEditMode(ev.clientX, ev.clientY);
