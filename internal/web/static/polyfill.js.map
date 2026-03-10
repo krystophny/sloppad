@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["polyfill.ts"],
+  "sourcesContent": ["// @ts-nocheck\nif (!Array.prototype.at) {\n  Array.prototype.at = function (i) { return i < 0 ? this[this.length + i] : this[i]; };\n  String.prototype.at = function (i) { return i < 0 ? this[this.length + i] : this[i]; };\n}\n"],
+  "mappings": ";AACA,MAAI,CAAC,MAAM,UAAU,IAAI;AACvB,UAAM,UAAU,KAAK,SAAU,GAAG;AAAE,aAAO,IAAI,IAAI,KAAK,KAAK,SAAS,CAAC,IAAI,KAAK,CAAC;AAAA,IAAG;AACpF,WAAO,UAAU,KAAK,SAAU,GAAG;AAAE,aAAO,IAAI,IAAI,KAAK,KAAK,SAAS,CAAC,IAAI,KAAK,CAAC;AAAA,IAAG;AAAA,EACvF;",
+  "names": []
+}

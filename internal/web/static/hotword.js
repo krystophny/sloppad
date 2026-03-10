@@ -1,32 +1,29 @@
-import { staticURL } from './paths.js';
-
-const ORT_LOCAL_URL = staticURL('vad/ort.min.mjs');
-const ORT_WASM_MODULE_URL = staticURL('vad/ort-wasm-simd-threaded.mjs');
-const ORT_WASM_BINARY_URL = staticURL('vad/ort-wasm-simd-threaded.wasm');
+import { staticURL } from "./paths.js";
+const ORT_LOCAL_URL = staticURL("vad/ort.min.mjs");
+const ORT_WASM_MODULE_URL = staticURL("vad/ort-wasm-simd-threaded.mjs");
+const ORT_WASM_BINARY_URL = staticURL("vad/ort-wasm-simd-threaded.wasm");
 let ort = null;
 async function loadOrt() {
   if (!ort) ort = await import(ORT_LOCAL_URL);
   return ort;
 }
-
-export function resolveOrtWasmPaths() {
+function resolveOrtWasmPaths() {
   return {
     mjs: ORT_WASM_MODULE_URL,
-    wasm: ORT_WASM_BINARY_URL,
+    wasm: ORT_WASM_BINARY_URL
   };
 }
-
-const HOTWORD_VENDOR_BASE = staticURL('vendor/openwakeword');
+const HOTWORD_VENDOR_BASE = staticURL("vendor/openwakeword");
 const HOTWORD_MODEL_FILES = {
   mel: `${HOTWORD_VENDOR_BASE}/melspectrogram.onnx`,
   embedding: `${HOTWORD_VENDOR_BASE}/embedding_model.onnx`,
-  keyword: `${HOTWORD_VENDOR_BASE}/alexa.onnx`,
+  keyword: `${HOTWORD_VENDOR_BASE}/alexa.onnx`
 };
 const HOTWORD_DEFAULT_THRESHOLD = 0.5;
 const HOTWORD_DETECTION_COOLDOWN_MS = 1500;
-const HOTWORD_TARGET_SAMPLE_RATE = 16000;
+const HOTWORD_TARGET_SAMPLE_RATE = 16e3;
 const HOTWORD_FRAME_MS = 80;
-const HOTWORD_TARGET_FRAME_SAMPLES = Math.floor((HOTWORD_TARGET_SAMPLE_RATE * HOTWORD_FRAME_MS) / 1000);
+const HOTWORD_TARGET_FRAME_SAMPLES = Math.floor(HOTWORD_TARGET_SAMPLE_RATE * HOTWORD_FRAME_MS / 1e3);
 const HOTWORD_MEL_CONTEXT_SAMPLES = 160 * 3;
 const HOTWORD_MEL_BANDS = 32;
 const HOTWORD_MEL_WINDOW = 76;
@@ -36,15 +33,13 @@ const HOTWORD_RAW_BUFFER_MAX = HOTWORD_TARGET_SAMPLE_RATE * 10;
 const HOTWORD_MEL_BUFFER_MAX = 10 * 97;
 const HOTWORD_FEATURE_BUFFER_MAX = 120;
 const HOTWORD_RING_BUFFER_SIZE = HOTWORD_TARGET_SAMPLE_RATE * 2;
-
-const listeners = new Set();
-
+const listeners = /* @__PURE__ */ new Set();
 const state = {
   initialized: false,
   available: false,
   active: false,
   threshold: HOTWORD_DEFAULT_THRESHOLD,
-  mode: 'none',
+  mode: "none",
   mock: null,
   model: null,
   preferredAudioCtx: null,
@@ -56,21 +51,18 @@ const state = {
   targetSampleBuffer: new Float32Array(0),
   pendingFrames: [],
   processingFrames: false,
-  lastDetectionAt: 0,
+  lastDetectionAt: 0
 };
-
 const ringBuffer = {
   buffer: new Float32Array(HOTWORD_RING_BUFFER_SIZE),
   writePos: 0,
-  filled: 0,
+  filled: 0
 };
-
 function resetRingBuffer() {
   ringBuffer.buffer = new Float32Array(HOTWORD_RING_BUFFER_SIZE);
   ringBuffer.writePos = 0;
   ringBuffer.filled = 0;
 }
-
 function writeRingBuffer(samples) {
   const buf = ringBuffer.buffer;
   const size = buf.length;
@@ -80,16 +72,14 @@ function writeRingBuffer(samples) {
   }
   ringBuffer.filled = Math.min(ringBuffer.filled + samples.length, size);
 }
-
 const pipeline = {
   rawBuffer: null,
   rawLen: 0,
   melBuffer: null,
   melLen: 0,
   featureBuffer: null,
-  featureLen: 0,
+  featureLen: 0
 };
-
 function resetPipeline() {
   pipeline.rawBuffer = new Float32Array(HOTWORD_RAW_BUFFER_MAX);
   pipeline.rawLen = 0;
@@ -98,7 +88,6 @@ function resetPipeline() {
   pipeline.featureBuffer = new Float32Array(HOTWORD_FEATURE_BUFFER_MAX * HOTWORD_EMBEDDING_DIM);
   pipeline.featureLen = 0;
 }
-
 function appendRaw(samples) {
   const need = pipeline.rawLen + samples.length;
   if (need > HOTWORD_RAW_BUFFER_MAX) {
@@ -109,7 +98,6 @@ function appendRaw(samples) {
   pipeline.rawBuffer.set(samples, pipeline.rawLen);
   pipeline.rawLen += samples.length;
 }
-
 function appendMelFrames(data, nFrames) {
   const elems = nFrames * HOTWORD_MEL_BANDS;
   const totalRows = pipeline.melLen + nFrames;
@@ -125,7 +113,6 @@ function appendMelFrames(data, nFrames) {
   }
   pipeline.melLen += nFrames;
 }
-
 function appendEmbedding(data) {
   if (pipeline.featureLen >= HOTWORD_FEATURE_BUFFER_MAX) {
     pipeline.featureBuffer.copyWithin(0, HOTWORD_EMBEDDING_DIM, pipeline.featureLen * HOTWORD_EMBEDDING_DIM);
@@ -134,22 +121,19 @@ function appendEmbedding(data) {
   pipeline.featureBuffer.set(data, pipeline.featureLen * HOTWORD_EMBEDDING_DIM);
   pipeline.featureLen += 1;
 }
-
 function clampNumber(value, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return min;
   return Math.max(min, Math.min(max, n));
 }
-
 function resolveMock() {
   const candidate = window.__taburaHotwordMock;
-  if (!candidate || typeof candidate !== 'object') return null;
-  if (typeof candidate.init !== 'function') return null;
-  if (typeof candidate.start !== 'function') return null;
-  if (typeof candidate.stop !== 'function') return null;
+  if (!candidate || typeof candidate !== "object") return null;
+  if (typeof candidate.init !== "function") return null;
+  if (typeof candidate.start !== "function") return null;
+  if (typeof candidate.stop !== "function") return null;
   return candidate;
 }
-
 function extractTensor(output) {
   if (!output) return null;
   if (output.data && output.dims) return output;
@@ -160,7 +144,6 @@ function extractTensor(output) {
   }
   return null;
 }
-
 function tensorScore(output) {
   const tensor = extractTensor(output);
   if (!tensor || !tensor.data || tensor.data.length === 0) return 0;
@@ -177,7 +160,6 @@ function tensorScore(output) {
   if (!Number.isFinite(logistic)) return 0;
   return clampNumber(logistic, 0, 1);
 }
-
 function concatFloat32(a, b) {
   if (!(a instanceof Float32Array) || a.length === 0) return b;
   if (!(b instanceof Float32Array) || b.length === 0) return a;
@@ -186,7 +168,6 @@ function concatFloat32(a, b) {
   out.set(b, a.length);
   return out;
 }
-
 function resampleToTargetRate(samples, sourceRate) {
   if (!(samples instanceof Float32Array) || samples.length === 0) {
     return new Float32Array(0);
@@ -195,11 +176,9 @@ function resampleToTargetRate(samples, sourceRate) {
   if (!Number.isFinite(srcRate) || srcRate <= 0 || srcRate === HOTWORD_TARGET_SAMPLE_RATE) {
     return samples;
   }
-
   const ratio = srcRate / HOTWORD_TARGET_SAMPLE_RATE;
   const outLength = Math.max(1, Math.floor(samples.length / ratio));
   const out = new Float32Array(outLength);
-
   for (let i = 0; i < outLength; i += 1) {
     const srcPos = i * ratio;
     const left = Math.floor(srcPos);
@@ -207,88 +186,76 @@ function resampleToTargetRate(samples, sourceRate) {
     const weight = srcPos - left;
     const leftVal = samples[left] || 0;
     const rightVal = samples[right] || 0;
-    out[i] = (leftVal * (1 - weight)) + (rightVal * weight);
+    out[i] = leftVal * (1 - weight) + rightVal * weight;
   }
-
   return out;
 }
-
 function emitHotwordDetected() {
   const now = Date.now();
-  if ((now - state.lastDetectionAt) < HOTWORD_DETECTION_COOLDOWN_MS) {
+  if (now - state.lastDetectionAt < HOTWORD_DETECTION_COOLDOWN_MS) {
     return;
   }
   state.lastDetectionAt = now;
   listeners.forEach((listener) => {
     try {
       listener();
-    } catch (_) {}
+    } catch (_) {
+    }
   });
 }
-
 async function runSession(session, inputTensor) {
   const inputName = session.inputNames[0];
   const feed = { [inputName]: inputTensor };
   const outputs = await session.run(feed);
   return outputs[session.outputNames[0]] || null;
 }
-
 async function runPipelineOnnx(frame) {
   if (!state.model) return 0;
   const { melSession, embeddingSession, keywordSession } = state.model;
   if (!keywordSession || !pipeline.rawBuffer) return 0;
-
   const int16Scaled = new Float32Array(frame.length);
   for (let i = 0; i < frame.length; i += 1) {
     int16Scaled[i] = Math.round(frame[i] * 32767);
   }
   appendRaw(int16Scaled);
-
   try {
     const melInputLen = Math.min(pipeline.rawLen, HOTWORD_TARGET_FRAME_SAMPLES + HOTWORD_MEL_CONTEXT_SAMPLES);
     if (melInputLen < 400) return 0;
-
     const melInputData = pipeline.rawBuffer.slice(pipeline.rawLen - melInputLen, pipeline.rawLen);
-    const melTensor = new ort.Tensor('float32', melInputData, [1, melInputLen]);
+    const melTensor = new ort.Tensor("float32", melInputData, [1, melInputLen]);
     const melOut = await runSession(melSession, melTensor);
     if (!melOut) return 0;
-
     const dims = melOut.dims;
     const nFrames = dims[dims.length - 2];
     appendMelFrames(melOut.data, nFrames);
-
     if (pipeline.melLen >= HOTWORD_MEL_WINDOW) {
       const windowStart = (pipeline.melLen - HOTWORD_MEL_WINDOW) * HOTWORD_MEL_BANDS;
       const windowEnd = pipeline.melLen * HOTWORD_MEL_BANDS;
       const embInputData = new Float32Array(HOTWORD_MEL_WINDOW * HOTWORD_MEL_BANDS);
       embInputData.set(pipeline.melBuffer.subarray(windowStart, windowEnd));
-      const embTensor = new ort.Tensor('float32', embInputData, [1, HOTWORD_MEL_WINDOW, HOTWORD_MEL_BANDS, 1]);
+      const embTensor = new ort.Tensor("float32", embInputData, [1, HOTWORD_MEL_WINDOW, HOTWORD_MEL_BANDS, 1]);
       const embOut = await runSession(embeddingSession, embTensor);
       if (!embOut) return 0;
-
       const embedding = new Float32Array(HOTWORD_EMBEDDING_DIM);
       for (let i = 0; i < HOTWORD_EMBEDDING_DIM; i += 1) {
         embedding[i] = embOut.data[i];
       }
       appendEmbedding(embedding);
     }
-
     if (pipeline.featureLen >= HOTWORD_KEYWORD_FRAMES) {
       const fStart = (pipeline.featureLen - HOTWORD_KEYWORD_FRAMES) * HOTWORD_EMBEDDING_DIM;
       const fEnd = pipeline.featureLen * HOTWORD_EMBEDDING_DIM;
       const kwInputData = new Float32Array(HOTWORD_KEYWORD_FRAMES * HOTWORD_EMBEDDING_DIM);
       kwInputData.set(pipeline.featureBuffer.subarray(fStart, fEnd));
-      const kwTensor = new ort.Tensor('float32', kwInputData, [1, HOTWORD_KEYWORD_FRAMES, HOTWORD_EMBEDDING_DIM]);
+      const kwTensor = new ort.Tensor("float32", kwInputData, [1, HOTWORD_KEYWORD_FRAMES, HOTWORD_EMBEDDING_DIM]);
       const kwOut = await runSession(keywordSession, kwTensor);
       return tensorScore(kwOut);
     }
-
     return 0;
   } catch (_) {
     return 0;
   }
 }
-
 async function processFrameQueue() {
   if (state.processingFrames) return;
   state.processingFrames = true;
@@ -305,46 +272,52 @@ async function processFrameQueue() {
     state.processingFrames = false;
   }
 }
-
 function onAudioProcess(event) {
   if (!state.active) return;
   const inputBuffer = event?.inputBuffer;
-  if (!inputBuffer || typeof inputBuffer.getChannelData !== 'function') return;
+  if (!inputBuffer || typeof inputBuffer.getChannelData !== "function") return;
   const channel = inputBuffer.getChannelData(0);
   if (!(channel instanceof Float32Array) || channel.length === 0) return;
-
   const resampled = resampleToTargetRate(channel, inputBuffer.sampleRate);
   if (resampled.length === 0) return;
-
   writeRingBuffer(resampled);
   state.targetSampleBuffer = concatFloat32(state.targetSampleBuffer, resampled);
-
   while (state.targetSampleBuffer.length >= HOTWORD_TARGET_FRAME_SAMPLES) {
     const frame = state.targetSampleBuffer.slice(0, HOTWORD_TARGET_FRAME_SAMPLES);
     state.targetSampleBuffer = state.targetSampleBuffer.slice(HOTWORD_TARGET_FRAME_SAMPLES);
     state.pendingFrames.push(frame);
   }
-
   void processFrameQueue();
 }
-
 function stopOnnxNodes(options = {}) {
   const closeContext = Boolean(options && options.closeContext);
   if (state.processorNode) {
     state.processorNode.onaudioprocess = null;
-    try { state.processorNode.disconnect(); } catch (_) {}
+    try {
+      state.processorNode.disconnect();
+    } catch (_) {
+    }
     state.processorNode = null;
   }
   if (state.sourceNode) {
-    try { state.sourceNode.disconnect(); } catch (_) {}
+    try {
+      state.sourceNode.disconnect();
+    } catch (_) {
+    }
     state.sourceNode = null;
   }
   if (state.sinkNode) {
-    try { state.sinkNode.disconnect(); } catch (_) {}
+    try {
+      state.sinkNode.disconnect();
+    } catch (_) {
+    }
     state.sinkNode = null;
   }
   if (closeContext && state.audioCtx && state.audioCtx !== state.preferredAudioCtx) {
-    try { state.audioCtx.close(); } catch (_) {}
+    try {
+      state.audioCtx.close();
+    } catch (_) {
+    }
     state.audioCtx = null;
   }
   state.targetSampleBuffer = new Float32Array(0);
@@ -354,33 +327,28 @@ function stopOnnxNodes(options = {}) {
   resetPipeline();
   resetRingBuffer();
 }
-
 async function startOnnxMonitor(stream) {
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextCtor) return false;
-
   resetPipeline();
   resetRingBuffer();
   state.micStream = stream;
-
   let audioCtx = state.preferredAudioCtx;
-  if (!audioCtx || audioCtx.state === 'closed') {
+  if (!audioCtx || audioCtx.state === "closed") {
     audioCtx = state.audioCtx;
   }
-  if (!audioCtx || audioCtx.state === 'closed') {
+  if (!audioCtx || audioCtx.state === "closed") {
     audioCtx = new AudioContextCtor();
   }
   const sourceNode = audioCtx.createMediaStreamSource(stream);
-  if (typeof audioCtx.createScriptProcessor !== 'function') {
-    throw new Error('ScriptProcessor is not supported in this browser');
+  if (typeof audioCtx.createScriptProcessor !== "function") {
+    throw new Error("ScriptProcessor is not supported in this browser");
   }
-
   const processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
-  const sinkNode = typeof audioCtx.createGain === 'function' ? audioCtx.createGain() : null;
+  const sinkNode = typeof audioCtx.createGain === "function" ? audioCtx.createGain() : null;
   if (sinkNode) {
     sinkNode.gain.value = 0;
   }
-
   processorNode.onaudioprocess = onAudioProcess;
   sourceNode.connect(processorNode);
   if (sinkNode) {
@@ -389,47 +357,39 @@ async function startOnnxMonitor(stream) {
   } else {
     processorNode.connect(audioCtx.destination);
   }
-
   state.audioCtx = audioCtx;
   state.sourceNode = sourceNode;
   state.processorNode = processorNode;
   state.sinkNode = sinkNode;
-
-  if (audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') {
-    await audioCtx.resume().catch(() => {});
+  if (audioCtx.state === "suspended" && typeof audioCtx.resume === "function") {
+    await audioCtx.resume().catch(() => {
+    });
   }
-  // iOS can keep a new AudioContext suspended when resumed outside a direct
-  // gesture. Never report hotword as active unless audio is actually running.
-  if (audioCtx.state !== 'running') {
-    throw new Error(`hotword audio context is ${audioCtx.state || 'unavailable'}`);
+  if (audioCtx.state !== "running") {
+    throw new Error(`hotword audio context is ${audioCtx.state || "unavailable"}`);
   }
   return true;
 }
-
 async function initOnnxModel() {
   await loadOrt();
   if (ort.env?.wasm) {
     ort.env.wasm.wasmPaths = resolveOrtWasmPaths();
     ort.env.wasm.numThreads = 1;
   }
-
   const sessionOptions = {
-    executionProviders: ['wasm'],
-    graphOptimizationLevel: 'all',
+    executionProviders: ["wasm"],
+    graphOptimizationLevel: "all"
   };
-
   const melSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.mel, sessionOptions);
   const embeddingSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.embedding, sessionOptions);
   const keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, sessionOptions);
-
   state.model = {
     melSession,
     embeddingSession,
-    keywordSession,
+    keywordSession
   };
 }
-
-export async function initHotword(options = {}) {
+async function initHotword(options = {}) {
   const force = Boolean(options && options.force);
   if (state.initialized && !force) return state.available;
   if (force) {
@@ -437,50 +397,46 @@ export async function initHotword(options = {}) {
     stopOnnxNodes({ closeContext: true });
     state.initialized = false;
     state.available = false;
-    state.mode = 'none';
+    state.mode = "none";
     state.mock = null;
     state.model = null;
     state.lastDetectionAt = 0;
   }
-
   state.initialized = true;
   state.threshold = HOTWORD_DEFAULT_THRESHOLD;
-
   const mock = resolveMock();
   if (mock) {
     state.mock = mock;
-    state.mode = 'mock';
+    state.mode = "mock";
     try {
       const ok = await Promise.resolve(mock.init());
       state.available = Boolean(ok);
       if (!state.available) {
-        state.mode = 'none';
+        state.mode = "none";
         state.mock = null;
       }
       return state.available;
     } catch (_) {
       state.available = false;
-      state.mode = 'none';
+      state.mode = "none";
       state.mock = null;
       return false;
     }
   }
-
   try {
     await initOnnxModel();
-    state.mode = 'onnx';
+    state.mode = "onnx";
     state.available = true;
     return true;
   } catch (err) {
     state.available = false;
-    state.mode = 'none';
+    state.mode = "none";
     state.model = null;
-    console.warn('Hotword initialization failed:', err);
+    console.warn("Hotword initialization failed:", err);
     return false;
   }
 }
-
-export async function startHotwordMonitor(micStream) {
+async function startHotwordMonitor(micStream) {
   if (!state.initialized) {
     await initHotword();
   }
@@ -490,8 +446,7 @@ export async function startHotwordMonitor(micStream) {
   if (state.active) {
     return true;
   }
-
-  if (state.mode === 'mock' && state.mock) {
+  if (state.mode === "mock" && state.mock) {
     try {
       state.mock.start(micStream, () => emitHotwordDetected());
       state.active = true;
@@ -501,11 +456,9 @@ export async function startHotwordMonitor(micStream) {
       return false;
     }
   }
-
-  if (state.mode !== 'onnx') {
+  if (state.mode !== "onnx") {
     return false;
   }
-
   try {
     const started = await startOnnxMonitor(micStream);
     state.active = Boolean(started);
@@ -513,49 +466,47 @@ export async function startHotwordMonitor(micStream) {
   } catch (err) {
     stopOnnxNodes();
     state.active = false;
-    console.warn('Hotword monitor start failed:', err);
+    console.warn("Hotword monitor start failed:", err);
     return false;
   }
 }
-
-export function stopHotwordMonitor() {
+function stopHotwordMonitor() {
   if (!state.active) return;
-  if (state.mode === 'mock' && state.mock) {
+  if (state.mode === "mock" && state.mock) {
     try {
       state.mock.stop();
-    } catch (_) {}
+    } catch (_) {
+    }
   }
-  if (state.mode === 'onnx') {
+  if (state.mode === "onnx") {
     stopOnnxNodes({ closeContext: false });
   }
   state.active = false;
 }
-
-export function isHotwordActive() {
+function isHotwordActive() {
   return state.active;
 }
-
-export function onHotwordDetected(callback) {
-  if (typeof callback !== 'function') {
-    return () => {};
+function onHotwordDetected(callback) {
+  if (typeof callback !== "function") {
+    return () => {
+    };
   }
   listeners.add(callback);
   return () => {
     listeners.delete(callback);
   };
 }
-
-export function setHotwordThreshold(value) {
+function setHotwordThreshold(value) {
   state.threshold = clampNumber(value, 0, 1);
-  if (state.mode === 'mock' && state.mock && typeof state.mock.setThreshold === 'function') {
+  if (state.mode === "mock" && state.mock && typeof state.mock.setThreshold === "function") {
     try {
       state.mock.setThreshold(state.threshold);
-    } catch (_) {}
+    } catch (_) {
+    }
   }
   return state.threshold;
 }
-
-export function getPreRollAudio() {
+function getPreRollAudio() {
   if (ringBuffer.filled === 0) return new Float32Array(0);
   const size = ringBuffer.buffer.length;
   const len = Math.min(ringBuffer.filled, size);
@@ -570,19 +521,30 @@ export function getPreRollAudio() {
   }
   return out;
 }
-
-export function getHotwordMicStream() {
+function getHotwordMicStream() {
   return state.micStream || null;
 }
-
-export function setHotwordAudioContext(audioCtx) {
-  if (!audioCtx || typeof audioCtx !== 'object') {
+function setHotwordAudioContext(audioCtx) {
+  if (!audioCtx || typeof audioCtx !== "object") {
     state.preferredAudioCtx = null;
     return;
   }
-  const hasRequiredApis = typeof audioCtx.createMediaStreamSource === 'function'
-    && typeof audioCtx.createScriptProcessor === 'function';
+  const hasRequiredApis = typeof audioCtx.createMediaStreamSource === "function" && typeof audioCtx.createScriptProcessor === "function";
   if (!hasRequiredApis) return;
   state.preferredAudioCtx = audioCtx;
   state.audioCtx = audioCtx;
 }
+export {
+  getHotwordMicStream,
+  getPreRollAudio,
+  initHotword,
+  isHotwordActive,
+  onHotwordDetected,
+  resolveOrtWasmPaths,
+  setHotwordAudioContext,
+  setHotwordThreshold,
+  startHotwordMonitor,
+  stopHotwordMonitor
+};
+
+//# sourceMappingURL=hotword.js.map

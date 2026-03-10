@@ -1,9 +1,7 @@
-import * as env from './app-env.js';
-import * as context from './app-context.js';
-
+import * as env from "./app-env.js";
+import * as context from "./app-context.js";
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
-
 const showStatus = (...args) => refs.showStatus(...args);
 const renderEdgeTopModelButtons = (...args) => refs.renderEdgeTopModelButtons(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
@@ -15,9 +13,6 @@ const parseOptionalBoolean = (...args) => refs.parseOptionalBoolean(...args);
 const normalizeCompanionRuntimeState = (...args) => refs.normalizeCompanionRuntimeState(...args);
 const getTTSAudioContext = (...args) => refs.getTTSAudioContext(...args);
 const interactionConversationMode = (...args) => refs.interactionConversationMode(...args);
-
-// --- Block stripping & TTS infrastructure ---
-
 const _canvasFileBlockRe = /:::\s*file\s*\{[^}]*\}\s*[\s\S]*?:::/gi;
 const _partialBlockRe = /:::\s*file\s*\{[^}]*\}[\s\S]*$/gi;
 const _canvasFileMarkerRefRe = /\[file:[^\]]*\]/g;
@@ -37,70 +32,79 @@ const _boldUnderscoreRe = /__([^_]+)__/g;
 const _italicUnderscoreRe = /_([^_\s][^_]*?)_/g;
 const _strikethroughRe = /~~([^~]+)~~/g;
 const _htmlTagRe = /<[^>]+>/g;
-
-// Strip complete and partial :::file{} blocks from text.
-export function stripBlocks(text) {
-  text = text.replace(_canvasFileBlockRe, ' ');
-  text = text.replace(_partialBlockRe, ' ');
-  text = text.replace(_canvasFileMarkerRefRe, ' ');
-  text = text.replace(_canvasDirectiveOpenRe, ' ');
-  text = text.replace(_canvasDirectiveCloseRe, ' ');
+function stripBlocks(text) {
+  text = text.replace(_canvasFileBlockRe, " ");
+  text = text.replace(_partialBlockRe, " ");
+  text = text.replace(_canvasFileMarkerRefRe, " ");
+  text = text.replace(_canvasDirectiveOpenRe, " ");
+  text = text.replace(_canvasDirectiveCloseRe, " ");
   return text;
 }
-
-export function stripMarkdownForSpeech(text) {
-  text = text.replace(_codeFenceRe, (m) => m.replace(/```/g, ''));
-  text = text.replace(_inlineCodeRe, '$1');
-  text = text.replace(_inlineImageRe, '$1');
-  text = text.replace(_inlineLinkRe, '$1');
-  text = text.replace(_headingRe, '');
-  text = text.replace(_blockquoteRe, '');
-  text = text.replace(_listMarkerRe, '');
-  text = text.replace(_strikethroughRe, '$1');
-  text = text.replace(_boldAsteriskRe, '$1');
-  text = text.replace(_italicAsteriskRe, '$1');
-  text = text.replace(_boldUnderscoreRe, '$1');
-  text = text.replace(_italicUnderscoreRe, '$1');
-  text = text.replace(_htmlTagRe, '');
-  text = text.replace(/\|/g, ' ');
-  text = text.replace(/[ \t]+\n/g, '\n');
-  text = text.replace(/\n+/g, ' ');
-  text = text.replace(/\s{2,}/g, ' ');
+function stripMarkdownForSpeech(text) {
+  text = text.replace(_codeFenceRe, (m) => m.replace(/```/g, ""));
+  text = text.replace(_inlineCodeRe, "$1");
+  text = text.replace(_inlineImageRe, "$1");
+  text = text.replace(_inlineLinkRe, "$1");
+  text = text.replace(_headingRe, "");
+  text = text.replace(_blockquoteRe, "");
+  text = text.replace(_listMarkerRe, "");
+  text = text.replace(_strikethroughRe, "$1");
+  text = text.replace(_boldAsteriskRe, "$1");
+  text = text.replace(_italicAsteriskRe, "$1");
+  text = text.replace(_boldUnderscoreRe, "$1");
+  text = text.replace(_italicUnderscoreRe, "$1");
+  text = text.replace(_htmlTagRe, "");
+  text = text.replace(/\|/g, " ");
+  text = text.replace(/[ \t]+\n/g, "\n");
+  text = text.replace(/\n+/g, " ");
+  text = text.replace(/\s{2,}/g, " ");
   return text.trim();
 }
-
-// Clean markdown for overlay display: strip blocks and lang tags.
-export function cleanForOverlay(markdown) {
-  return stripBlocks(markdown).replace(_langTagRe, '').trim();
+function cleanForOverlay(markdown) {
+  return stripBlocks(markdown).replace(_langTagRe, "").trim();
 }
-
-export function inferTTSLanguage(text) {
-  const sample = String(text || '').trim();
-  if (!sample) return '';
-  if (/[äöüßÄÖÜ]/.test(sample)) return 'de';
-  const tokens = sample
-    .toLowerCase()
-    .replace(/[^a-zA-Z\u00c0-\u017f\s]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  if (tokens.length === 0) return '';
-  const germanHints = new Set([
-    'und', 'ist', 'nicht', 'ich', 'du', 'wir', 'sie', 'mit', 'fuer', 'für',
-    'auf', 'das', 'der', 'die', 'den', 'dem', 'ein', 'eine', 'bitte', 'danke',
+function inferTTSLanguage(text) {
+  const sample = String(text || "").trim();
+  if (!sample) return "";
+  if (/[äöüßÄÖÜ]/.test(sample)) return "de";
+  const tokens = sample.toLowerCase().replace(/[^a-zA-Z\u00c0-\u017f\s]/g, " ").split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return "";
+  const germanHints = /* @__PURE__ */ new Set([
+    "und",
+    "ist",
+    "nicht",
+    "ich",
+    "du",
+    "wir",
+    "sie",
+    "mit",
+    "fuer",
+    "für",
+    "auf",
+    "das",
+    "der",
+    "die",
+    "den",
+    "dem",
+    "ein",
+    "eine",
+    "bitte",
+    "danke"
   ]);
   let hits = 0;
   for (const token of tokens) {
     if (germanHints.has(token)) hits += 1;
   }
-  if (hits >= 2 && hits / tokens.length >= 0.08) return 'de';
-  return '';
+  if (hits >= 2 && hits / tokens.length >= 0.08) return "de";
+  return "";
 }
-
-// Extract speakable text for TTS (everything except blocks).
-export function extractTTSText(markdown) {
+function extractTTSText(markdown) {
   let text = stripBlocks(markdown);
-  let lang = '';
-  text = text.replace(_langTagRe, (_, l) => { if (!lang) lang = l.toLowerCase(); return ''; });
+  let lang = "";
+  text = text.replace(_langTagRe, (_, l) => {
+    if (!lang) lang = l.toLowerCase();
+    return "";
+  });
   text = stripMarkdownForSpeech(text);
   if (!lang) {
     lang = inferTTSLanguage(text);
@@ -108,11 +112,9 @@ export function extractTTSText(markdown) {
   text = text.trim();
   return { ttsText: text, ttsLang: lang };
 }
-
-
-export class SentenceChunker {
+class SentenceChunker {
   constructor(onSentence) {
-    this._buffer = '';
+    this._buffer = "";
     this._onSentence = onSentence;
     this._timer = null;
   }
@@ -121,7 +123,10 @@ export class SentenceChunker {
     this._tryEmit();
   }
   _tryEmit() {
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
     const boundaries = /([.!?])\s+/g;
     let lastIndex = 0;
     let match;
@@ -142,18 +147,23 @@ export class SentenceChunker {
     }
   }
   flush() {
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
     const sentence = this._buffer.trim();
-    this._buffer = '';
+    this._buffer = "";
     if (sentence) this._onSentence(sentence);
   }
   reset() {
-    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    this._buffer = '';
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
+    this._buffer = "";
   }
 }
-
-export class TTSPlayer {
+class TTSPlayer {
   constructor() {
     this._queue = [];
     this._playing = false;
@@ -177,7 +187,10 @@ export class TTSPlayer {
     this._stopped = true;
     this._queue = [];
     if (this._currentSource) {
-      try { this._currentSource.stop(); } catch (_) {}
+      try {
+        this._currentSource.stop();
+      } catch (_) {
+      }
       this._currentSource = null;
     }
     this._playing = false;
@@ -210,7 +223,7 @@ export class TTSPlayer {
     const wavData = this._queue.shift();
     try {
       const ctx = this._ensureCtx();
-      if (ctx.state === 'suspended') await ctx.resume();
+      if (ctx.state === "suspended") await ctx.resume();
       const audioBuffer = await ctx.decodeAudioData(wavData.slice(0));
       if (this._stopped) return;
       const source = ctx.createBufferSource();
@@ -227,25 +240,24 @@ export class TTSPlayer {
         if (!this._stopped) this._playNext();
       };
     } catch (err) {
-      console.warn('TTS playback error:', err);
+      console.warn("TTS playback error:", err);
       this._currentSource = null;
       if (!this._stopped) this._playNext();
     }
   }
 }
-
 let ttsPlayer = null;
 let ttsSentenceChunker = null;
 state.ttsEnabled = false;
-let ttsLastSpeakText = '';
-let ttsSpeakLang = 'en';
+let ttsLastSpeakText = "";
+let ttsSpeakLang = "en";
 let hotwordSyncInFlight = false;
 let hotwordResyncQueued = false;
 let hotwordInitAttempted = false;
 let hotwordUnsubscribe = null;
 let hotwordRetryTimer = null;
 const HOTWORD_RETRY_MS = 800;
-export function readTTSSilentPreference() {
+function readTTSSilentPreference() {
   try {
     const value = window.localStorage.getItem(TTS_SILENT_STORAGE_KEY);
     const parsed = parseOptionalBoolean(value);
@@ -254,14 +266,13 @@ export function readTTSSilentPreference() {
     return false;
   }
 }
-
-export function persistTTSSilentPreference(silent) {
+function persistTTSSilentPreference(silent) {
   try {
-    window.localStorage.setItem(TTS_SILENT_STORAGE_KEY, silent ? 'true' : 'false');
-  } catch (_) {}
+    window.localStorage.setItem(TTS_SILENT_STORAGE_KEY, silent ? "true" : "false");
+  } catch (_) {
+  }
 }
-
-export function readYoloModePreference() {
+function readYoloModePreference() {
   try {
     const value = window.localStorage.getItem(YOLO_MODE_STORAGE_KEY);
     const parsed = parseOptionalBoolean(value);
@@ -270,14 +281,13 @@ export function readYoloModePreference() {
     return false;
   }
 }
-
-export function persistYoloModePreference(enabled) {
+function persistYoloModePreference(enabled) {
   try {
-    window.localStorage.setItem(YOLO_MODE_STORAGE_KEY, enabled ? 'true' : 'false');
-  } catch (_) {}
+    window.localStorage.setItem(YOLO_MODE_STORAGE_KEY, enabled ? "true" : "false");
+  } catch (_) {
+  }
 }
-
-export function readSomedayReviewNudgePreference() {
+function readSomedayReviewNudgePreference() {
   try {
     const value = window.localStorage.getItem(SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY);
     const parsed = parseOptionalBoolean(value);
@@ -286,48 +296,44 @@ export function readSomedayReviewNudgePreference() {
     return true;
   }
 }
-
-export function persistSomedayReviewNudgePreference(enabled) {
+function persistSomedayReviewNudgePreference(enabled) {
   try {
-    window.localStorage.setItem(SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false');
-  } catch (_) {}
+    window.localStorage.setItem(SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
+  } catch (_) {
+  }
 }
-
-export function readSomedayReviewNudgeLastShownAt() {
+function readSomedayReviewNudgeLastShownAt() {
   try {
-    const raw = Number(window.localStorage.getItem(SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY) || '0');
+    const raw = Number(window.localStorage.getItem(SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY) || "0");
     return Number.isFinite(raw) && raw > 0 ? raw : 0;
   } catch (_) {
     return 0;
   }
 }
-
-export function persistSomedayReviewNudgeLastShownAt(value = Date.now()) {
+function persistSomedayReviewNudgeLastShownAt(value = Date.now()) {
   try {
     window.localStorage.setItem(SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, String(Math.max(0, Number(value) || 0)));
-  } catch (_) {}
+  } catch (_) {
+  }
 }
-
-export function setSomedayReviewNudgeEnabled(enabled, { persist = true } = {}) {
+function setSomedayReviewNudgeEnabled(enabled, { persist = true } = {}) {
   const next = Boolean(enabled);
   state.somedayReviewNudgeEnabled = next;
   if (persist) persistSomedayReviewNudgePreference(next);
 }
-
-export function setYoloModeLocal(enabled, { persist = true, render = true } = {}) {
+function setYoloModeLocal(enabled, { persist = true, render = true } = {}) {
   const next = Boolean(enabled);
   if (state.yoloMode === next) return;
   state.yoloMode = next;
   if (persist) persistYoloModePreference(next);
   if (render) renderEdgeTopModelButtons();
 }
-
-export async function setYoloMode(enabled) {
+async function setYoloMode(enabled) {
   const next = Boolean(enabled);
-  const resp = await fetch(apiURL('runtime/yolo'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: next }),
+  const resp = await fetch(apiURL("runtime/yolo"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: next })
   });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
@@ -335,41 +341,34 @@ export async function setYoloMode(enabled) {
   }
   setYoloModeLocal(next, { persist: true, render: true });
 }
-
-export function toggleYoloMode() {
+function toggleYoloMode() {
   if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return;
   const next = !Boolean(state.yoloMode);
-  setYoloMode(next)
-    .then(() => {
-      showStatus(next ? 'autonomous policy on' : 'autonomous policy off');
-    })
-    .catch((err) => {
-      showStatus(`autonomous policy update failed: ${String(err?.message || err || 'unknown error')}`);
-      renderEdgeTopModelButtons();
-    });
+  setYoloMode(next).then(() => {
+    showStatus(next ? "autonomous policy on" : "autonomous policy off");
+  }).catch((err) => {
+    showStatus(`autonomous policy update failed: ${String(err?.message || err || "unknown error")}`);
+    renderEdgeTopModelButtons();
+  });
 }
-
-export function canSpeakTTS() {
+function canSpeakTTS() {
   return Boolean(state.ttsEnabled) && !Boolean(state.ttsSilent);
 }
-
-export function clearHotwordRetry() {
+function clearHotwordRetry() {
   if (hotwordRetryTimer !== null) {
     window.clearTimeout(hotwordRetryTimer);
     hotwordRetryTimer = null;
   }
 }
-
-export function scheduleHotwordRetry() {
+function scheduleHotwordRetry() {
   if (hotwordRetryTimer !== null) return;
   hotwordRetryTimer = window.setTimeout(() => {
     hotwordRetryTimer = null;
     requestHotwordSync();
   }, HOTWORD_RETRY_MS);
 }
-
-export function canStartHotwordMonitor() {
-  const mode = syncVoiceLifecycle('can-start-hotword');
+function canStartHotwordMonitor() {
+  const mode = syncVoiceLifecycle("can-start-hotword");
   if (!state.hotwordEnabled) return false;
   if (!state.liveSessionActive) return false;
   if (!canSpeakTTS()) return false;
@@ -379,8 +378,7 @@ export function canStartHotwordMonitor() {
   if (isStopCapableLifecycle(mode)) return false;
   return true;
 }
-
-export async function syncHotwordMonitor() {
+async function syncHotwordMonitor() {
   if (!state.hotwordEnabled || !canStartHotwordMonitor()) {
     clearHotwordRetry();
     if (isHotwordActive()) {
@@ -406,18 +404,14 @@ export async function syncHotwordMonitor() {
     clearHotwordRetry();
     return;
   }
-  const errName = String(startErr?.name || '').toLowerCase();
-  const errMsg = String(startErr?.message || '').toLowerCase();
-  const permissionDenied = errName.includes('notallowed')
-    || errName.includes('permission')
-    || errMsg.includes('permission denied')
-    || errMsg.includes('notallowederror');
+  const errName = String(startErr?.name || "").toLowerCase();
+  const errMsg = String(startErr?.message || "").toLowerCase();
+  const permissionDenied = errName.includes("notallowed") || errName.includes("permission") || errMsg.includes("permission denied") || errMsg.includes("notallowederror");
   if (!permissionDenied) {
     scheduleHotwordRetry();
   }
 }
-
-export function requestHotwordSync() {
+function requestHotwordSync() {
   if (hotwordSyncInFlight) {
     hotwordResyncQueued = true;
     return;
@@ -431,9 +425,8 @@ export function requestHotwordSync() {
     }
   });
 }
-
-export function configureHotwordLifecycle() {
-  if (typeof hotwordUnsubscribe === 'function') return;
+function configureHotwordLifecycle() {
+  if (typeof hotwordUnsubscribe === "function") return;
   hotwordUnsubscribe = onHotwordDetected(() => {
     if (!canStartHotwordMonitor()) return;
     stopHotwordMonitor();
@@ -442,12 +435,10 @@ export function configureHotwordLifecycle() {
     updateAssistantActivityIndicator();
   });
 }
-
-export async function initHotwordLifecycle() {
+async function initHotwordLifecycle() {
   return initHotwordLifecycleWithOptions();
 }
-
-export async function initHotwordLifecycleWithOptions(options = {}) {
+async function initHotwordLifecycleWithOptions(options = {}) {
   const force = Boolean(options && options.force);
   if (hotwordInitAttempted && !force) return state.hotwordEnabled;
   if (force) {
@@ -463,66 +454,64 @@ export async function initHotwordLifecycleWithOptions(options = {}) {
       setHotwordThreshold(0.5);
       configureHotwordLifecycle();
     } else {
-      console.warn('Hotword unavailable; continuing without wake-word activation.');
+      console.warn("Hotword unavailable; continuing without wake-word activation.");
     }
   } catch (err) {
     state.hotwordEnabled = false;
-    console.warn('Hotword initialization error:', err);
+    console.warn("Hotword initialization error:", err);
   }
   requestHotwordSync();
   return state.hotwordEnabled;
 }
-
-export function applyLiveSessionStateSnapshot(snapshot = null) {
-  const nextSnapshot = snapshot && typeof snapshot === 'object'
-    ? snapshot
-    : getLiveSessionSnapshot();
+function applyLiveSessionStateSnapshot(snapshot = null) {
+  const nextSnapshot = snapshot && typeof snapshot === "object" ? snapshot : getLiveSessionSnapshot();
   state.liveSessionActive = Boolean(nextSnapshot.liveSessionActive);
-  state.liveSessionMode = String(nextSnapshot.liveSessionMode || '').trim().toLowerCase();
+  state.liveSessionMode = String(nextSnapshot.liveSessionMode || "").trim().toLowerCase();
   state.interaction.conversation = interactionConversationMode();
   state.liveSessionHotword = String(nextSnapshot.liveSessionHotword || LIVE_SESSION_HOTWORD_DEFAULT).trim() || LIVE_SESSION_HOTWORD_DEFAULT;
   state.liveSessionDialogueListenActive = Boolean(nextSnapshot.liveSessionDialogueListenActive);
   state.liveSessionDialogueListenTimer = nextSnapshot.liveSessionDialogueListenTimer ?? null;
   requestHotwordSync();
 }
-
-export function isDialogueLiveSession() {
+function isDialogueLiveSession() {
   return state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE;
 }
-
-export function isMeetingLiveSession() {
+function isMeetingLiveSession() {
   return state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_MEETING;
 }
-
-export function liveSessionStatusSummary() {
-  if (!state.liveSessionActive) return '';
+function liveSessionStatusSummary() {
+  if (!state.liveSessionActive) return "";
   if (isDialogueLiveSession()) {
-    const lifecycle = syncVoiceLifecycle('live-dialogue-summary');
-    if (lifecycle === VOICE_LIFECYCLE.TTS_PLAYING) return 'Dialogue • Talking';
-    if (lifecycle === VOICE_LIFECYCLE.ASSISTANT_WORKING || lifecycle === VOICE_LIFECYCLE.AWAITING_TURN) return 'Dialogue • Thinking';
-    return 'Dialogue • Listening';
+    const lifecycle = syncVoiceLifecycle("live-dialogue-summary");
+    if (lifecycle === VOICE_LIFECYCLE.TTS_PLAYING) return "Dialogue • Talking";
+    if (lifecycle === VOICE_LIFECYCLE.ASSISTANT_WORKING || lifecycle === VOICE_LIFECYCLE.AWAITING_TURN) return "Dialogue • Thinking";
+    return "Dialogue • Listening";
   }
   const runtimeState = normalizeCompanionRuntimeState(state.companionRuntimeState);
-  if (runtimeState === COMPANION_RUNTIME_STATES.TALKING) return 'Meeting • Talking';
-  if (runtimeState === COMPANION_RUNTIME_STATES.THINKING) return 'Meeting • Thinking';
-  if (runtimeState === COMPANION_RUNTIME_STATES.ERROR) return 'Meeting • Error';
-  if (runtimeState === COMPANION_RUNTIME_STATES.LISTENING) return 'Meeting • Listening';
-  return 'Meeting • Quiet';
+  if (runtimeState === COMPANION_RUNTIME_STATES.TALKING) return "Meeting • Talking";
+  if (runtimeState === COMPANION_RUNTIME_STATES.THINKING) return "Meeting • Thinking";
+  if (runtimeState === COMPANION_RUNTIME_STATES.ERROR) return "Meeting • Error";
+  if (runtimeState === COMPANION_RUNTIME_STATES.LISTENING) return "Meeting • Listening";
+  return "Meeting • Quiet";
 }
-
-export function stopTTSPlayback() {
-  if (ttsPlayer) { ttsPlayer.stop(); ttsPlayer = null; }
-  if (ttsSentenceChunker) { ttsSentenceChunker.reset(); ttsSentenceChunker = null; }
-  ttsLastSpeakText = '';
-  ttsSpeakLang = 'en';
+function stopTTSPlayback() {
+  if (ttsPlayer) {
+    ttsPlayer.stop();
+    ttsPlayer = null;
+  }
+  if (ttsSentenceChunker) {
+    ttsSentenceChunker.reset();
+    ttsSentenceChunker = null;
+  }
+  ttsLastSpeakText = "";
+  ttsSpeakLang = "en";
   if (state.ttsPlaying) {
     state.ttsPlaying = false;
     updateAssistantActivityIndicator();
   }
   requestHotwordSync();
 }
-
-export function ensureTTSChunker() {
+function ensureTTSChunker() {
   if (!ttsPlayer) {
     ttsPlayer = new TTSPlayer();
   }
@@ -530,29 +519,27 @@ export function ensureTTSChunker() {
   ttsSentenceChunker = new SentenceChunker((sentence) => {
     const ws = state.chatWs;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'tts_speak', text: sentence, lang: ttsSpeakLang }));
+      ws.send(JSON.stringify({ type: "tts_speak", text: sentence, lang: ttsSpeakLang }));
     }
   });
 }
-
-export function queueTTSDiff(diffText) {
+function queueTTSDiff(diffText) {
   if (!canSpeakTTS()) return;
-  const fragment = String(diffText || '').trim();
+  const fragment = String(diffText || "").trim();
   if (!fragment) return;
   ensureTTSChunker();
   ttsSentenceChunker.add(fragment);
 }
-
-export function computeTTSDiff(nextFullText, hintedDeltaText = '') {
-  const next = String(nextFullText || '');
-  const hinted = String(hintedDeltaText || '');
+function computeTTSDiff(nextFullText, hintedDeltaText = "") {
+  const next = String(nextFullText || "");
+  const hinted = String(hintedDeltaText || "");
   if (hinted.trim()) {
     ttsLastSpeakText = next;
     return hinted;
   }
   if (!next || next === ttsLastSpeakText) {
     ttsLastSpeakText = next;
-    return '';
+    return "";
   }
   if (next.startsWith(ttsLastSpeakText)) {
     const suffix = next.slice(ttsLastSpeakText.length);
@@ -561,31 +548,71 @@ export function computeTTSDiff(nextFullText, hintedDeltaText = '') {
   }
   if (ttsLastSpeakText.startsWith(next)) {
     ttsLastSpeakText = next;
-    return '';
+    return "";
   }
   ttsLastSpeakText = next;
   return next;
 }
-
-export function enqueueTTSAudio(audioData) {
+function enqueueTTSAudio(audioData) {
   if (!canSpeakTTS()) return;
   if (!ttsPlayer) ttsPlayer = new TTSPlayer();
   ttsPlayer.enqueue(audioData);
 }
-
-export function setTTSSpeakLang(lang) {
-  const next = String(lang || '').trim();
+function setTTSSpeakLang(lang) {
+  const next = String(lang || "").trim();
   if (next) ttsSpeakLang = next;
 }
-
-export function getTTSLastSpeakText() {
+function getTTSLastSpeakText() {
   return ttsLastSpeakText;
 }
-
-export function flushTTSChunker() {
+function flushTTSChunker() {
   if (ttsSentenceChunker) ttsSentenceChunker.flush();
 }
-
-export function hasTTSPlayer() {
+function hasTTSPlayer() {
   return Boolean(ttsPlayer);
 }
+export {
+  SentenceChunker,
+  TTSPlayer,
+  applyLiveSessionStateSnapshot,
+  canSpeakTTS,
+  canStartHotwordMonitor,
+  cleanForOverlay,
+  clearHotwordRetry,
+  computeTTSDiff,
+  configureHotwordLifecycle,
+  enqueueTTSAudio,
+  ensureTTSChunker,
+  extractTTSText,
+  flushTTSChunker,
+  getTTSLastSpeakText,
+  hasTTSPlayer,
+  inferTTSLanguage,
+  initHotwordLifecycle,
+  initHotwordLifecycleWithOptions,
+  isDialogueLiveSession,
+  isMeetingLiveSession,
+  liveSessionStatusSummary,
+  persistSomedayReviewNudgeLastShownAt,
+  persistSomedayReviewNudgePreference,
+  persistTTSSilentPreference,
+  persistYoloModePreference,
+  queueTTSDiff,
+  readSomedayReviewNudgeLastShownAt,
+  readSomedayReviewNudgePreference,
+  readTTSSilentPreference,
+  readYoloModePreference,
+  requestHotwordSync,
+  scheduleHotwordRetry,
+  setSomedayReviewNudgeEnabled,
+  setTTSSpeakLang,
+  setYoloMode,
+  setYoloModeLocal,
+  stopTTSPlayback,
+  stripBlocks,
+  stripMarkdownForSpeech,
+  syncHotwordMonitor,
+  toggleYoloMode
+};
+
+//# sourceMappingURL=app-tts.js.map

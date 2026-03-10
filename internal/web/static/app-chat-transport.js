@@ -1,9 +1,7 @@
-import * as env from './app-env.js';
-import * as context from './app-context.js';
-
+import * as env from "./app-env.js";
+import * as context from "./app-context.js";
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, resolveCanvasApprovalRequest, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
-
 const showStatus = (...args) => refs.showStatus(...args);
 const renderEdgeTopModelButtons = (...args) => refs.renderEdgeTopModelButtons(...args);
 const renderEdgeTopProjects = (...args) => refs.renderEdgeTopProjects(...args);
@@ -88,46 +86,45 @@ const maybeHandleInlineBugReport = (...args) => refs.maybeHandleInlineBugReport(
 const openSidebarItem = (...args) => refs.openSidebarItem(...args);
 const loadWorkspaceBrowserPath = (...args) => refs.loadWorkspaceBrowserPath(...args);
 const openWorkspaceSidebarFile = (...args) => refs.openWorkspaceSidebarFile(...args);
-
-export function closeChatWs() {
+function closeChatWs() {
   state.chatWsToken += 1;
   state.chatWsLastMessageAt = 0;
   if (state.chatWs) {
-    try { state.chatWs.close(); } catch (_) {}
+    try {
+      state.chatWs.close();
+    } catch (_) {
+    }
   }
   state.chatWs = null;
 }
-
-export function sendChatWsJSON(payload) {
+function sendChatWsJSON(payload) {
   const ws = state.chatWs;
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(payload));
   return true;
 }
-
-export function sendCanvasPositionEvent(anchor, options = {}) {
+function sendCanvasPositionEvent(anchor, options = {}) {
   const cursor = buildCursorPayload(anchor);
   if (!cursor) return false;
   const payload = {
-    type: 'canvas_position',
+    type: "canvas_position",
     cursor,
-    gesture: String(options?.gesture || 'tap').trim().toLowerCase() || 'tap',
-    output_mode: state.ttsSilent ? 'silent' : 'voice',
+    gesture: String(options?.gesture || "tap").trim().toLowerCase() || "tap",
+    output_mode: state.ttsSilent ? "silent" : "voice"
   };
   if (options?.requestResponse) {
     payload.request_response = true;
   }
   return sendChatWsJSON(payload);
 }
-
 function approvalRequestCanvasText(payload) {
-  const description = String(payload?.description || 'Approval required').trim();
-  const action = String(payload?.action || payload?.request_kind || '').trim().replace(/_/g, ' ');
-  const reason = String(payload?.reason || '').trim();
-  const grantRoot = String(payload?.grant_root || '').trim();
-  const lines = ['# Approval required', ''];
+  const description = String(payload?.description || "Approval required").trim();
+  const action = String(payload?.action || payload?.request_kind || "").trim().replace(/_/g, " ");
+  const reason = String(payload?.reason || "").trim();
+  const grantRoot = String(payload?.grant_root || "").trim();
+  const lines = ["# Approval required", ""];
   if (description) {
-    lines.push(description, '');
+    lines.push(description, "");
   }
   if (action) {
     lines.push(`- Action: ${action}`);
@@ -138,59 +135,55 @@ function approvalRequestCanvasText(payload) {
   if (grantRoot) {
     lines.push(`- Scope: ${grantRoot}`);
   }
-  if (lines[lines.length - 1] !== '') {
-    lines.push('');
+  if (lines[lines.length - 1] !== "") {
+    lines.push("");
   }
-  lines.push('Choose **Approve**, **Reject**, or **Cancel** below to continue.');
-  return lines.join('\n');
+  lines.push("Choose **Approve**, **Reject**, or **Cancel** below to continue.");
+  return lines.join("\n");
 }
-
 function renderApprovalRequestCanvas(payload) {
-  const requestID = String(payload?.request_id || '').trim();
+  const requestID = String(payload?.request_id || "").trim();
   if (!requestID) return;
   renderCanvas({
-    kind: 'text_artifact',
+    kind: "text_artifact",
     title: `.tabura/artifacts/tmp/approval-${requestID}.md`,
     text: approvalRequestCanvasText(payload),
     meta: {
       real_artifact: false,
       approval_request: true,
       request_id: requestID,
-      action: String(payload?.action || payload?.request_kind || '').trim(),
-      reason: String(payload?.reason || '').trim(),
-      grant_root: String(payload?.grant_root || '').trim(),
-    },
+      action: String(payload?.action || payload?.request_kind || "").trim(),
+      reason: String(payload?.reason || "").trim(),
+      grant_root: String(payload?.grant_root || "").trim()
+    }
   });
-  showCanvasColumn('canvas-text');
+  showCanvasColumn("canvas-text");
 }
-
-export function openChatWs() {
+function openChatWs() {
   if (!state.chatSessionId) return;
   const turnToken = state.chatWsToken + 1;
   state.chatWsToken = turnToken;
   const targetSessionID = state.chatSessionId;
   const ws = new WebSocket(wsURL(`chat/${encodeURIComponent(targetSessionID)}`));
-  ws.binaryType = 'arraybuffer';
+  ws.binaryType = "arraybuffer";
   state.chatWs = ws;
-
   ws.onopen = () => {
     if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     const isReconnect = state.chatWsHasConnected;
     state.chatWsHasConnected = true;
-    showStatus('connected');
+    showStatus("connected");
     if (state.pendingRuntimeReloadStatus) {
       showStatus(state.pendingRuntimeReloadStatus);
-      state.pendingRuntimeReloadStatus = '';
+      state.pendingRuntimeReloadStatus = "";
     }
     void refreshAssistantActivity();
     if (isReconnect) {
       resetAssistantTurnTracking();
       void loadChatHistory().catch((err) => {
-        appendPlainMessage('system', `History sync failed: ${String(err?.message || err)}`);
+        appendPlainMessage("system", `History sync failed: ${String(err?.message || err)}`);
       });
     }
   };
-
   ws.onmessage = (event) => {
     if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     state.chatWsLastMessageAt = Date.now();
@@ -201,34 +194,35 @@ export function openChatWs() {
     }
     if (event.data instanceof Blob) {
       if (!canSpeakTTS()) return;
-      event.data.arrayBuffer()
-        .then((audioBuffer) => {
-          if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
-          if (!canSpeakTTS()) return;
-          enqueueTTSAudio(audioBuffer);
-        })
-        .catch((err) => {
-          console.warn('TTS blob decode error:', err);
-        });
+      event.data.arrayBuffer().then((audioBuffer) => {
+        if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
+        if (!canSpeakTTS()) return;
+        enqueueTTSAudio(audioBuffer);
+      }).catch((err) => {
+        console.warn("TTS blob decode error:", err);
+      });
       return;
     }
-    if (typeof event.data !== 'string') return;
+    if (typeof event.data !== "string") return;
     let payload = null;
-    try { payload = JSON.parse(event.data); } catch (_) { return; }
+    try {
+      payload = JSON.parse(event.data);
+    } catch (_) {
+      return;
+    }
     if (handleSTTWSMessage(payload)) return;
     try {
       handleChatEvent(payload);
     } catch (err) {
-      console.error('handleChatEvent error:', err);
-      const turnID = String(payload?.turn_id || '').trim();
+      console.error("handleChatEvent error:", err);
+      const turnID = String(payload?.turn_id || "").trim();
       if (turnID) trackAssistantTurnFinished(turnID);
       state.voiceAwaitingTurn = false;
-      appendPlainMessage('system', `Internal error: ${String(err?.message || err)}`);
-      showStatus('error');
+      appendPlainMessage("system", `Internal error: ${String(err?.message || err)}`);
+      showStatus("error");
       updateAssistantActivityIndicator();
     }
   };
-
   ws.onclose = () => {
     if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
     cancelLiveSessionListen();
@@ -243,104 +237,97 @@ export function openChatWs() {
       updateAssistantActivityIndicator();
     }
     state.chatWs = null;
-    showStatus('reconnecting...');
+    showStatus("reconnecting...");
     window.setTimeout(() => {
       if (turnToken !== state.chatWsToken || targetSessionID !== state.chatSessionId) return;
       openChatWs();
     }, 1200);
   };
 }
-
-export function closeCanvasWs() {
+function closeCanvasWs() {
   state.canvasWsToken += 1;
   if (state.canvasWs) {
-    try { state.canvasWs.close(); } catch (_) {}
+    try {
+      state.canvasWs.close();
+    } catch (_) {
+    }
   }
   state.canvasWs = null;
 }
-
-export function assistantMessageUsesCanvasBlocks(text) {
-  const lower = String(text || '').toLowerCase();
-  return lower.includes(':::file{');
+function assistantMessageUsesCanvasBlocks(text) {
+  const lower = String(text || "").toLowerCase();
+  return lower.includes(":::file{");
 }
-
-export function shouldRenderAssistantHistoryInChat(_renderFormat, markdown, plain) {
-  return Boolean(String(markdown || plain || '').trim());
+function shouldRenderAssistantHistoryInChat(_renderFormat, markdown, plain) {
+  return Boolean(String(markdown || plain || "").trim());
 }
-
-export function isVoiceOutputModePayload(payload) {
-  return String(payload?.output_mode || '').trim().toLowerCase() === 'voice';
+function isVoiceOutputModePayload(payload) {
+  return String(payload?.output_mode || "").trim().toLowerCase() === "voice";
 }
-
 function batchItemLabel(item) {
-  const titled = String(item?.item_title || '').trim();
+  const titled = String(item?.item_title || "").trim();
   if (titled) return titled;
   const itemID = Number(item?.item_id || 0);
   if (itemID > 0) return `item ${itemID}`;
-  return 'item';
+  return "item";
 }
-
 function batchItemCounts(items) {
   const counts = { total: 0, running: 0, completed: 0, failed: 0 };
   if (!Array.isArray(items)) return counts;
   items.forEach((item) => {
     counts.total += 1;
-    const status = String(item?.status || '').trim().toLowerCase();
-    if (status === 'completed') counts.completed += 1;
-    else if (status === 'failed') counts.failed += 1;
-    else if (status === 'running') counts.running += 1;
+    const status = String(item?.status || "").trim().toLowerCase();
+    if (status === "completed") counts.completed += 1;
+    else if (status === "failed") counts.failed += 1;
+    else if (status === "running") counts.running += 1;
   });
   return counts;
 }
-
 function batchSummaryLabel(batch, items, fallbackCount = 0) {
-  const batchStatus = String(batch?.status || '').trim().toLowerCase();
+  const batchStatus = String(batch?.status || "").trim().toLowerCase();
   const counts = batchItemCounts(items);
   const total = counts.total || Math.max(0, Number(fallbackCount || 0));
-  if (batchStatus === 'running') {
+  if (batchStatus === "running") {
     if (total > 0) return `batch running: ${total} item(s)`;
-    return 'batch running';
+    return "batch running";
   }
-  if (batchStatus === 'completed') {
+  if (batchStatus === "completed") {
     if (counts.total > 0) return `batch completed: ${counts.completed} completed, ${counts.failed} failed`;
-    return 'batch completed';
+    return "batch completed";
   }
-  if (batchStatus === 'failed') {
+  if (batchStatus === "failed") {
     if (counts.total > 0) return `batch failed: ${counts.completed} completed, ${counts.failed} failed`;
-    return 'batch failed';
+    return "batch failed";
   }
-  if (total === 0) return 'no matching batch items';
-  return 'batch status updated';
+  if (total === 0) return "no matching batch items";
+  return "batch status updated";
 }
-
 function batchProgressMessage(payload) {
-  const batch = payload?.batch && typeof payload.batch === 'object' ? payload.batch : {};
-  const item = payload?.item && typeof payload.item === 'object' ? payload.item : null;
+  const batch = payload?.batch && typeof payload.batch === "object" ? payload.batch : {};
+  const item = payload?.item && typeof payload.item === "object" ? payload.item : null;
   if (item) {
     const label = batchItemLabel(item);
-    const status = String(item?.status || '').trim().toLowerCase() || 'updated';
-    if (status === 'completed') {
+    const status = String(item?.status || "").trim().toLowerCase() || "updated";
+    if (status === "completed") {
       return `Batch update: ${label} completed.`;
     }
-    if (status === 'failed') {
-      const errorMsg = String(item?.error_msg || '').trim();
+    if (status === "failed") {
+      const errorMsg = String(item?.error_msg || "").trim();
       if (errorMsg) return `Batch update: ${label} failed: ${errorMsg}.`;
       return `Batch update: ${label} failed.`;
     }
-    if (status === 'running') {
+    if (status === "running") {
       return `Batch update: ${label} started.`;
     }
     return `Batch update: ${label} ${status}.`;
   }
   return `Batch update: ${batchSummaryLabel(batch, payload?.items, payload?.item_count)}.`;
 }
-
 function batchStatusIsActive(payload) {
-  const batchStatus = String(payload?.batch?.status || '').trim().toLowerCase();
-  if (batchStatus === 'running') return true;
+  const batchStatus = String(payload?.batch?.status || "").trim().toLowerCase();
+  if (batchStatus === "running") return true;
   return payload?.status?.active === true;
 }
-
 function applyBatchStatus(payload) {
   const label = batchSummaryLabel(payload?.batch, payload?.items, payload?.item_count);
   state.batchStatusLabel = label;
@@ -348,28 +335,25 @@ function applyBatchStatus(payload) {
   showStatus(label);
   refreshBatchItemSidebar();
 }
-
 function refreshBatchItemSidebar() {
-  if (state.fileSidebarMode === 'items' && state.prReviewDrawerOpen) {
+  if (state.fileSidebarMode === "items" && state.prReviewDrawerOpen) {
     void loadItemSidebarView(state.itemSidebarView);
     return;
   }
-  void refreshItemSidebarCounts().catch(() => {});
+  void refreshItemSidebarCounts().catch(() => {
+  });
 }
-
-export function handleChatEvent(payload) {
-  const type = String(payload?.type || '').trim();
+function handleChatEvent(payload) {
+  const type = String(payload?.type || "").trim();
   if (!type) return;
-
   if (handleLiveSessionMessage(payload)) {
     applyLiveSessionStateSnapshot();
     renderEdgeTopModelButtons();
     updateAssistantActivityIndicator();
     return;
   }
-
-  if (type === 'companion_state') {
-    const projectKey = String(payload?.project_key || '').trim();
+  if (type === "companion_state") {
+    const projectKey = String(payload?.project_key || "").trim();
     const currentProjectKey = activeProjectKey();
     if (!projectKey || !currentProjectKey || projectKey === currentProjectKey) {
       applyCompanionState(payload);
@@ -377,60 +361,56 @@ export function handleChatEvent(payload) {
     }
     return;
   }
-
-  if (type === 'mode_changed') {
-    const nextMode = String(payload.mode || 'chat').trim().toLowerCase();
+  if (type === "mode_changed") {
+    const nextMode = String(payload.mode || "chat").trim().toLowerCase();
     setChatMode(nextMode);
-    const activeProjectID = String(state.activeProjectId || '').trim();
+    const activeProjectID = String(state.activeProjectId || "").trim();
     if (activeProjectID) {
       const existing = state.projects.find((item) => item.id === activeProjectID);
       if (existing) {
         upsertProject({
           ...existing,
-          chat_mode: nextMode,
+          chat_mode: nextMode
         });
       }
     }
     renderEdgeTopModelButtons();
-    const message = String(payload.message || '').trim();
-    if (message) appendPlainMessage('system', message);
+    const message = String(payload.message || "").trim();
+    if (message) appendPlainMessage("system", message);
     return;
   }
-
-  if (type === 'action') {
-    const action = String(payload.action || '').trim();
-    if (action === 'open_canvas') {
-      showCanvasColumn('canvas-text');
+  if (type === "action") {
+    const action = String(payload.action || "").trim();
+    if (action === "open_canvas") {
+      showCanvasColumn("canvas-text");
       state.canvasActionThisTurn = true;
-    } else if (action === 'open_chat') {
-      // No more canvas - stay on rasa
+    } else if (action === "open_chat") {
     }
     return;
   }
-
-  if (type === 'system_action') {
-    const action = payload && typeof payload.action === 'object' ? payload.action : {};
-    const actionType = String(action?.type || '').trim();
-    if (actionType === 'switch_project') {
-      const projectID = String(action?.project_id || '').trim();
+  if (type === "system_action") {
+    const action = payload && typeof payload.action === "object" ? payload.action : {};
+    const actionType = String(action?.type || "").trim();
+    if (actionType === "switch_project") {
+      const projectID = String(action?.project_id || "").trim();
       if (projectID) {
         void switchProject(projectID);
       }
-    } else if (actionType === 'switch_model') {
-      const projectID = String(action?.project_id || '').trim();
+    } else if (actionType === "switch_model") {
+      const projectID = String(action?.project_id || "").trim();
       const alias = normalizeProjectChatModelAlias(action?.alias);
-      const effortRaw = String(action?.effort || '').trim().toLowerCase();
+      const effortRaw = String(action?.effort || "").trim().toLowerCase();
       if (projectID && alias) {
         const existing = state.projects.find((item) => item.id === projectID);
         if (existing) {
           const nextEffort = normalizeProjectChatModelReasoningEffort(
-            effortRaw || existing.chat_model_reasoning_effort || '',
-            alias,
+            effortRaw || existing.chat_model_reasoning_effort || "",
+            alias
           );
           upsertProject({
             ...existing,
             chat_model: alias,
-            chat_model_reasoning_effort: nextEffort,
+            chat_model_reasoning_effort: nextEffort
           });
           renderEdgeTopProjects();
           renderEdgeTopModelButtons();
@@ -439,34 +419,33 @@ export function handleChatEvent(payload) {
         }
       }
       if (alias) {
-        const effort = effortRaw ? normalizeProjectChatModelReasoningEffort(effortRaw, alias) : '';
+        const effort = effortRaw ? normalizeProjectChatModelReasoningEffort(effortRaw, alias) : "";
         void switchProjectChatModel(alias, effort);
       }
-    } else if (actionType === 'toggle_silent') {
+    } else if (actionType === "toggle_silent") {
       toggleTTSSilentMode();
-    } else if (actionType === 'show_item_sidebar_view') {
-      const view = normalizeItemSidebarView(action?.view || 'inbox');
-      const actionFilters = action?.filters && typeof action.filters === 'object' ? action.filters : {};
-      const filters = action?.clear_filters
-        ? (actionFilters.all_spheres === true ? { all_spheres: true } : {})
-        : actionFilters;
+    } else if (actionType === "show_item_sidebar_view") {
+      const view = normalizeItemSidebarView(action?.view || "inbox");
+      const actionFilters = action?.filters && typeof action.filters === "object" ? action.filters : {};
+      const filters = action?.clear_filters ? actionFilters.all_spheres === true ? { all_spheres: true } : {} : actionFilters;
       void openItemSidebarView(view, filters);
-    } else if (actionType === 'set_someday_review_nudge') {
+    } else if (actionType === "set_someday_review_nudge") {
       const enabled = parseOptionalBoolean(action?.enabled);
       if (enabled !== null) {
         setSomedayReviewNudgeEnabled(enabled);
-        showStatus(enabled ? 'someday reminders on' : 'someday reminders off');
+        showStatus(enabled ? "someday reminders on" : "someday reminders off");
       }
-    } else if (actionType === 'item_state_changed') {
-      const nextView = String(action?.view || '').trim();
+    } else if (actionType === "item_state_changed") {
+      const nextView = String(action?.view || "").trim();
       if (nextView) {
         void openItemSidebarView(nextView);
-      } else if (state.fileSidebarMode === 'items' && state.prReviewDrawerOpen) {
+      } else if (state.fileSidebarMode === "items" && state.prReviewDrawerOpen) {
         void loadItemSidebarView(state.itemSidebarView);
       } else {
-        void refreshItemSidebarCounts().catch(() => {});
+        void refreshItemSidebarCounts().catch(() => {
+        });
       }
-    } else if (actionType === 'open_item_sidebar_item') {
+    } else if (actionType === "open_item_sidebar_item") {
       const itemID = Number(action?.item_id || 0);
       if (itemID > 0) {
         const items = Array.isArray(state.itemSidebarItems) ? state.itemSidebarItems : [];
@@ -475,8 +454,8 @@ export function handleChatEvent(payload) {
           void openSidebarItem(item);
         }
       }
-    } else if (actionType === 'open_workspace_path') {
-      const path = String(action?.path || '').trim();
+    } else if (actionType === "open_workspace_path") {
+      const path = String(action?.path || "").trim();
       if (path) {
         if (action?.is_dir === true) {
           void loadWorkspaceBrowserPath(path);
@@ -484,69 +463,59 @@ export function handleChatEvent(payload) {
           void openWorkspaceSidebarFile(path);
         }
       }
-    } else if (actionType === 'print_item') {
-      openPrintView(String(action?.url || '').trim());
-    } else if (actionType === 'batch_status') {
+    } else if (actionType === "print_item") {
+      openPrintView(String(action?.url || "").trim());
+    } else if (actionType === "batch_status") {
       applyBatchStatus(action);
-    } else if (actionType === 'toggle_live_dialogue') {
-      const next = state.liveSessionActive ? '' : LIVE_SESSION_MODE_DIALOGUE;
-      const action = next
-        ? activateLiveSession(next)
-        : deactivateLiveSession({ disableMeetingConfig: true });
-      Promise.resolve(action)
-        .then(() => {
-          renderEdgeTopModelButtons();
-          updateAssistantActivityIndicator();
-          showStatus(next ? 'live dialogue on' : 'live off');
-        })
-        .catch((err) => {
-          const message = String(err?.message || err || 'live toggle failed');
-          showStatus(`live toggle failed: ${message}`);
-        });
+    } else if (actionType === "toggle_live_dialogue") {
+      const next = state.liveSessionActive ? "" : LIVE_SESSION_MODE_DIALOGUE;
+      const action2 = next ? activateLiveSession(next) : deactivateLiveSession({ disableMeetingConfig: true });
+      Promise.resolve(action2).then(() => {
+        renderEdgeTopModelButtons();
+        updateAssistantActivityIndicator();
+        showStatus(next ? "live dialogue on" : "live off");
+      }).catch((err) => {
+        const message = String(err?.message || err || "live toggle failed");
+        showStatus(`live toggle failed: ${message}`);
+      });
     }
     return;
   }
-
-  if (type === 'batch_progress') {
+  if (type === "batch_progress") {
     const message = batchProgressMessage(payload);
-    if (message) appendPlainMessage('system', message);
+    if (message) appendPlainMessage("system", message);
     applyBatchStatus(payload);
     return;
   }
-
-  if (type === 'system_action_confirmation_required') {
-    const action = payload && typeof payload.action === 'object' ? payload.action : {};
-    const summary = String(action?.summary || '').trim();
+  if (type === "system_action_confirmation_required") {
+    const action = payload && typeof payload.action === "object" ? payload.action : {};
+    const summary = String(action?.summary || "").trim();
     if (summary) {
-      showStatus('confirmation required');
-      appendPlainMessage('system', `Confirmation required: ${summary}`);
+      showStatus("confirmation required");
+      appendPlainMessage("system", `Confirmation required: ${summary}`);
     }
     return;
   }
-
-  if (type === 'approval_request') {
+  if (type === "approval_request") {
     renderApprovalRequestCard(payload);
     renderApprovalRequestCanvas(payload);
-    showStatus('approval required');
+    showStatus("approval required");
     return;
   }
-
-  if (type === 'approval_resolved') {
+  if (type === "approval_resolved") {
     resolveApprovalRequestCard(payload?.request_id, payload?.decision);
     resolveCanvasApprovalRequest(payload?.request_id, payload?.decision);
     return;
   }
-
-  if (type === 'approval_error') {
-    const message = String(payload?.error || 'approval failed').trim();
+  if (type === "approval_error") {
+    const message = String(payload?.error || "approval failed").trim();
     if (message) {
       showStatus(message);
     }
     return;
   }
-
-  if (type === 'turn_started') {
-    const turnID = String(payload.turn_id || '').trim();
+  if (type === "turn_started") {
+    const turnID = String(payload.turn_id || "").trim();
     const turnIsVoice = isVoiceOutputModePayload(payload) || state.voiceAwaitingTurn || isVoiceTurn();
     if (turnID) {
       if (turnIsVoice) state.voiceTurns.add(turnID);
@@ -556,16 +525,13 @@ export function handleChatEvent(payload) {
     state.voiceAwaitingTurn = false;
     state.indicatorSuppressedByCanvasUpdate = false;
     ensurePendingForTurn(turnID);
-    // A previous canvas update can suppress indicator rendering. Re-sync after
-    // clearing suppression so stop control is available immediately on turn start.
     updateAssistantActivityIndicator();
     if (isMobileSilent()) {
-      const edgeRight = document.getElementById('edge-right');
-      if (edgeRight) edgeRight.classList.add('edge-pinned');
+      const edgeRight = document.getElementById("edge-right");
+      if (edgeRight) edgeRight.classList.add("edge-pinned");
     }
     state.canvasActionThisTurn = false;
     state.turnFirstResponseShown = false;
-    // Reset TTS state for new turn
     stopTTSPlayback();
     const pos = getLastInputPosition();
     if (isVoiceTurn() || state.hasArtifact) {
@@ -574,33 +540,30 @@ export function handleChatEvent(payload) {
       hideOverlay();
     } else {
       showOverlay(pos.x, pos.y + 24);
-      updateOverlay('_Thinking..._');
+      updateOverlay("_Thinking..._");
       getUiState().overlayTurnId = payload.turn_id || null;
     }
     return;
   }
-
-  if (type === 'request_position') {
-    const prompt = String(payload?.prompt || '').trim();
-    state.requestedPositionPrompt = prompt || 'Tap where you want it.';
+  if (type === "request_position") {
+    const prompt = String(payload?.prompt || "").trim();
+    state.requestedPositionPrompt = prompt || "Tap where you want it.";
     showStatus(state.requestedPositionPrompt);
     updateAssistantActivityIndicator();
     return;
   }
-
-  if (type === 'assistant_message') {
-    const turnID = String(payload.turn_id || '').trim();
+  if (type === "assistant_message") {
+    const turnID = String(payload.turn_id || "").trim();
     trackAssistantTurnStarted(turnID);
-    const md = String(payload.message || '');
+    const md = String(payload.message || "");
     const autoCanvas = Boolean(payload.auto_canvas);
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
     const row = ensurePendingForTurn(turnID);
-    if (String(md || '').trim()) {
+    if (String(md || "").trim()) {
       updateAssistantRow(row, md, true);
     } else if (!renderOnCanvas) {
-      updateAssistantRow(row, '_Thinking..._', true);
+      updateAssistantRow(row, "_Thinking..._", true);
     }
-
     if (autoCanvas) {
       state.indicatorSuppressedByCanvasUpdate = true;
       updateAssistantActivityIndicator();
@@ -608,14 +571,12 @@ export function handleChatEvent(payload) {
         hideOverlay();
       }
     }
-
-    // First non-empty response: show on canvas (silent) / speak (voice)
-    const trimmedMd = String(md || '').trim();
+    const trimmedMd = String(md || "").trim();
     const shouldSpeakStreaming = isVoiceOutputModePayload(payload) || (turnID ? state.voiceTurns.has(turnID) : false) || isVoiceTurn();
     if (trimmedMd && !state.turnFirstResponseShown) {
       state.turnFirstResponseShown = true;
       if (isMobileSilent()) {
-        renderCanvas({ kind: 'text_artifact', title: '', text: md });
+        renderCanvas({ kind: "text_artifact", title: "", text: md });
       }
       if (shouldSpeakStreaming && canSpeakTTS()) {
         const { ttsText, ttsLang } = extractTTSText(md);
@@ -624,7 +585,6 @@ export function handleChatEvent(payload) {
         queueTTSDiff(diff);
       }
     }
-
     if (!isVoiceTurn() && !isMobileSilent() && !state.hasArtifact) {
       const cleaned = cleanForOverlay(md);
       if (cleaned) updateOverlay(cleaned);
@@ -633,34 +593,31 @@ export function handleChatEvent(payload) {
     }
     return;
   }
-
-  if (type === 'assistant_output' || type === 'message_persisted') {
-    if (String(payload.role || '') !== 'assistant') return;
-    const turnID = String(payload.turn_id || '').trim();
-    const md = String(payload.message || '');
+  if (type === "assistant_output" || type === "message_persisted") {
+    if (String(payload.role || "") !== "assistant") return;
+    const turnID = String(payload.turn_id || "").trim();
+    const md = String(payload.message || "");
     const autoCanvas = Boolean(payload.auto_canvas);
     const lastTTSText = getTTSLastSpeakText();
     const inferredText = md || lastTTSText;
     const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(inferredText);
-    // Persisted text may be empty for voice-only responses; fall back to TTS text.
-    const displayMd = md || (lastTTSText ? `_${lastTTSText}_` : '');
-    const hasDisplayMd = Boolean(String(displayMd || '').trim());
+    const displayMd = md || (lastTTSText ? `_${lastTTSText}_` : "");
+    const hasDisplayMd = Boolean(String(displayMd || "").trim());
     const mobileSilent = isMobileSilent();
     const row = takePendingRow(turnID);
     if (row && hasDisplayMd) {
       updateAssistantRow(row, displayMd, false);
     } else if (row) {
-      row.classList.remove('is-pending');
+      row.classList.remove("is-pending");
     } else if (hasDisplayMd) {
       appendRenderedAssistant(displayMd);
     }
     const shouldSpeakTurn = isVoiceOutputModePayload(payload) || (turnID ? state.voiceTurns.has(turnID) : false) || isVoiceTurn();
     trackAssistantTurnFinished(turnID);
-    state.assistantLastError = '';
-    showStatus(state.batchStatusActive && state.batchStatusLabel ? state.batchStatusLabel : 'ready');
+    state.assistantLastError = "";
+    showStatus(state.batchStatusActive && state.batchStatusLabel ? state.batchStatusLabel : "ready");
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
-
     if (shouldSpeakTurn && canSpeakTTS() && md.trim()) {
       const { ttsText, ttsLang } = extractTTSText(md);
       if (ttsLang) setTTSSpeakLang(ttsLang);
@@ -670,19 +627,16 @@ export function handleChatEvent(payload) {
       state.indicatorSuppressedByCanvasUpdate = true;
       updateAssistantActivityIndicator();
     }
-
     flushTTSChunker();
     if (mobileSilent) {
       if (state.canvasActionThisTurn) {
-        // LLM touched the canvas this turn — keep showing the document.
-        const edgeRight = document.getElementById('edge-right');
-        if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
+        const edgeRight = document.getElementById("edge-right");
+        if (edgeRight) edgeRight.classList.remove("edge-active", "edge-pinned");
       } else if (hasDisplayMd) {
-        // Mirror final answer on canvas while keeping chat in focus.
         renderCanvas({
-          kind: 'text_artifact',
-          title: '',
-          text: displayMd,
+          kind: "text_artifact",
+          title: "",
+          text: displayMd
         });
       }
       hideOverlay();
@@ -705,39 +659,33 @@ export function handleChatEvent(payload) {
       }
     }
     state.canvasActionThisTurn = false;
-    // If live dialogue is active but no TTS was queued (e.g. TTS error,
-    // empty md, or all text already spoken during streaming), kick the listen
-    // cycle so the hands-free loop does not stall.
     if (isDialogueLiveSession() && !hasTTSPlayer() && shouldSpeakTurn && canSpeakTTS()) {
       onLiveSessionTTSPlaybackComplete();
     }
     return;
   }
-
-  if (type === 'item_completed') {
-    const turnID = String(payload.turn_id || '').trim();
+  if (type === "item_completed") {
+    const turnID = String(payload.turn_id || "").trim();
     const line = formatItemCompletedLabel(payload);
     appendAssistantProgressForTurn(turnID, line);
     return;
   }
-
-  if (type === 'turn_completed') {
+  if (type === "turn_completed") {
     void refreshAssistantActivity();
     return;
   }
-
-  if (type === 'turn_cancelled') {
+  if (type === "turn_cancelled") {
     state.voiceAwaitingTurn = false;
-    const turnID = String(payload.turn_id || '').trim();
+    const turnID = String(payload.turn_id || "").trim();
     let row = takePendingRow(turnID);
     if (!row && !turnID) {
       row = takeAnyPendingRow();
     }
-    if (row) updateAssistantRow(row, '_Stopped._', false);
+    if (row) updateAssistantRow(row, "_Stopped._", false);
     trackAssistantTurnFinished(turnID);
     state.indicatorSuppressedByCanvasUpdate = false;
-    state.assistantLastError = '';
-    showStatus('stopped');
+    state.assistantLastError = "";
+    showStatus("stopped");
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
     hideOverlay();
@@ -747,81 +695,74 @@ export function handleChatEvent(payload) {
     }, 180);
     return;
   }
-
-  if (type === 'turn_queue_cleared') {
+  if (type === "turn_queue_cleared") {
     state.voiceAwaitingTurn = false;
     const count = Number(payload?.count || 0);
     const limit = Number.isFinite(count) && count > 0 ? Math.floor(count) : state.pendingQueue.length;
     for (let i = 0; i < limit; i += 1) {
-      const row = takePendingRow('');
+      const row = takePendingRow("");
       if (!row) break;
-      updateAssistantRow(row, '_Stopped._', false);
-      trackAssistantTurnFinished('');
+      updateAssistantRow(row, "_Stopped._", false);
+      trackAssistantTurnFinished("");
     }
-    showStatus('queue cleared');
+    showStatus("queue cleared");
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
     return;
   }
-
-  if (type === 'context_usage') {
+  if (type === "context_usage") {
     state.contextUsed = Number(payload.context_used) || 0;
     state.contextMax = Number(payload.context_max) || 0;
     return;
   }
-
-  if (type === 'context_compact') {
-    appendPlainMessage('system', 'Context auto-compacted to free space.');
+  if (type === "context_compact") {
+    appendPlainMessage("system", "Context auto-compacted to free space.");
     state.contextUsed = 0;
     state.contextMax = 0;
     return;
   }
-
-  if (type === 'chat_cleared') {
+  if (type === "chat_cleared") {
     stopTTSPlayback();
     clearChatHistory();
     resetAssistantTurnTracking({ clearError: true });
-    appendPlainMessage('system', 'Chat cleared.');
+    appendPlainMessage("system", "Chat cleared.");
     state.contextUsed = 0;
     state.contextMax = 0;
     return;
   }
-
-  if (type === 'chat_compacted') {
-    void loadChatHistory().catch(() => {});
-    const message = String(payload.message || 'Chat compacted.').trim();
-    appendPlainMessage('system', message);
+  if (type === "chat_compacted") {
+    void loadChatHistory().catch(() => {
+    });
+    const message = String(payload.message || "Chat compacted.").trim();
+    appendPlainMessage("system", message);
     return;
   }
-
-  if (type === 'error') {
+  if (type === "error") {
     state.voiceAwaitingTurn = false;
-    const turnID = String(payload.turn_id || '').trim();
+    const turnID = String(payload.turn_id || "").trim();
     const row = takePendingRow(turnID);
-    if (row) row.classList.remove('is-pending');
+    if (row) row.classList.remove("is-pending");
     trackAssistantTurnFinished(turnID);
-    const errText = String(payload.error || 'assistant request failed');
+    const errText = String(payload.error || "assistant request failed");
     state.assistantLastError = errText;
-    appendPlainMessage('system', errText);
+    appendPlainMessage("system", errText);
     showStatus(errText);
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
     updateOverlay(`**Error:** ${errText}`);
-    window.setTimeout(() => hideOverlay(), 2000);
+    window.setTimeout(() => hideOverlay(), 2e3);
     if (isDialogueLiveSession() && canSpeakTTS()) {
       onLiveSessionTTSPlaybackComplete();
     }
   }
 }
-
-export async function switchProject(projectID) {
-  const nextProjectID = String(projectID || '').trim();
+async function switchProject(projectID) {
+  const nextProjectID = String(projectID || "").trim();
   if (!nextProjectID) return;
   if (state.projectSwitchInFlight) return;
   if (nextProjectID === state.activeProjectId && state.chatSessionId) return;
-
   state.projectSwitchInFlight = true;
-  showStatus('switching workspace...');
+  showStatus("switching workspace...");
   await deactivateLiveSession({ silent: true, disableMeetingConfig: true });
   cancelChatVoiceCapture();
   closeChatWs();
@@ -830,19 +771,19 @@ export async function switchProject(projectID) {
   clearCanvas();
   clearWelcomeSurface();
   resetCompanionState();
-  state.fileSidebarMode = 'items';
-  state.workspaceBrowserPath = '';
+  state.fileSidebarMode = "items";
+  state.workspaceBrowserPath = "";
   state.workspaceBrowserEntries = [];
   state.workspaceBrowserLoading = false;
-  state.workspaceBrowserError = '';
-  state.workspaceBrowserActivePath = '';
+  state.workspaceBrowserError = "";
+  state.workspaceBrowserActivePath = "";
   state.workspaceBrowserActiveIsDir = false;
-  state.workspaceOpenFilePath = '';
+  state.workspaceOpenFilePath = "";
   state.workspaceStepInFlight = false;
   state.itemSidebarItems = [];
   state.itemSidebarCounts = defaultItemSidebarCounts();
   state.itemSidebarLoading = false;
-  state.itemSidebarError = '';
+  state.itemSidebarError = "";
   state.itemSidebarActiveItemID = 0;
   setInboxTriggerCount(0);
   hideCanvasColumn();
@@ -856,31 +797,31 @@ export async function switchProject(projectID) {
     upsertProject(project);
     renderEdgeTopProjects();
     await refreshWorkspaceBrowser(true);
-    await loadItemSidebarView(state.itemSidebarView).catch(() => {});
+    await loadItemSidebarView(state.itemSidebarView).catch(() => {
+    });
     openCanvasWs();
     await showWelcomeForActiveProject(true);
     await loadChatHistory();
     await refreshAssistantActivity();
-    await refreshCompanionState(project.id).catch(() => {});
+    await refreshCompanionState(project.id).catch(() => {
+    });
     openChatWs();
     showStatus(`ready`);
   } catch (err) {
-    const message = String(err?.message || err || 'workspace switch failed');
-    appendPlainMessage('system', `Workspace switch failed: ${message}`);
+    const message = String(err?.message || err || "workspace switch failed");
+    appendPlainMessage("system", `Workspace switch failed: ${message}`);
     showStatus(`workspace switch failed: ${message}`);
   } finally {
     state.projectSwitchInFlight = false;
     renderEdgeTopModelButtons();
   }
 }
-
-export async function switchToHub() {
+async function switchToHub() {
   const project = hubProject();
   if (!project || !project.id) return;
   await switchProject(project.id);
 }
-
-export {
+import {
   abortError,
   abortPendingSubmit,
   cancelActiveAssistantTurn,
@@ -890,5 +831,30 @@ export {
   handleStopAction,
   setPendingSubmit,
   submitMessage,
-  waitWithAbort,
-} from './app-chat-submit.js';
+  waitWithAbort
+} from "./app-chat-submit.js";
+export {
+  abortError,
+  abortPendingSubmit,
+  assistantMessageUsesCanvasBlocks,
+  cancelActiveAssistantTurn,
+  cancelActiveAssistantTurnWithRetry,
+  clearPendingSubmit,
+  closeCanvasWs,
+  closeChatWs,
+  forceVoiceLifecycleIdle,
+  handleChatEvent,
+  handleStopAction,
+  isVoiceOutputModePayload,
+  openChatWs,
+  sendCanvasPositionEvent,
+  sendChatWsJSON,
+  setPendingSubmit,
+  shouldRenderAssistantHistoryInChat,
+  submitMessage,
+  switchProject,
+  switchToHub,
+  waitWithAbort
+};
+
+//# sourceMappingURL=app-chat-transport.js.map

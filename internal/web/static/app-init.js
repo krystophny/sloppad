@@ -1,17 +1,15 @@
-import * as env from './app-env.js';
-import * as context from './app-context.js';
+import * as env from "./app-env.js";
+import * as context from "./app-context.js";
 import {
   activeReplySidebarItem,
   commandCenterPanel,
   ensureCommandCenter,
   handleCommandCenterShortcut,
   hideCommandCenter,
-  isCommandCenterVisible,
-} from './app-command-center.js';
-
+  isCommandCenterVisible
+} from "./app-command-center.js";
 const { marked, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, pinCursorAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, float32ToWav } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
-
 const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const setYoloModeLocal = (...args) => refs.setYoloModeLocal(...args);
@@ -83,31 +81,30 @@ const launchNewMailAuthoring = (...args) => refs.launchNewMailAuthoring(...args)
 const launchReplyAuthoring = (...args) => refs.launchReplyAuthoring(...args);
 const launchReplyAllAuthoring = (...args) => refs.launchReplyAllAuthoring(...args);
 const launchForwardAuthoring = (...args) => refs.launchForwardAuthoring(...args);
-
 function handleMailShortcut(ev) {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return false;
-  if (state.prReviewMode || state.fileSidebarMode !== 'items') return false;
-  if (!document.body.classList.contains('file-sidebar-open')) return false;
-  if (String(ev.key || '') === 'c' || String(ev.key || '') === 'C') {
+  if (state.prReviewMode || state.fileSidebarMode !== "items") return false;
+  if (!document.body.classList.contains("file-sidebar-open")) return false;
+  if (String(ev.key || "") === "c" || String(ev.key || "") === "C") {
     ev.preventDefault();
     void launchNewMailAuthoring();
     return true;
   }
-  if (String(ev.key || '') === 'r' || String(ev.key || '') === 'R') {
+  if (String(ev.key || "") === "r" || String(ev.key || "") === "R") {
     const replyItem = activeReplySidebarItem();
     if (!replyItem) return false;
     ev.preventDefault();
     void launchReplyAuthoring(replyItem);
     return true;
   }
-  if (String(ev.key || '') === 'a' || String(ev.key || '') === 'A') {
+  if (String(ev.key || "") === "a" || String(ev.key || "") === "A") {
     const replyAllItem = activeReplySidebarItem();
     if (!replyAllItem) return false;
     ev.preventDefault();
     void launchReplyAllAuthoring(replyAllItem);
     return true;
   }
-  if (String(ev.key || '') === 'f' || String(ev.key || '') === 'F') {
+  if (String(ev.key || "") === "f" || String(ev.key || "") === "F") {
     const forwardItem = activeReplySidebarItem();
     if (!forwardItem) return false;
     ev.preventDefault();
@@ -116,19 +113,18 @@ function handleMailShortcut(ev) {
   }
   return false;
 }
-
-export function bindUi() {
-  const canvasText = document.getElementById('canvas-text');
-  const canvasViewport = document.getElementById('canvas-viewport');
+function bindUi() {
+  const canvasText = document.getElementById("canvas-text");
+  const canvasViewport = document.getElementById("canvas-viewport");
   const artifactEditor = ensureArtifactEditor();
-  const indicatorNode = document.getElementById('indicator');
+  const indicatorNode = document.getElementById("indicator");
   if (indicatorNode && indicatorNode.parentElement !== document.body) {
     document.body.appendChild(indicatorNode);
   }
   ensureCommandCenter();
   if (artifactEditor) {
-    artifactEditor.addEventListener('keydown', (ev) => {
-      if (ev.key !== 'Escape') return;
+    artifactEditor.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
       ev.preventDefault();
       ev.stopPropagation();
       exitArtifactEditMode({ applyChanges: true });
@@ -142,11 +138,7 @@ export function bindUi() {
     const top = getTopEdgeTapSizePx();
     return x < s || x > window.innerWidth - s || y < top || y > window.innerHeight - s;
   };
-  const isVoiceInteractionTarget = (target, x, y) => (
-    isInEdgeZone(x, y)
-    || (target instanceof Element
-      && target.closest('button,a,input,textarea,select,[contenteditable="true"],.overlay,.floating-input,.edge-panel,#canvas-pdf .canvas-pdf-page,#canvas-pdf .textLayer,#canvas-pdf .annotationLayer'))
-  );
+  const isVoiceInteractionTarget = (target, x, y) => isInEdgeZone(x, y) || target instanceof Element && target.closest('button,a,input,textarea,select,[contenteditable="true"],.overlay,.floating-input,.edge-panel,#canvas-pdf .canvas-pdf-page,#canvas-pdf .textLayer,#canvas-pdf .annotationLayer');
   const rememberMousePosition = (x, y) => {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     lastMouseX = Number(x);
@@ -163,7 +155,7 @@ export function bindUi() {
     }
     return {
       x: Math.floor(window.innerWidth / 2),
-      y: Math.floor(window.innerHeight / 2),
+      y: Math.floor(window.innerHeight / 2)
     };
   };
   const captureAnchorAtPoint = (x, y) => {
@@ -175,41 +167,41 @@ export function bindUi() {
     return beginVoiceCapture(x, y, captureAnchor);
   };
   const buildCanvasPositionPayload = (anchor, options = {}) => {
-    if (!anchor || typeof anchor !== 'object') return null;
+    if (!anchor || typeof anchor !== "object") return null;
     const payload = {
-      type: 'canvas_position',
-      gesture: String(options?.gesture || 'tap').trim().toLowerCase() || 'tap',
-      output_mode: state.ttsSilent ? 'silent' : 'voice',
-      cursor: {},
+      type: "canvas_position",
+      gesture: String(options?.gesture || "tap").trim().toLowerCase() || "tap",
+      output_mode: state.ttsSilent ? "silent" : "voice",
+      cursor: {}
     };
     const cursor = payload.cursor;
     const setTextField = (key, value) => {
-      const text = String(value || '').trim();
+      const text = String(value || "").trim();
       if (text) cursor[key] = text;
     };
     const setIntField = (key, value) => {
-      const num = Number.parseInt(String(value || ''), 10);
+      const num = Number.parseInt(String(value || ""), 10);
       if (Number.isFinite(num) && num > 0) cursor[key] = num;
     };
     const setFloatField = (key, value) => {
       const num = Number(value);
       if (Number.isFinite(num)) cursor[key] = num;
     };
-    setTextField('view', anchor.view);
-    setTextField('element', anchor.element);
-    setTextField('title', anchor.title);
-    setIntField('page', anchor.page);
-    setIntField('line', anchor.line);
-    setFloatField('relative_x', anchor.relativeX);
-    setFloatField('relative_y', anchor.relativeY);
-    setTextField('selected_text', anchor.selectedText);
-    setTextField('surrounding_text', anchor.surroundingText);
-    setIntField('item_id', anchor.itemID || anchor.item_id);
-    setTextField('item_title', anchor.itemTitle || anchor.item_title);
-    setTextField('item_state', anchor.itemState || anchor.item_state);
-    setIntField('workspace_id', anchor.workspaceID || anchor.workspace_id);
-    setTextField('workspace_name', anchor.workspaceName || anchor.workspace_name);
-    setTextField('path', anchor.path);
+    setTextField("view", anchor.view);
+    setTextField("element", anchor.element);
+    setTextField("title", anchor.title);
+    setIntField("page", anchor.page);
+    setIntField("line", anchor.line);
+    setFloatField("relative_x", anchor.relativeX);
+    setFloatField("relative_y", anchor.relativeY);
+    setTextField("selected_text", anchor.selectedText);
+    setTextField("surrounding_text", anchor.surroundingText);
+    setIntField("item_id", anchor.itemID || anchor.item_id);
+    setTextField("item_title", anchor.itemTitle || anchor.item_title);
+    setTextField("item_state", anchor.itemState || anchor.item_state);
+    setIntField("workspace_id", anchor.workspaceID || anchor.workspace_id);
+    setTextField("workspace_name", anchor.workspaceName || anchor.workspace_name);
+    setTextField("path", anchor.path);
     if (anchor.isDir === true || anchor.is_dir === true) {
       cursor.is_dir = true;
     }
@@ -226,27 +218,21 @@ export function bindUi() {
     ws.send(JSON.stringify(payload));
     return true;
   };
-
-  document.addEventListener('mousemove', (ev) => {
+  document.addEventListener("mousemove", (ev) => {
     rememberMousePosition(ev.clientX, ev.clientY);
   }, { passive: true });
-  document.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType !== 'mouse') return;
+  document.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType !== "mouse") return;
     rememberMousePosition(ev.clientX, ev.clientY);
   }, true);
-
   if (indicatorNode) {
-    const isIndicatorArmed = () => (
-      indicatorNode.classList.contains('is-working')
-      || indicatorNode.classList.contains('is-recording')
-      || indicatorNode.classList.contains('is-listening')
-    );
+    const isIndicatorArmed = () => indicatorNode.classList.contains("is-working") || indicatorNode.classList.contains("is-recording") || indicatorNode.classList.contains("is-listening");
     const pointHitsIndicatorChip = (x, y) => {
-      const chips = indicatorNode.querySelectorAll('.record-dot, .stop-square');
+      const chips = indicatorNode.querySelectorAll(".record-dot, .stop-square");
       for (const chip of chips) {
         if (!(chip instanceof HTMLElement)) continue;
         const style = window.getComputedStyle(chip);
-        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        if (style.display === "none" || style.visibility === "hidden") continue;
         const rect = chip.getBoundingClientRect();
         if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
           return true;
@@ -257,7 +243,7 @@ export function bindUi() {
     const isTapOnInteractiveUi = (ev) => {
       const t = ev.target;
       if (!(t instanceof Element)) return false;
-      return Boolean(t.closest('button, a, input, textarea, select, #edge-left-tap, #edge-right-tap, #edge-top-tap, #edge-top, #edge-right, #pr-file-pane, #pr-file-drawer-backdrop'));
+      return Boolean(t.closest("button, a, input, textarea, select, #edge-left-tap, #edge-right-tap, #edge-top-tap, #edge-top, #edge-right, #pr-file-pane, #pr-file-drawer-backdrop"));
     };
     const handleIndicatorTap = (ev, x, y, isTouch = false) => {
       if (!isIndicatorArmed()) return;
@@ -271,24 +257,22 @@ export function bindUi() {
       if (isTouch) suppressSyntheticClick();
       void handleStopAction();
     };
-    document.addEventListener('click', (ev) => {
+    document.addEventListener("click", (ev) => {
       handleIndicatorTap(ev, ev.clientX, ev.clientY, false);
     }, true);
-    document.addEventListener('touchend', (ev) => {
+    document.addEventListener("touchend", (ev) => {
       const touch = ev.changedTouches && ev.changedTouches.length > 0 ? ev.changedTouches[0] : null;
       if (!touch) return;
       handleIndicatorTap(ev, touch.clientX, touch.clientY, true);
     }, { passive: false, capture: true });
   }
-
-  // Left-click/tap on canvas -> toggle voice recording
-  const clickTarget = canvasViewport || document.getElementById('workspace');
+  const clickTarget = canvasViewport || document.getElementById("workspace");
   const syncIndicatorOnViewportChange = () => {
     updateAssistantActivityIndicator();
   };
   if (canvasViewport instanceof HTMLElement) {
     syncInkLayerSize();
-    canvasViewport.addEventListener('scroll', syncIndicatorOnViewportChange, { passive: true, capture: true });
+    canvasViewport.addEventListener("scroll", syncIndicatorOnViewportChange, { passive: true, capture: true });
     let canvasSwipeStart = null;
     let canvasSwipeHandled = false;
     let horizontalWheelAccum = 0;
@@ -297,14 +281,14 @@ export function bindUi() {
       canvasSwipeStart = null;
       canvasSwipeHandled = false;
     };
-    canvasViewport.addEventListener('touchstart', (ev) => {
+    canvasViewport.addEventListener("touchstart", (ev) => {
       if (!isMobileViewport() && !isLikelyIOS()) return;
       if (state.prReviewDrawerOpen || ev.touches.length !== 1) return;
       const touch = ev.touches[0];
       canvasSwipeStart = { x: touch.clientX, y: touch.clientY };
       canvasSwipeHandled = false;
     }, { passive: true });
-    canvasViewport.addEventListener('touchmove', (ev) => {
+    canvasViewport.addEventListener("touchmove", (ev) => {
       if (!canvasSwipeStart || canvasSwipeHandled || ev.touches.length !== 1) return;
       const touch = ev.touches[0];
       const dx = touch.clientX - canvasSwipeStart.x;
@@ -317,9 +301,9 @@ export function bindUi() {
       canvasSwipeHandled = true;
       ev.preventDefault();
     }, { passive: false });
-    canvasViewport.addEventListener('touchend', resetCanvasSwipe, { passive: true });
-    canvasViewport.addEventListener('touchcancel', resetCanvasSwipe, { passive: true });
-    canvasViewport.addEventListener('wheel', (ev) => {
+    canvasViewport.addEventListener("touchend", resetCanvasSwipe, { passive: true });
+    canvasViewport.addEventListener("touchcancel", resetCanvasSwipe, { passive: true });
+    canvasViewport.addEventListener("wheel", (ev) => {
       if (!state.hasArtifact) return;
       const absX = Math.abs(ev.deltaX);
       const absY = Math.abs(ev.deltaY);
@@ -337,19 +321,25 @@ export function bindUi() {
       horizontalWheelAccum = 0;
       horizontalWheelLastAt = now;
     }, { passive: false });
-    canvasViewport.addEventListener('pointerdown', (ev) => {
+    canvasViewport.addEventListener("pointerdown", (ev) => {
       if (!isInkTool()) return;
-      if (ev.pointerType !== 'pen') return;
+      if (ev.pointerType !== "pen") return;
       if (isEditableTarget(ev.target)) return;
-      if (ev.target instanceof Element && ev.target.closest('.edge-panel,#pr-file-pane,#pr-file-drawer-backdrop')) return;
+      if (ev.target instanceof Element && ev.target.closest(".edge-panel,#pr-file-pane,#pr-file-drawer-backdrop")) return;
       if (beginInkStroke(ev)) {
-        try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+        try {
+          window.getSelection()?.removeAllRanges();
+        } catch (_) {
+        }
         setPenInkingState(true);
         ev.preventDefault();
-        try { canvasViewport.setPointerCapture(ev.pointerId); } catch (_) {}
+        try {
+          canvasViewport.setPointerCapture(ev.pointerId);
+        } catch (_) {
+        }
       }
     }, true);
-    canvasViewport.addEventListener('pointermove', (ev) => {
+    canvasViewport.addEventListener("pointermove", (ev) => {
       if (!isInkTool()) return;
       if (state.inkDraft.activePointerId !== ev.pointerId) return;
       if (extendInkStroke(ev)) {
@@ -365,16 +355,15 @@ export function bindUi() {
       setPenInkingState(false);
       ev.preventDefault();
     };
-    canvasViewport.addEventListener('pointerup', finishInkPointer, true);
-    canvasViewport.addEventListener('pointercancel', finishInkPointer, true);
-    canvasViewport.addEventListener('selectstart', (ev) => {
+    canvasViewport.addEventListener("pointerup", finishInkPointer, true);
+    canvasViewport.addEventListener("pointercancel", finishInkPointer, true);
+    canvasViewport.addEventListener("selectstart", (ev) => {
       if (!isInkTool()) return;
       ev.preventDefault();
     }, true);
   }
-  window.addEventListener('scroll', syncIndicatorOnViewportChange, { passive: true });
-  window.addEventListener('resize', syncIndicatorOnViewportChange);
-
+  window.addEventListener("scroll", syncIndicatorOnViewportChange, { passive: true });
+  window.addEventListener("resize", syncIndicatorOnViewportChange);
   if (clickTarget) {
     let touchTapStartX = 0;
     let touchTapStartY = 0;
@@ -389,35 +378,33 @@ export function bindUi() {
         touchEditTimer = null;
       }
     };
-
     const handleWorkspaceTap = (target, x, y) => {
-      const requestedPositionPrompt = String(state.requestedPositionPrompt || '').trim();
+      const requestedPositionPrompt = String(state.requestedPositionPrompt || "").trim();
       let tapAnchor = null;
       if (requestedPositionPrompt) {
-        if (state.interaction.tool !== 'prompt') {
+        if (state.interaction.tool !== "prompt") {
           if (prefersTextComposer() && state.hasArtifact && createPdfStickyNoteAt(x, y)) return;
           return;
         }
         if (isVoiceInteractionTarget(target, x, y)) return;
-        const sel = window.getSelection();
-        if (sel && !sel.isCollapsed) return;
+        const sel2 = window.getSelection();
+        if (sel2 && !sel2.isCollapsed) return;
         rememberMousePosition(x, y);
         tapAnchor = captureAnchorAtPoint(x, y);
         pinCursorAnchor(x, y, tapAnchor);
-        state.requestedPositionPrompt = '';
+        state.requestedPositionPrompt = "";
         updateAssistantActivityIndicator();
       }
-      const liveSessionPointerMode = state.liveSessionActive
-        && state.liveSessionMode === LIVE_SESSION_MODE_MEETING;
+      const liveSessionPointerMode = state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_MEETING;
       if (liveSessionPointerMode) {
         if (prefersTextComposer() && state.hasArtifact && createPdfStickyNoteAt(x, y)) return;
         if (isVoiceInteractionTarget(target, x, y)) return;
-        const sel = window.getSelection();
-        if (sel && !sel.isCollapsed) return;
+        const sel2 = window.getSelection();
+        if (sel2 && !sel2.isCollapsed) return;
         rememberMousePosition(x, y);
         tapAnchor = tapAnchor || captureAnchorAtPoint(x, y);
         pinCursorAnchor(x, y, tapAnchor);
-        sendCanvasPosition(tapAnchor, { gesture: 'tap' });
+        sendCanvasPosition(tapAnchor, { gesture: "tap" });
         updateAssistantActivityIndicator();
         return;
       }
@@ -450,15 +437,11 @@ export function bindUi() {
         openComposerAt(x, y, anchor);
         return;
       }
-      if (
-        state.interaction.conversation === 'push_to_talk'
-        || (state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE)
-      ) {
+      if (state.interaction.conversation === "push_to_talk" || state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE) {
         void beginVoiceCaptureFromPoint(x, y, tapAnchor);
       }
     };
-
-    clickTarget.addEventListener('touchstart', (ev) => {
+    clickTarget.addEventListener("touchstart", (ev) => {
       if (ev.touches.length !== 1) {
         touchTapTracking = false;
         touchTapMoved = false;
@@ -490,17 +473,15 @@ export function bindUi() {
         }, ARTIFACT_EDIT_LONG_TAP_MS);
       }
     }, { passive: true });
-
-    clickTarget.addEventListener('touchmove', (ev) => {
-      if ((!touchTapTracking && touchEditTimer === null) || touchTapMoved || ev.touches.length !== 1) return;
+    clickTarget.addEventListener("touchmove", (ev) => {
+      if (!touchTapTracking && touchEditTimer === null || touchTapMoved || ev.touches.length !== 1) return;
       const touch = ev.touches[0];
       if (Math.hypot(touch.clientX - touchTapStartX, touch.clientY - touchTapStartY) > TOUCH_TAP_MOVE_THRESHOLD) {
         touchTapMoved = true;
         clearTouchEditTimer();
       }
     }, { passive: true });
-
-    clickTarget.addEventListener('touchend', (ev) => {
+    clickTarget.addEventListener("touchend", (ev) => {
       if (touchLongTapTriggered) {
         touchLongTapTriggered = false;
         touchTapTracking = false;
@@ -524,29 +505,25 @@ export function bindUi() {
       suppressSyntheticClick();
       handleWorkspaceTap(ev.target, touch.clientX, touch.clientY);
     }, { passive: false });
-
-    clickTarget.addEventListener('touchcancel', () => {
+    clickTarget.addEventListener("touchcancel", () => {
       touchTapTracking = false;
       touchTapMoved = false;
       touchLongTapTriggered = false;
       clearTouchEditTimer();
     }, { passive: true });
-
-    clickTarget.addEventListener('click', (ev) => {
+    clickTarget.addEventListener("click", (ev) => {
       if (isSuppressedClick()) return;
       if (ev.button !== 0) return;
       handleWorkspaceTap(ev.target, ev.clientX, ev.clientY);
     });
   }
-
-  // Right-click -> artifact editor (text artifacts) or floating text input
   if (clickTarget) {
-    clickTarget.addEventListener('contextmenu', (ev) => {
+    clickTarget.addEventListener("contextmenu", (ev) => {
       if (isArtifactEditorActive()) {
         ev.preventDefault();
         return;
       }
-      if (ev.target instanceof Element && ev.target.closest('.edge-panel')) return;
+      if (ev.target instanceof Element && ev.target.closest(".edge-panel")) return;
       if (canEnterArtifactEditModeFromTarget(ev.target)) {
         ev.preventDefault();
         enterArtifactEditMode(ev.clientX, ev.clientY);
@@ -561,108 +538,104 @@ export function bindUi() {
       openComposerAt(ev.clientX, ev.clientY, anchor);
     });
   }
-
-  // Text input Enter -> send
-  const floatingInput = document.getElementById('floating-input');
+  const floatingInput = document.getElementById("floating-input");
   if (floatingInput instanceof HTMLTextAreaElement) {
-    floatingInput.addEventListener('focus', () => {
+    floatingInput.addEventListener("focus", () => {
       cancelLiveSessionListen();
     });
-    floatingInput.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey) {
+    floatingInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
         ev.preventDefault();
         const text = floatingInput.value.trim();
         if (text) {
-          state.lastInputOrigin = 'text';
-          floatingInput.value = '';
+          state.lastInputOrigin = "text";
+          floatingInput.value = "";
           floatingInput.blur();
           hideTextInput();
           settleKeyboardAfterSubmit();
           void submitMessage(text);
         }
       }
-      if (ev.key === 'Escape') {
+      if (ev.key === "Escape") {
         ev.preventDefault();
         hideTextInput();
       }
     });
-    floatingInput.addEventListener('input', () => {
-      floatingInput.style.height = 'auto';
+    floatingInput.addEventListener("input", () => {
+      floatingInput.style.height = "auto";
       floatingInput.style.height = `${Math.min(floatingInput.scrollHeight, 240)}px`;
     });
   }
-
-  // Chat pane input: Enter sends, Escape blurs, auto-resize
-  const chatPaneInput = document.getElementById('chat-pane-input');
+  const chatPaneInput = document.getElementById("chat-pane-input");
   if (chatPaneInput instanceof HTMLTextAreaElement) {
-    chatPaneInput.addEventListener('focus', () => {
+    chatPaneInput.addEventListener("focus", () => {
       cancelLiveSessionListen();
     });
-    chatPaneInput.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && !ev.shiftKey) {
+    chatPaneInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && !ev.shiftKey) {
         ev.preventDefault();
         const text = chatPaneInput.value.trim();
         if (text) {
-          state.lastInputOrigin = 'text';
-          chatPaneInput.value = '';
-          chatPaneInput.style.height = '';
+          state.lastInputOrigin = "text";
+          chatPaneInput.value = "";
+          chatPaneInput.style.height = "";
           chatPaneInput.blur();
           settleKeyboardAfterSubmit();
           void submitMessage(text);
         }
       }
-      if (ev.key === 'Escape') {
+      if (ev.key === "Escape") {
         ev.preventDefault();
-        chatPaneInput.value = '';
-        chatPaneInput.style.height = '';
+        chatPaneInput.value = "";
+        chatPaneInput.style.height = "";
         chatPaneInput.blur();
         settleKeyboardAfterSubmit();
       }
     });
-    chatPaneInput.addEventListener('input', () => {
-      chatPaneInput.style.height = 'auto';
+    chatPaneInput.addEventListener("input", () => {
+      chatPaneInput.style.height = "auto";
       chatPaneInput.style.height = `${Math.min(chatPaneInput.scrollHeight, 240)}px`;
     });
-
   }
-
-  const inkClear = document.getElementById('ink-clear');
+  const inkClear = document.getElementById("ink-clear");
   if (inkClear instanceof HTMLButtonElement) {
-    inkClear.addEventListener('click', () => {
+    inkClear.addEventListener("click", () => {
       clearInkDraft();
-      showStatus('ink cleared');
+      showStatus("ink cleared");
     });
   }
-  const inkSubmit = document.getElementById('ink-submit');
+  const inkSubmit = document.getElementById("ink-submit");
   if (inkSubmit instanceof HTMLButtonElement) {
-    inkSubmit.addEventListener('click', () => {
+    inkSubmit.addEventListener("click", () => {
       void submitInkDraft();
     });
   }
-
-  // Voice tap on chat history (only when panel is pinned, not just hover-active)
-  const chatHistory = document.getElementById('chat-history');
+  const chatHistory = document.getElementById("chat-history");
   if (chatHistory) {
-    chatHistory.addEventListener('click', (ev) => {
+    chatHistory.addEventListener("click", (ev) => {
       if (ev.button !== 0) return;
       if (ev.target instanceof Element && ev.target.closest('a,button,input,textarea,select,[contenteditable="true"]')) return;
       if (isInEdgeZone(ev.clientX, ev.clientY)) return;
-      const edgeR = chatHistory.closest('.edge-panel');
-      if (edgeR && !edgeR.classList.contains('edge-pinned')) return;
-      if (isUiStopGestureActive()) { void handleStopAction(); return; }
+      const edgeR = chatHistory.closest(".edge-panel");
+      if (edgeR && !edgeR.classList.contains("edge-pinned")) return;
+      if (isUiStopGestureActive()) {
+        void handleStopAction();
+        return;
+      }
       if (prefersTextComposer()) return;
       if (isLiveSessionListenActive()) {
         cancelLiveSessionListen();
         void beginVoiceCaptureFromPoint(ev.clientX, ev.clientY);
         return;
       }
-      if (isRecording()) { void stopVoiceCaptureAndSend(); return; }
+      if (isRecording()) {
+        void stopVoiceCaptureAndSend();
+        return;
+      }
       void beginVoiceCaptureFromPoint(ev.clientX, ev.clientY);
     });
   }
-
-  // Click outside overlay/input -> dismiss
-  document.addEventListener('mousedown', (ev) => {
+  document.addEventListener("mousedown", (ev) => {
     if (!(ev.target instanceof Element)) return;
     const sidebarMenu = document.getElementById(ITEM_SIDEBAR_MENU_ID);
     if (state.itemSidebarMenuOpen && sidebarMenu instanceof HTMLElement && !sidebarMenu.contains(ev.target)) {
@@ -672,29 +645,24 @@ export function bindUi() {
     if (isCommandCenterVisible() && commandCenter instanceof HTMLElement && !commandCenter.contains(ev.target)) {
       hideCommandCenter();
     }
-    // Dismiss overlay on click outside
     if (isOverlayVisible()) {
-      const overlay = document.getElementById('overlay');
+      const overlay = document.getElementById("overlay");
       if (overlay && !overlay.contains(ev.target)) {
         hideOverlay();
       }
     }
-    // Dismiss text input on click outside
     if (isTextInputVisible()) {
-      const input = document.getElementById('floating-input');
+      const input = document.getElementById("floating-input");
       if (input && !input.contains(ev.target) && ev.button === 0) {
         hideTextInput();
       }
     }
   });
-
-  // Keyboard typing auto-activates text input (rasa mode)
-  document.addEventListener('keydown', (ev) => {
+  document.addEventListener("keydown", (ev) => {
     if (handleCommandCenterShortcut(ev, { hideTextInput, hideOverlay, cancelLiveSessionListen })) {
       return;
     }
-    // Escape handling
-    if (ev.key === 'Escape' && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+    if (ev.key === "Escape" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
       if (isArtifactEditorActive()) {
         ev.preventDefault();
         exitArtifactEditMode({ applyChanges: true });
@@ -702,7 +670,7 @@ export function bindUi() {
       }
       if (isRecording()) {
         cancelChatVoiceCapture();
-        showStatus('ready');
+        showStatus("ready");
         return;
       }
       if (isOverlayVisible()) {
@@ -719,7 +687,7 @@ export function bindUi() {
       }
       if (state.inkDraft.dirty) {
         clearInkDraft();
-        showStatus('ink cleared');
+        showStatus("ink cleared");
         return;
       }
       if (state.prReviewDrawerOpen) {
@@ -735,21 +703,17 @@ export function bindUi() {
       void handleStopAction();
       return;
     }
-
-    // Enter stops recording
-    if (ev.key === 'Enter' && isRecording()) {
+    if (ev.key === "Enter" && isRecording()) {
       ev.preventDefault();
       void stopVoiceCaptureAndSend();
       return;
     }
-    if (ev.key === 'Enter' && isInkTool() && state.inkDraft.dirty) {
+    if (ev.key === "Enter" && isInkTool() && state.inkDraft.dirty) {
       ev.preventDefault();
       void submitInkDraft();
       return;
     }
-
-    // Control long-press for PTT
-    if (ev.key === 'Control' && !ev.repeat) {
+    if (ev.key === "Control" && !ev.repeat) {
       if (state.chatCtrlHoldTimer || state.chatVoiceCapture) return;
       if (isLiveSessionListenActive()) {
         cancelLiveSessionListen();
@@ -761,64 +725,58 @@ export function bindUi() {
       }, CHAT_CTRL_LONG_PRESS_MS);
       return;
     }
-
-    if (ev.ctrlKey && ev.key !== 'Control') {
+    if (ev.ctrlKey && ev.key !== "Control") {
       if (state.chatCtrlHoldTimer) {
         clearTimeout(state.chatCtrlHoldTimer);
         state.chatCtrlHoldTimer = null;
       }
       if (state.chatVoiceCapture) {
         cancelChatVoiceCapture();
-        showStatus('ready');
+        showStatus("ready");
       }
       return;
     }
-
     if (isCommandCenterVisible()) return;
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
     if (isEditableTarget(ev.target)) return;
     if (isArtifactEditorActive()) return;
     if (handleItemSidebarKeyboardShortcut(ev)) return;
     if (handleMailShortcut(ev)) return;
-
-    if (ev.key === 'ArrowRight') {
+    if (ev.key === "ArrowRight") {
       if (stepCanvasFile(1)) {
         ev.preventDefault();
       }
       return;
     }
-    if (ev.key === 'ArrowLeft') {
+    if (ev.key === "ArrowLeft") {
       if (stepCanvasFile(-1)) {
         ev.preventDefault();
       }
       return;
     }
-
     if (state.prReviewMode) {
-      if (ev.key === 'j' || ev.key === 'J') {
+      if (ev.key === "j" || ev.key === "J") {
         ev.preventDefault();
         stepPrReviewFile(1);
         return;
       }
-      if (ev.key === 'k' || ev.key === 'K') {
+      if (ev.key === "k" || ev.key === "K") {
         ev.preventDefault();
         stepPrReviewFile(-1);
         return;
       }
     }
-
-    // Route printable keys into an active composer before treating them as tool shortcuts.
     if (ev.key.length === 1 && !isTextInputVisible()) {
-      const edgeR = document.getElementById('edge-right');
-      const cpInput = document.getElementById('chat-pane-input');
-      const chatPaneOpen = edgeR && (edgeR.classList.contains('edge-active') || edgeR.classList.contains('edge-pinned'));
-      if (chatPaneOpen && cpInput instanceof HTMLTextAreaElement && !window.matchMedia('(max-width: 767px)').matches) {
+      const edgeR = document.getElementById("edge-right");
+      const cpInput = document.getElementById("chat-pane-input");
+      const chatPaneOpen = edgeR && (edgeR.classList.contains("edge-active") || edgeR.classList.contains("edge-pinned"));
+      if (chatPaneOpen && cpInput instanceof HTMLTextAreaElement && !window.matchMedia("(max-width: 767px)").matches) {
         cancelLiveSessionListen();
         cpInput.focus();
         cpInput.value = ev.key;
         const caret = ev.key.length;
         cpInput.setSelectionRange(caret, caret);
-        cpInput.dispatchEvent(new Event('input', { bubbles: true }));
+        cpInput.dispatchEvent(new Event("input", { bubbles: true }));
         ev.preventDefault();
         return;
       }
@@ -831,23 +789,22 @@ export function bindUi() {
         return;
       }
     }
-
     const toolByKey = {
-      '1': 'pointer',
-      '2': 'highlight',
-      '3': 'ink',
-      '4': 'text_note',
-      '5': 'prompt',
-      p: 'pointer',
-      P: 'pointer',
-      h: 'highlight',
-      H: 'highlight',
-      i: 'ink',
-      I: 'ink',
-      t: 'text_note',
-      T: 'text_note',
-      q: 'prompt',
-      Q: 'prompt',
+      "1": "pointer",
+      "2": "highlight",
+      "3": "ink",
+      "4": "text_note",
+      "5": "prompt",
+      p: "pointer",
+      P: "pointer",
+      h: "highlight",
+      H: "highlight",
+      i: "ink",
+      I: "ink",
+      t: "text_note",
+      T: "text_note",
+      q: "prompt",
+      Q: "prompt"
     };
     const shortcutTool = toolByKey[ev.key];
     if (shortcutTool) {
@@ -855,15 +812,12 @@ export function bindUi() {
       void selectInteractionTool(shortcutTool);
       return;
     }
-
-    // Enter when text input is NOT visible but could send
-    if (ev.key === 'Enter' && !isTextInputVisible()) {
+    if (ev.key === "Enter" && !isTextInputVisible()) {
       ev.preventDefault();
     }
   }, true);
-
-  document.addEventListener('keyup', (ev) => {
-    if (ev.key !== 'Control') return;
+  document.addEventListener("keyup", (ev) => {
+    if (ev.key !== "Control") return;
     if (state.chatCtrlHoldTimer) {
       clearTimeout(state.chatCtrlHoldTimer);
       state.chatCtrlHoldTimer = null;
@@ -873,23 +827,18 @@ export function bindUi() {
       void stopVoiceCaptureAndSend();
     }
   }, true);
-
-  window.addEventListener('blur', () => {
+  window.addEventListener("blur", () => {
     if (state.chatCtrlHoldTimer) {
       clearTimeout(state.chatCtrlHoldTimer);
       state.chatCtrlHoldTimer = null;
     }
-    // Keep active capture alive on transient browser blur; hard stop is
-    // handled by visibilitychange when the page is actually hidden.
     if (state.chatVoiceCapture && document.hidden) {
       cancelChatVoiceCapture();
-      showStatus('ready');
+      showStatus("ready");
     }
   });
-
-  // Text selection on artifact sets anchor
   if (canvasText) {
-    canvasText.addEventListener('mouseup', () => {
+    canvasText.addEventListener("mouseup", () => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed) return;
       const loc = getLocationFromSelection();
@@ -903,8 +852,12 @@ export function bindUi() {
       maybeApplySelectionHighlight();
     }, 0);
   };
-  document.addEventListener('mouseup', applySelectionHighlightSoon, true);
-  document.addEventListener('touchend', applySelectionHighlightSoon, true);
-
+  document.addEventListener("mouseup", applySelectionHighlightSoon, true);
+  document.addEventListener("touchend", applySelectionHighlightSoon, true);
   initEdgePanels();
 }
+export {
+  bindUi
+};
+
+//# sourceMappingURL=app-init.js.map
