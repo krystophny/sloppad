@@ -244,7 +244,7 @@ func (a *App) activeTodoistAccounts() ([]store.ExternalAccount, error) {
 	return enabled, nil
 }
 
-func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Task, mappings []store.ExternalContainerMapping, projectNames map[string]string) (store.Item, error) {
+func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mappings []store.ExternalContainerMapping, projectNames map[string]string) (store.Item, error) {
 	projectName := ""
 	if task.ProjectID != nil {
 		projectName = strings.TrimSpace(projectNames[strings.TrimSpace(*task.ProjectID)])
@@ -302,7 +302,7 @@ func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Tas
 				return store.Item{}, err
 			}
 		}
-		if err := a.syncTodoistTaskArtifact(item, task, projectNames); err != nil {
+		if err := a.syncTodoistTaskArtifact(item, task, projectNames, comments); err != nil {
 			return store.Item{}, err
 		}
 		item, err = a.store.GetItem(existing.ID)
@@ -340,7 +340,7 @@ func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Tas
 	if err != nil {
 		return store.Item{}, err
 	}
-	if err := a.syncTodoistTaskArtifact(item, task, projectNames); err != nil {
+	if err := a.syncTodoistTaskArtifact(item, task, projectNames, comments); err != nil {
 		return store.Item{}, err
 	}
 	item, err = a.store.GetItem(item.ID)
@@ -486,7 +486,18 @@ func (a *App) syncTodoistAccount(ctx context.Context, account store.ExternalAcco
 	}
 	syncedCount := 0
 	for _, task := range tasks {
-		if _, err := a.persistTodoistTask(account, task, mappings, projectNames); err != nil {
+		comments := []todoist.Comment(nil)
+		if task.CommentCount > 0 {
+			detail, err := client.GetTask(ctx, task.ID)
+			if err != nil {
+				return 0, err
+			}
+			if strings.TrimSpace(detail.Task.ID) != "" {
+				task = detail.Task
+			}
+			comments = append(comments, detail.Comments...)
+		}
+		if _, err := a.persistTodoistTask(account, task, comments, mappings, projectNames); err != nil {
 			return 0, err
 		}
 		syncedCount++
@@ -595,7 +606,7 @@ func (a *App) executeCreateTodoistTaskActionWith(account store.ExternalAccount, 
 	if err != nil {
 		return "", nil, err
 	}
-	item, err := a.persistTodoistTask(account, task, mappings, todoistProjectNameByID(projects))
+	item, err := a.persistTodoistTask(account, task, nil, mappings, todoistProjectNameByID(projects))
 	if err != nil {
 		return "", nil, err
 	}
