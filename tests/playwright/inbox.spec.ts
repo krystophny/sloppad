@@ -43,6 +43,88 @@ test.describe('item inbox sidebar', () => {
     await expect(page.locator('#pr-file-list')).toContainText('email');
   });
 
+  test('desktop sidebar stays docked beside the canvas instead of covering it', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+
+    const before = await page.locator('#canvas-column').evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        left: Math.round(rect.left),
+        width: Math.round(rect.width),
+      };
+    });
+    expect(before.left).toBe(0);
+
+    await page.locator('#edge-left-tap').click();
+    await expect(page.locator('#pr-file-pane')).toHaveClass(/is-open/);
+    await expect(page.locator('.sidebar-tab.is-active')).toContainText('Inbox');
+
+    const readLayout = () => page.evaluate(() => {
+      const pane = document.getElementById('pr-file-pane');
+      const canvas = document.getElementById('canvas-column');
+      const backdrop = document.getElementById('pr-file-drawer-backdrop');
+      const edgeTop = document.getElementById('edge-top');
+      if (
+        !(pane instanceof HTMLElement)
+        || !(canvas instanceof HTMLElement)
+        || !(backdrop instanceof HTMLElement)
+        || !(edgeTop instanceof HTMLElement)
+      ) {
+        return null;
+      }
+      const paneRect = pane.getBoundingClientRect();
+      const canvasRect = canvas.getBoundingClientRect();
+      const edgeTopRect = edgeTop.getBoundingClientRect();
+      return {
+        paneLeft: Math.round(paneRect.left),
+        paneRight: Math.round(paneRect.right),
+        paneTop: Math.round(paneRect.top),
+        paneWidth: Math.round(paneRect.width),
+        canvasLeft: Math.round(canvasRect.left),
+        canvasWidth: Math.round(canvasRect.width),
+        backdropDisplay: getComputedStyle(backdrop).display,
+        edgeTopLeft: Math.round(edgeTopRect.left),
+        edgeTopRight: Math.round(edgeTopRect.right),
+      };
+    });
+
+    await expect.poll(readLayout).toMatchObject({
+      paneLeft: 0,
+      paneTop: 0,
+      canvasLeft: 340,
+      paneRight: 340,
+      backdropDisplay: 'none',
+    });
+
+    const layout = await readLayout();
+    expect(layout).not.toBeNull();
+    expect(layout?.paneLeft).toBe(0);
+    expect(layout?.paneTop).toBe(0);
+    expect(layout?.paneWidth ?? 0).toBeGreaterThanOrEqual(320);
+    expect(layout?.canvasLeft).toBe(layout?.paneRight);
+    expect(layout?.canvasWidth ?? 0).toBeLessThan(before.width);
+    expect(layout?.canvasWidth ?? 0).toBeGreaterThan(600);
+    expect(layout?.backdropDisplay).toBe('none');
+
+    await page.evaluate(() => {
+      document.getElementById('edge-top')?.classList.add('edge-pinned');
+    });
+
+    await expect.poll(readLayout).toMatchObject({
+      canvasLeft: 340,
+      edgeTopLeft: 340,
+    });
+
+    const pinnedLayout = await readLayout();
+    expect(pinnedLayout).not.toBeNull();
+    expect(pinnedLayout?.edgeTopLeft).toBe(pinnedLayout?.canvasLeft);
+    expect(pinnedLayout?.edgeTopRight).toBeGreaterThan(pinnedLayout?.edgeTopLeft ?? 0);
+
+    await page.locator('.sidebar-tab', { hasText: 'Waiting' }).click();
+    await expect(page.locator('.sidebar-tab.is-active')).toContainText('Waiting');
+  });
+
   test('switches between waiting, someday, done, and files tabs', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await waitReady(page);

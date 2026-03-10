@@ -21,6 +21,27 @@
   transform: translateX(0);
 }
 
+@media (min-width: 768px) {
+  #pr-file-pane {
+    position: relative;
+    left: auto;
+    top: auto;
+    bottom: auto;
+    flex: 0 0 var(--file-sidebar-width);
+    height: 100%;
+    min-height: 100%;
+    margin-left: calc(-1 * var(--file-sidebar-width));
+    transform: none;
+    transition: margin-left var(--panel-slide-duration) var(--panel-slide-ease);
+    z-index: 2;
+    box-shadow: none;
+  }
+
+  #pr-file-pane.is-open {
+    margin-left: 0;
+  }
+}
+
 .pr-file-list {
   flex: 1;
   min-height: 0;
@@ -383,6 +404,12 @@
 
 body.file-sidebar-enabled #pr-file-drawer-backdrop.is-open {
   display: block;
+}
+
+@media (min-width: 768px) {
+  body.file-sidebar-enabled #pr-file-drawer-backdrop.is-open {
+    display: none;
+  }
 }
 
 .meeting-summary-items {

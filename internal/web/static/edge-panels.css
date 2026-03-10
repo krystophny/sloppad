@@ -104,6 +104,12 @@ body.panel-motion-enabled {
   transform: translateY(0);
 }
 
+@media (min-width: 768px) {
+  body.file-sidebar-open .edge-top {
+    left: var(--file-sidebar-width);
+  }
+}
+
 .edge-top .edge-panel-inner {
   padding-top: calc(var(--safe-area-top) + 0.35rem);
 }
