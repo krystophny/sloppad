@@ -364,7 +364,7 @@ export function renderMailDraftArtifact(root, event) {
 
   const shell = document.createElement('section');
   shell.id = MAIL_DRAFT_EDITOR_ID;
-  shell.className = 'mail-draft-editor';
+  shell.className = 'mail-draft-editor canvas-embedded-ui';
 
   const header = document.createElement('header');
   header.className = 'mail-draft-header';

@@ -90,8 +90,15 @@ test.describe('mail drafts', () => {
         columns: style.gridTemplateColumns,
       };
     });
+    const paperLayout = await page.locator('.mail-draft-paper').evaluate((node) => {
+      const style = window.getComputedStyle(node as HTMLElement);
+      return {
+        columns: style.gridTemplateColumns,
+      };
+    });
     expect(composerLayout.display).toBe('grid');
     expect(composerLayout.columns).not.toBe('none');
+    expect(paperLayout.columns.split(' ').length).toBeGreaterThan(1);
     await expect.poll(async () => page.locator('#mail-draft-recipient-suggestions option').count()).toBe(2);
     await expect(page.locator('#mail-draft-recipient-suggestions option').nth(0)).toHaveAttribute('value', 'ada@example.com');
     await expect(page.locator('#mail-draft-recipient-suggestions option').nth(1)).toHaveAttribute('value', 'bob@example.com');
@@ -134,6 +141,33 @@ test.describe('mail drafts', () => {
 
     await page.locator('.sidebar-tab', { hasText: 'Done' }).click();
     await expect(page.locator('#pr-file-list')).toContainText('Quarterly update');
+  });
+
+  test('mail drafts keep focus inside the form instead of reopening the floating composer', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+
+    await page.evaluate(() => {
+      (window as any).__setItemSidebarData({
+        inbox: [],
+        waiting: [],
+        someday: [],
+        done: [],
+      });
+    });
+
+    await openInbox(page);
+    await page.locator('#new-mail-trigger').click();
+    await waitForLogEntry(page, 'api_fetch', 'mail_draft_create');
+
+    await setInteractionTool(page, 'text_note');
+    await page.locator('.mail-draft-envelope .mail-draft-field-line').first().click();
+    await expect(page.locator('#floating-input')).toBeHidden();
+    await expect(page.locator('[name="to"]')).toBeFocused();
+
+    await page.locator('.mail-draft-body-row').click();
+    await expect(page.locator('#floating-input')).toBeHidden();
+    await expect(page.locator('[name="body"]')).toBeFocused();
   });
 
   test('reply drafts seed recipient and subject from the selected email item', async ({ page }) => {

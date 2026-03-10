@@ -24,7 +24,7 @@
 .mail-draft-editor {
   display: grid;
   gap: 1rem;
-  max-width: min(100%, 860px);
+  max-width: min(100%, 1180px);
   margin: 0 auto;
 }
 
@@ -271,6 +271,22 @@
   border-top: 2px solid var(--border);
   margin-top: 1rem;
   padding-top: 1rem;
+}
+
+@media (min-width: 980px) {
+  .mail-draft-paper {
+    grid-template-columns: minmax(18rem, 22rem) minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .mail-draft-envelope {
+    border-bottom: none;
+    border-right: 1px solid rgba(0, 0, 0, 0.14);
+  }
+
+  .mail-draft-letter {
+    min-width: 0;
+  }
 }
 
 @media (max-width: 760px) {

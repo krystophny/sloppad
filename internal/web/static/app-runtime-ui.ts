@@ -645,7 +645,7 @@ export function startRuntimeReloadWatcher() {
 
 export function isEditableTarget(target) {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest('input,textarea,select,[contenteditable="true"]'));
+  return Boolean(target.closest('input,textarea,select,[contenteditable="true"],.canvas-embedded-ui'));
 }
 
 export function artifactEditorEl() {
@@ -688,6 +688,7 @@ export function canEnterArtifactEditModeFromTarget(target) {
   if (state.prReviewMode) return false;
   if (!(target instanceof Element)) return false;
   if (!target.closest('#canvas-text')) return false;
+  if (target.closest('.canvas-embedded-ui')) return false;
   if (target.closest('a,button,input,textarea,select,[contenteditable="true"]')) return false;
   if (isRecording() || shouldStopInUiClick()) return false;
   return true;
