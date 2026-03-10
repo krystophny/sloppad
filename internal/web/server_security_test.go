@@ -110,6 +110,8 @@ func TestServeCaptureUsesStandaloneAssets(t *testing.T) {
 		`src="./static/capture.js`,
 		`id="capture-record"`,
 		`id="capture-note"`,
+		`same inbox and artifact flow`,
+		`href="./"`,
 	} {
 		if !strings.Contains(body, fragment) {
 			t.Fatalf("GET /capture body missing %q", fragment)
@@ -192,6 +194,24 @@ func TestPrivacyCapturePageDoesNotPersistVoiceAudio(t *testing.T) {
 	for _, forbidden := range []string{"indexeddb", "queued locally", "saved locally"} {
 		if strings.Contains(source, forbidden) {
 			t.Fatalf("capture.js contains forbidden persisted-audio marker %q", forbidden)
+		}
+	}
+}
+
+func TestCapturePageUsesCanonicalItemAndArtifactAPIs(t *testing.T) {
+	data, err := staticFiles.ReadFile("static/capture.js")
+	if err != nil {
+		t.Fatalf("ReadFile(static/capture.js): %v", err)
+	}
+	source := string(data)
+	for _, required := range []string{"./api/artifacts", "./api/items"} {
+		if !strings.Contains(source, required) {
+			t.Fatalf("capture.js missing canonical API %q", required)
+		}
+	}
+	for _, forbidden := range []string{"./api/chat", "./api/projects", "./api/capture"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("capture.js contains parallel surface API %q", forbidden)
 		}
 	}
 }

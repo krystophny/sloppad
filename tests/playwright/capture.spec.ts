@@ -8,6 +8,8 @@ test.describe('capture page', () => {
     await expect(page.locator('#capture-page')).toBeVisible();
     await expect(page.locator('#workspace')).toHaveCount(0);
     await expect(page.locator('#edge-left-tap')).toHaveCount(0);
+    await expect(page.locator('.capture-boundary')).toContainText('same inbox and artifact flow');
+    await expect(page.locator('.capture-return')).toContainText('Open full workspace');
     await expect(page.locator('#capture-save')).toBeDisabled();
 
     await page.locator('#capture-note').fill('Follow up with the review queue tomorrow morning. Capture the blockers too.');
