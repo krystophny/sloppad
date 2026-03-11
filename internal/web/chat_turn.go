@@ -329,15 +329,7 @@ func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSe
 			if actionPayload == nil {
 				continue
 			}
-			eventType := "system_action"
-			actionType, _ := actionPayload["type"].(string)
-			if strings.EqualFold(strings.TrimSpace(actionType), "confirmation_required") {
-				eventType = "system_action_confirmation_required"
-			}
-			a.broadcastChatEvent(sessionID, map[string]interface{}{
-				"type":   eventType,
-				"action": actionPayload,
-			})
+			a.broadcastSystemActionEvent(sessionID, actionPayload)
 		}
 	} else {
 		assistantText = "I can only handle system actions in local-only mode."
@@ -369,6 +361,28 @@ func suppressLocalAssistantResponse(payloads []map[string]interface{}) bool {
 		}
 	}
 	return false
+}
+
+func systemActionEventType(actionPayload map[string]interface{}) string {
+	actionType, _ := actionPayload["type"].(string)
+	switch strings.TrimSpace(actionType) {
+	case "confirmation_required":
+		return "system_action_confirmation_required"
+	case "system_action_suppressed":
+		return "system_action_suppressed"
+	default:
+		return "system_action"
+	}
+}
+
+func (a *App) broadcastSystemActionEvent(sessionID string, actionPayload map[string]interface{}) {
+	if a == nil || actionPayload == nil {
+		return
+	}
+	a.broadcastChatEvent(sessionID, map[string]interface{}{
+		"type":   systemActionEventType(actionPayload),
+		"action": actionPayload,
+	})
 }
 
 // runAssistantTurnLegacy is the single-shot fallback when persistent session

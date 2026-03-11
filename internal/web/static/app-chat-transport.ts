@@ -146,6 +146,18 @@ function approvalRequestCanvasText(payload) {
   return lines.join('\n');
 }
 
+function suppressedSystemActionStatusText(action) {
+  const actionType = String(action?.action_type || action?.type || 'command').trim().replace(/_/g, ' ');
+  const status = String(action?.status || '').trim();
+  if (status === 'already_executed') {
+    return `duplicate ${actionType} suppressed: already executing`;
+  }
+  if (status === 'cooldown_suppressed') {
+    return `duplicate ${actionType} suppressed during cooldown`;
+  }
+  return `duplicate ${actionType} suppressed`;
+}
+
 function renderApprovalRequestCanvas(payload) {
   const requestID = String(payload?.request_id || '').trim();
   if (!requestID) return;
@@ -538,6 +550,12 @@ export function handleChatEvent(payload) {
           showStatus(`live toggle failed: ${message}`);
         });
     }
+    return;
+  }
+
+  if (type === 'system_action_suppressed') {
+    const action = payload && typeof payload.action === 'object' ? payload.action : {};
+    showStatus(suppressedSystemActionStatusText(action));
     return;
   }
 

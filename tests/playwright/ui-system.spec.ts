@@ -1598,6 +1598,20 @@ test.describe('project state persistence', () => {
 
     await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Dialogue');
   });
+
+  test('system_action_suppressed shows duplicate command status', async ({ page }) => {
+    await injectChatEvent(page, {
+      type: 'system_action_suppressed',
+      action: {
+        type: 'system_action_suppressed',
+        action_type: 'shell',
+        status: 'cooldown_suppressed',
+        cooldown_ms: 1500,
+      },
+    });
+
+    await expect(page.locator('#status-text')).toContainText('duplicate shell suppressed during cooldown');
+  });
 });
 
 

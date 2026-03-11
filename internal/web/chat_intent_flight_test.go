@@ -169,3 +169,41 @@ func TestExecuteSystemActionSuppressesShellCooldownDuplicate(t *testing.T) {
 		t.Fatalf("marker file = %q, want single execution", got)
 	}
 }
+
+func TestBroadcastSystemActionEventEmitsSuppressedEventType(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	conn, clientConn, cleanup := newParticipantTestWSConn(t)
+	defer cleanup()
+	app.hub.registerChat(session.ID, conn)
+	defer app.hub.unregisterChat(session.ID, conn)
+
+	env := newCommandEnvelope(&SystemAction{
+		Action: "shell",
+		Params: map[string]interface{}{"command": "printf 'hello-shell'"},
+	})
+	app.broadcastSystemActionEvent(session.ID, suppressedSystemActionPayload(env, "cooldown_suppressed", 1500*time.Millisecond))
+
+	payload := waitForWSJSONMessageType(t, clientConn, 2*time.Second, "system_action_suppressed")
+	action, ok := payload["action"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("action payload = %#v, want object", payload["action"])
+	}
+	if got := strFromAny(action["action_type"]); got != "shell" {
+		t.Fatalf("action_type = %q, want shell", got)
+	}
+	if got := strFromAny(action["status"]); got != "cooldown_suppressed" {
+		t.Fatalf("status = %q, want cooldown_suppressed", got)
+	}
+	if got := intFromAny(action["cooldown_ms"], 0); got != 1500 {
+		t.Fatalf("cooldown_ms = %d, want 1500", got)
+	}
+}
