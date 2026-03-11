@@ -17,8 +17,6 @@ func normalizeProjectKind(kind string) string {
 		return "task"
 	case "linked":
 		return "linked"
-	case "hub":
-		return "hub"
 	default:
 		return "managed"
 	}

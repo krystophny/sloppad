@@ -196,11 +196,11 @@ func TestClassifyAndExecuteSystemActionCreateWorkspaceFromGit(t *testing.T) {
 	t.Setenv("TABURA_WORKSPACE_CLONE_ROOT", cloneRoot)
 
 	sourceRepo := initGitTestRepo(t, "example-workspace")
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
 		t.Fatalf("chat session: %v", err)
 	}
@@ -357,11 +357,11 @@ func TestClassifyAndExecuteSystemActionWorkspaceManagement(t *testing.T) {
 	app.intentLLMURL = ""
 	app.intentClassifierURL = ""
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
 		t.Fatalf("chat session: %v", err)
 	}

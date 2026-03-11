@@ -490,7 +490,7 @@ export function applyRuntimePreferences(runtime) {
   renderEdgeTopProjects();
   renderInteractionSurfaceToggle();
   renderToolPalette();
-  state.startupBehavior = String(runtime?.startup_behavior || 'hub_first').trim().toLowerCase() || 'hub_first';
+  state.startupBehavior = String(runtime?.startup_behavior || 'resume_active').trim().toLowerCase() || 'resume_active';
   state.disclaimerVersion = String(runtime?.disclaimer_version || '').trim();
   state.disclaimerAckRequired = Boolean(runtime?.disclaimer_ack_required);
 }
@@ -521,7 +521,7 @@ export async function updateRuntimePreferences(patch) {
   renderEdgeTopProjects();
   renderInteractionSurfaceToggle();
   renderToolPalette();
-  state.startupBehavior = String(payload?.startup_behavior || state.startupBehavior || 'hub_first').trim().toLowerCase() || 'hub_first';
+  state.startupBehavior = String(payload?.startup_behavior || state.startupBehavior || 'resume_active').trim().toLowerCase() || 'resume_active';
   renderEdgeTopModelButtons();
   return payload;
 }
@@ -843,7 +843,7 @@ export function hasVisibleCanvasArtifact() {
 }
 
 export function shouldShowCompanionIdleSurface() {
-  return Boolean(state.companionEnabled) && !state.liveSessionActive && !hasVisibleCanvasArtifact() && !isHubActive();
+  return Boolean(state.companionEnabled) && !state.liveSessionActive && !hasVisibleCanvasArtifact();
 }
 
 export function updateCompanionIdleSurface() {
@@ -897,22 +897,6 @@ export function resetCompanionState() {
   state.companionRuntimeReason = 'idle';
   state.companionProjectKey = '';
   updateCompanionIdleSurface();
-}
-
-export function isHubProject(project) {
-  if (!project || typeof project !== 'object') return false;
-  const kind = String(project.kind || '').trim().toLowerCase();
-  if (kind === 'hub') return true;
-  const key = String(project.project_key || '').trim();
-  return key === '__hub__';
-}
-
-export function hubProject() {
-  return state.projects.find((project) => isHubProject(project)) || null;
-}
-
-export function isHubActive() {
-  return isHubProject(activeProject());
 }
 
 export function isTemporaryProjectKind(kind) {

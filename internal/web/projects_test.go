@@ -144,31 +144,22 @@ func TestProjectsListCreatesEphemeralWorkspaceWhenNoneExist(t *testing.T) {
 	}
 }
 
-func TestHubProjectReusesWorkspaceChatSession(t *testing.T) {
+func TestProjectAPIModelIncludesWorkspaceChatSession(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
 		t.Fatalf("ensure default project: %v", err)
 	}
-	hub, err := app.ensureHubProject()
-	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+	if _, err := app.ensureWorkspaceForProject(defaultProject, false); err != nil {
+		t.Fatalf("ensure workspace for default project: %v", err)
 	}
-
 	defaultItem, err := app.buildProjectAPIModel(defaultProject)
 	if err != nil {
 		t.Fatalf("build default project API model: %v", err)
 	}
-	hubItem, err := app.buildProjectAPIModel(hub)
-	if err != nil {
-		t.Fatalf("build hub project API model: %v", err)
-	}
-	if hubItem.ChatSessionID == "" {
-		t.Fatalf("expected hub chat session id")
-	}
-	if hubItem.ChatSessionID != defaultItem.ChatSessionID {
-		t.Fatalf("hub chat_session_id = %q, want shared session %q", hubItem.ChatSessionID, defaultItem.ChatSessionID)
+	if defaultItem.ChatSessionID == "" {
+		t.Fatalf("expected project chat session id")
 	}
 }
 
@@ -243,12 +234,12 @@ func TestProjectsListPrefersLastUsedWorkspaceProject(t *testing.T) {
 	if _, err := app.store.SetWorkspaceSphere(betaWorkspace.ID, store.SphereWork); err != nil {
 		t.Fatalf("SetWorkspaceSphere(beta) error: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensureHubProject() error: %v", err)
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
 	}
-	if err := app.store.SetActiveProjectID(hub.ID); err != nil {
-		t.Fatalf("SetActiveProjectID(hub) error: %v", err)
+	if err := app.store.SetActiveProjectID(defaultProject.ID); err != nil {
+		t.Fatalf("SetActiveProjectID(default) error: %v", err)
 	}
 	if err := app.setActiveWorkspaceTracked(alphaWorkspace.ID, "workspace_switch"); err != nil {
 		t.Fatalf("setActiveWorkspaceTracked(alpha) error: %v", err)
@@ -574,7 +565,7 @@ func TestProjectChatModelUpdate(t *testing.T) {
 	}
 }
 
-func TestHubProjectCreatedWithFixedSparkModel(t *testing.T) {
+func TestProjectsListMatchesStoredProjects(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	rrList := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
@@ -585,26 +576,25 @@ func TestHubProjectCreatedWithFixedSparkModel(t *testing.T) {
 	if err := json.Unmarshal(rrList.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode projects response: %v", err)
 	}
-
-	foundHub := false
-	for _, project := range payload.Projects {
-		if project.ProjectKey != HubProjectKey {
-			continue
-		}
-		foundHub = true
-		if project.Kind != HubProjectKind {
-			t.Fatalf("hub project kind = %q, want %q", project.Kind, HubProjectKind)
-		}
-		if project.ChatModel != "spark" {
-			t.Fatalf("hub chat model = %q, want spark", project.ChatModel)
-		}
-		if project.ReasoningEffort != "low" {
-			t.Fatalf("hub reasoning effort = %q, want low", project.ReasoningEffort)
-		}
-		break
+	storedProjects, err := app.store.ListProjects()
+	if err != nil {
+		t.Fatalf("ListProjects() error: %v", err)
 	}
-	if !foundHub {
-		t.Fatalf("expected hub project in projects list")
+	if len(payload.Projects) != len(storedProjects) {
+		t.Fatalf("payload project count = %d, want %d", len(payload.Projects), len(storedProjects))
+	}
+	storedByID := make(map[string]store.Project, len(storedProjects))
+	for _, project := range storedProjects {
+		storedByID[project.ID] = project
+	}
+	for _, project := range payload.Projects {
+		stored, ok := storedByID[project.ID]
+		if !ok {
+			t.Fatalf("unexpected project in payload: %#v", project)
+		}
+		if project.Name != stored.Name {
+			t.Fatalf("project %q name = %q, want %q", project.ID, project.Name, stored.Name)
+		}
 	}
 }
 
@@ -787,22 +777,22 @@ func TestProjectsActivityUnreadClearsOnActivate(t *testing.T) {
 	t.Fatalf("expected project %q in activity response after activation", project.ID)
 }
 
-func TestHubProjectRejectsModelUpdates(t *testing.T) {
+func TestProjectChatModelUpdateAllowsDefaultProject(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
 
 	rr := doAuthedJSONRequest(
 		t,
 		app.Router(),
 		http.MethodPost,
-		"/api/projects/"+hub.ID+"/chat-model",
+		"/api/projects/"+project.ID+"/chat-model",
 		map[string]any{"model": "gpt"},
 	)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -924,16 +914,7 @@ func TestProjectWelcomeListsDocsAndRecentFiles(t *testing.T) {
 	if len(listPayload.Projects) == 0 {
 		t.Fatalf("expected at least one project")
 	}
-	projectID := ""
-	for _, project := range listPayload.Projects {
-		if project.Kind != "hub" {
-			projectID = project.ID
-			break
-		}
-	}
-	if projectID == "" {
-		t.Fatalf("expected a non-hub project")
-	}
+	projectID := listPayload.Projects[0].ID
 	project, err := app.store.GetProject(projectID)
 	if err != nil {
 		t.Fatalf("get project: %v", err)
@@ -969,7 +950,7 @@ func TestProjectWelcomeListsDocsAndRecentFiles(t *testing.T) {
 	}
 }
 
-func TestHubWelcomeListsProjects(t *testing.T) {
+func TestProjectWelcomeIncludesRuntimeCards(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	rrList := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
@@ -980,34 +961,24 @@ func TestHubWelcomeListsProjects(t *testing.T) {
 	if err := json.Unmarshal(rrList.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode projects response: %v", err)
 	}
-	hubID := ""
-	projectName := ""
-	for _, project := range listPayload.Projects {
-		if project.Kind == "hub" {
-			hubID = project.ID
-			continue
-		}
-		if projectName == "" {
-			projectName = project.Name
-		}
+	if len(listPayload.Projects) == 0 {
+		t.Fatalf("expected at least one project")
 	}
-	if hubID == "" {
-		t.Fatalf("expected hub project id")
-	}
+	projectID := listPayload.Projects[0].ID
 
-	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects/"+hubID+"/welcome", nil)
+	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects/"+projectID+"/welcome", nil)
 	if rrWelcome.Code != http.StatusOK {
-		t.Fatalf("expected hub welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
+		t.Fatalf("expected project welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(rrWelcome.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode hub welcome response: %v", err)
+		t.Fatalf("decode welcome response: %v", err)
 	}
-	if got := strFromAny(payload["scope"]); got != "hub" {
-		t.Fatalf("scope = %q, want %q", got, "hub")
+	if got := strFromAny(payload["scope"]); got != "project" {
+		t.Fatalf("scope = %q, want %q", got, "project")
 	}
-	if projectName != "" && !strings.Contains(rrWelcome.Body.String(), projectName) {
-		t.Fatalf("hub welcome missing project name %q: %s", projectName, rrWelcome.Body.String())
+	if !strings.Contains(rrWelcome.Body.String(), "Silent mode") {
+		t.Fatalf("welcome missing runtime card: %s", rrWelcome.Body.String())
 	}
 }
 
@@ -1161,11 +1132,11 @@ func TestTemporaryProjectCreationCopiesSourceSettingsAndPersist(t *testing.T) {
 	}
 }
 
-func TestTemporaryProjectDiscardRemovesProjectDataAndFallsBackToHub(t *testing.T) {
+func TestTemporaryProjectDiscardRemovesProjectDataAndFallsBackToDefaultProject(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
 
 	rrCreate := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/projects", map[string]any{
@@ -1246,11 +1217,11 @@ func TestTemporaryProjectDiscardRemovesProjectDataAndFallsBackToHub(t *testing.T
 	if !discardPayload.OK {
 		t.Fatalf("expected discard ok=true")
 	}
-	if discardPayload.ActiveProjectID != hub.ID {
-		t.Fatalf("active_project_id = %q, want %q", discardPayload.ActiveProjectID, hub.ID)
+	if discardPayload.ActiveProjectID != defaultProject.ID {
+		t.Fatalf("active_project_id = %q, want %q", discardPayload.ActiveProjectID, defaultProject.ID)
 	}
-	if discardPayload.ActiveProject.Kind != "hub" {
-		t.Fatalf("active project kind = %q, want hub", discardPayload.ActiveProject.Kind)
+	if discardPayload.ActiveProject.Kind != defaultProject.Kind {
+		t.Fatalf("active project kind = %q, want %q", discardPayload.ActiveProject.Kind, defaultProject.Kind)
 	}
 	if _, err := app.store.GetProject(createPayload.Project.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("GetProject(discarded) error = %v, want sql.ErrNoRows", err)

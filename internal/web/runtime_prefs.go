@@ -41,10 +41,10 @@ func normalizeRuntimeTool(raw string) string {
 
 func normalizeRuntimeStartupBehavior(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "hub_first":
-		return "hub_first"
+	case "resume_active", "workspace_first", "project_first":
+		return "resume_active"
 	default:
-		return "hub_first"
+		return "resume_active"
 	}
 }
 
@@ -86,11 +86,11 @@ func (a *App) runtimeTool() string {
 
 func (a *App) runtimeStartupBehavior() string {
 	if a == nil || a.store == nil {
-		return "hub_first"
+		return "resume_active"
 	}
 	value, err := a.store.AppState(appStateStartupBehaviorKey)
 	if err != nil {
-		return "hub_first"
+		return "resume_active"
 	}
 	return normalizeRuntimeStartupBehavior(value)
 }

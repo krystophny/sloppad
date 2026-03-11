@@ -35,7 +35,6 @@ const updateAssistantRow = (...args) => refs.updateAssistantRow(...args);
 const trackAssistantTurnStarted = (...args) => refs.trackAssistantTurnStarted(...args);
 const trackAssistantTurnFinished = (...args) => refs.trackAssistantTurnFinished(...args);
 const activeProjectKey = (...args) => refs.activeProjectKey(...args);
-const hubProject = (...args) => refs.hubProject(...args);
 const setChatMode = (...args) => refs.setChatMode(...args);
 const resetCompanionState = (...args) => refs.resetCompanionState(...args);
 const applyCompanionState = (...args) => refs.applyCompanionState(...args);
@@ -898,12 +897,6 @@ export async function switchProject(projectID) {
     state.projectSwitchInFlight = false;
     renderEdgeTopModelButtons();
   }
-}
-
-export async function switchToHub() {
-  const project = hubProject();
-  if (!project || !project.id) return;
-  await switchProject(project.id);
 }
 
 export {

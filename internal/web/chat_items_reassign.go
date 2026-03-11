@@ -94,7 +94,7 @@ func (a *App) resolveProjectReference(raw string) (store.Project, error) {
 	if project, err := a.store.GetProject(ref); err == nil {
 		return project, nil
 	}
-	return a.hubFindProjectByName(ref)
+	return a.findProjectByName(ref)
 }
 
 func (a *App) executeItemReassignmentAction(session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {

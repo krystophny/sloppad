@@ -66,84 +66,6 @@ func describeRecentFileTime(info os.FileInfo) string {
 	}
 }
 
-func (a *App) buildHubWelcomeSections(projects []store.Project, activeProjectID string) []projectWelcomeSection {
-	projectCards := make([]projectWelcomeCard, 0, len(projects))
-	for _, project := range projects {
-		if isHubProject(project) {
-			continue
-		}
-		item, err := a.buildProjectAPIModel(project)
-		if err != nil {
-			continue
-		}
-		subtitle := strings.TrimSpace(project.RootPath)
-		if project.ID == activeProjectID {
-			subtitle = "current active project"
-		}
-		description := "Open project canvas"
-		switch item.RunState.Status {
-		case "running":
-			description = fmt.Sprintf("%d active run, %d queued", item.RunState.ActiveTurns, item.RunState.QueuedTurns)
-		case "queued":
-			description = fmt.Sprintf("%d queued run", item.RunState.QueuedTurns)
-		}
-		projectCards = append(projectCards, projectWelcomeCard{
-			ID:          "project-" + project.ID,
-			Title:       strings.TrimSpace(project.Name),
-			Subtitle:    subtitle,
-			Description: description,
-			Action: projectWelcomeAction{
-				Type:      "switch_project",
-				ProjectID: project.ID,
-			},
-		})
-	}
-	sort.Slice(projectCards, func(i, j int) bool {
-		left := strings.ToLower(projectCards[i].Title)
-		right := strings.ToLower(projectCards[j].Title)
-		if left != right {
-			return left < right
-		}
-		return projectCards[i].Title < projectCards[j].Title
-	})
-	quickCards := []projectWelcomeCard{
-		{
-			ID:          "pref-silent",
-			Title:       "Silent mode",
-			Subtitle:    map[bool]string{true: "on", false: "off"}[a.silentModeEnabled()],
-			Description: "Global runtime preference across projects",
-			Action: projectWelcomeAction{
-				Type:       "set_silent_mode",
-				SilentMode: boolPtr(!a.silentModeEnabled()),
-			},
-		},
-		{
-			ID:          "pref-startup",
-			Title:       "Startup",
-			Subtitle:    a.runtimeStartupBehavior(),
-			Description: "Fresh app loads start in Hub",
-			Action: projectWelcomeAction{
-				Type:          "set_startup_behavior",
-				StartupTarget: "hub_first",
-			},
-		},
-	}
-	sections := []projectWelcomeSection{}
-	if len(projectCards) > 0 {
-		sections = append(sections, projectWelcomeSection{
-			ID:    "projects",
-			Title: "Active Projects",
-			Cards: projectCards,
-		})
-	}
-	sections = append(sections, projectWelcomeSection{
-		ID:    "runtime",
-		Title: "Runtime",
-		Cards: quickCards,
-	})
-	return sections
-}
-
 func discoverProjectWelcomeCards(rootPath string) ([]projectWelcomeCard, []projectWelcomeCard) {
 	type fileInfo struct {
 		rel  string
@@ -255,16 +177,6 @@ func (a *App) buildProjectWelcomeSections(project store.Project) []projectWelcom
 		Title: "Modes",
 		Cards: []projectWelcomeCard{
 			{
-				ID:          "go-hub",
-				Title:       "Hub",
-				Subtitle:    "Return to project switchboard",
-				Description: "Open the Hub canvas",
-				Action: projectWelcomeAction{
-					Type:      "switch_project",
-					ProjectID: "hub",
-				},
-			},
-			{
 				ID:          "silent",
 				Title:       "Silent mode",
 				Subtitle:    map[bool]string{true: "on", false: "off"}[a.silentModeEnabled()],
@@ -298,27 +210,13 @@ func (a *App) handleProjectWelcome(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	scope := "project"
-	title := strings.TrimSpace(project.Name)
-	var sections []projectWelcomeSection
-	if isHubProject(project) {
-		scope = "hub"
-		title = "Hub"
-		projects, _, listErr := a.listProjectsWithDefault()
-		if listErr != nil {
-			http.Error(w, listErr.Error(), http.StatusInternalServerError)
-			return
-		}
-		sections = a.buildHubWelcomeSections(projects, project.ID)
-	} else {
-		sections = a.buildProjectWelcomeSections(project)
-	}
+	sections := a.buildProjectWelcomeSections(project)
 	writeJSON(w, projectWelcomeResponse{
 		OK:        true,
 		ProjectID: project.ID,
 		Project:   item,
-		Scope:     scope,
-		Title:     title,
+		Scope:     "project",
+		Title:     strings.TrimSpace(project.Name),
 		Sections:  sections,
 	})
 }

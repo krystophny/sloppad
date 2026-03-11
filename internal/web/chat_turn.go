@@ -28,10 +28,6 @@ func (a *App) runAssistantTurn(sessionID string, turn dequeuedTurn) {
 	positionCtx := a.chatCanvasPositions.consume(sessionID)
 	cursorCtx := turn.cursor
 	userText := queuedUserMessage(messages, turn.messageID)
-	if a.activeProjectIsHub() {
-		a.runHubTurn(sessionID, session, messages, turn.outputMode, turn.localOnly)
-		return
-	}
 	if a.tryRunLocalSystemActionTurn(sessionID, session, userText, cursorCtx, turn.captureMode, turn.outputMode, turn.localOnly) {
 		return
 	}

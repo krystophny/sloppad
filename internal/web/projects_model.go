@@ -76,9 +76,6 @@ func (a *App) projectSphere(project store.Project) (string, error) {
 }
 
 func (a *App) projectSelectionRank(project store.Project, activeSphere string) (int, error) {
-	if isHubProject(project) {
-		return 3, nil
-	}
 	projectSphere, err := a.projectSphere(project)
 	if err != nil {
 		return 0, err
@@ -281,10 +278,8 @@ func (a *App) activateProject(projectID string) (store.Project, error) {
 	if err := a.store.SetActiveProjectID(project.ID); err != nil {
 		return store.Project{}, err
 	}
-	if !isHubProject(project) {
-		if _, err := a.ensureWorkspaceForProject(project, true); err != nil {
-			return store.Project{}, err
-		}
+	if _, err := a.ensureWorkspaceForProject(project, true); err != nil {
+		return store.Project{}, err
 	}
 	if err := a.markProjectSeen(project); err != nil {
 		return store.Project{}, err
@@ -330,9 +325,6 @@ func (a *App) updateProjectChatModel(projectID, rawModel, rawReasoningEffort str
 	project, err := a.store.GetProject(strings.TrimSpace(projectID))
 	if err != nil {
 		return store.Project{}, err
-	}
-	if isHubProject(project) {
-		return store.Project{}, errors.New("hub model is fixed to spark/low")
 	}
 	modelAlias := modelprofile.ResolveAlias(rawModel, "")
 	if modelAlias == "" {

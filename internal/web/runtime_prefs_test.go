@@ -42,8 +42,8 @@ func TestRuntimeIncludesSafetyPreferences(t *testing.T) {
 	if got := strFromAny(payload["tool"]); got != "pointer" {
 		t.Fatalf("tool = %q, want %q", got, "pointer")
 	}
-	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
-		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
+	if got := strFromAny(payload["startup_behavior"]); got != "resume_active" {
+		t.Fatalf("startup_behavior = %q, want %q", got, "resume_active")
 	}
 	if got := strFromAny(payload["active_sphere"]); got != "private" {
 		t.Fatalf("active_sphere = %q, want %q", got, "private")
@@ -109,7 +109,7 @@ func TestRuntimePreferenceUpdatePersists(t *testing.T) {
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPatch, "/api/runtime/preferences", map[string]any{
 		"silent_mode":      true,
 		"tool":             "text_note",
-		"startup_behavior": "hub_first",
+		"startup_behavior": "resume_active",
 		"active_sphere":    "work",
 	})
 	if rr.Code != http.StatusOK {
@@ -130,8 +130,8 @@ func TestRuntimePreferenceUpdatePersists(t *testing.T) {
 	if got := strFromAny(payload["tool"]); got != "text_note" {
 		t.Fatalf("tool = %q, want %q", got, "text_note")
 	}
-	if got := strFromAny(payload["startup_behavior"]); got != "hub_first" {
-		t.Fatalf("startup_behavior = %q, want %q", got, "hub_first")
+	if got := strFromAny(payload["startup_behavior"]); got != "resume_active" {
+		t.Fatalf("startup_behavior = %q, want %q", got, "resume_active")
 	}
 	if got := strFromAny(payload["active_sphere"]); got != "work" {
 		t.Fatalf("active_sphere = %q, want %q", got, "work")

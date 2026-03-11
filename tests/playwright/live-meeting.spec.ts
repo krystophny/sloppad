@@ -70,19 +70,6 @@ async function setHarnessMeetingState(
           chat_model_reasoning_effort: 'low',
           run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
         },
-        {
-          id: 'hub',
-          name: 'Hub',
-          kind: 'hub',
-          project_key: '__hub__',
-          root_path: '/tmp/hub',
-          chat_session_id: 'chat-hub',
-          canvas_session_id: 'local',
-          chat_mode: 'chat',
-          chat_model: 'spark',
-          chat_model_reasoning_effort: 'low',
-          run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
-        },
       ];
       appState.activeProjectId = 'test';
       appState.hasArtifact = false;

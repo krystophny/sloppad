@@ -157,14 +157,7 @@ func (a *App) saveCompanionConfig(projectID string, cfg companionConfig) error {
 }
 
 func (a *App) activeCompanionProject() (store.Project, error) {
-	project, err := a.resolveProjectByIDOrActive("active")
-	if err != nil {
-		return store.Project{}, err
-	}
-	if isHubProject(project) {
-		return a.hubPrimaryProject()
-	}
-	return project, nil
+	return a.resolveProjectByIDOrActive("active")
 }
 
 func (a *App) resolveParticipantProject(chatSessionID string) (string, companionConfig) {

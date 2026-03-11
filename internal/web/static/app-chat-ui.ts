@@ -8,8 +8,6 @@ const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const openWorkspaceSidebarFile = (...args) => refs.openWorkspaceSidebarFile(...args);
 const switchProject = (...args) => refs.switchProject(...args);
-const hubProject = (...args) => refs.hubProject(...args);
-const isHubActive = (...args) => refs.isHubActive(...args);
 const showCanvasColumn = (...args) => refs.showCanvasColumn(...args);
 const chatHistoryEl = (...args) => refs.chatHistoryEl(...args);
 const syncChatScroll = (...args) => refs.syncChatScroll(...args);
@@ -467,13 +465,7 @@ export async function handleWelcomeAction(action) {
   if (!type) return;
   if (type === 'switch_project') {
     const projectID = String(action?.project_id || '').trim();
-    if (!projectID || projectID === 'hub') {
-      const hub = hubProject();
-      if (hub?.id) {
-        await switchProject(hub.id);
-      }
-      return;
-    }
+    if (!projectID) return;
     await switchProject(projectID);
     return;
   }
@@ -493,7 +485,7 @@ export async function handleWelcomeAction(action) {
     return;
   }
   if (type === 'set_startup_behavior') {
-    await updateRuntimePreferences({ startup_behavior: 'hub_first' });
+    await updateRuntimePreferences({ startup_behavior: 'resume_active' });
   }
 }
 
@@ -502,9 +494,7 @@ export function renderWelcomeSurface(payload) {
   if (!(canvasText instanceof HTMLElement)) return;
   const sections = Array.isArray(payload?.sections) ? payload.sections : [];
   const title = String(payload?.title || 'Welcome').trim() || 'Welcome';
-  const subtitle = isHubActive()
-    ? 'Choose a workspace or change a global runtime preference.'
-    : 'Pick up a recent file, open docs, or switch modes before asking.';
+  const subtitle = 'Pick up a recent file, open docs, or switch modes before asking.';
   const normalizedSections = sections.map((section, index) => ({
     ...section,
     _sectionIndex: index,

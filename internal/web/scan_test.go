@@ -26,18 +26,16 @@ func (f fakeScanExtractor) ExtractScan(_ context.Context, _ scanExtractRequest) 
 	return f.result, f.err
 }
 
-func firstNonHubProject(t *testing.T, app *App) store.Project {
+func firstProject(t *testing.T, app *App) store.Project {
 	t.Helper()
 	projects, err := app.store.ListProjects()
 	if err != nil {
 		t.Fatalf("ListProjects() error: %v", err)
 	}
 	for _, project := range projects {
-		if !strings.EqualFold(project.Kind, "hub") {
-			return project
-		}
+		return project
 	}
-	t.Fatal("expected non-hub project")
+	t.Fatal("expected project")
 	return store.Project{}
 }
 
@@ -52,7 +50,7 @@ func TestScanUploadCreatesLinkedArtifactAndSummary(t *testing.T) {
 		},
 	}
 
-	project := firstNonHubProject(t, app)
+	project := firstProject(t, app)
 	sourceArtifact, err := app.store.CreateArtifact(
 		store.ArtifactKindMarkdown,
 		nil,
@@ -163,7 +161,7 @@ func TestScanConfirmCreatesAnnotationArtifactAndUpdatesScanMeta(t *testing.T) {
 		},
 	}
 
-	project := firstNonHubProject(t, app)
+	project := firstProject(t, app)
 	sourceArtifact, err := app.store.CreateArtifact(
 		store.ArtifactKindMarkdown,
 		nil,

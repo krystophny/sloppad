@@ -13,16 +13,13 @@ func testSessionForCanvasPosition(t *testing.T, app *App) string {
 		t.Fatalf("ListProjects: %v", err)
 	}
 	for _, project := range projects {
-		if isHubProject(project) {
-			continue
-		}
 		session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
 		if err != nil {
 			t.Fatalf("GetOrCreateChatSession: %v", err)
 		}
 		return session.ID
 	}
-	t.Fatal("no non-hub project available")
+	t.Fatal("no project available")
 	return ""
 }
 
@@ -116,10 +113,8 @@ func TestFinalizeAssistantResponse_StripsPositionMarkerBeforePersist(t *testing.
 	}
 	var projectKey string
 	for _, project := range projects {
-		if !isHubProject(project) {
-			projectKey = project.ProjectKey
-			break
-		}
+		projectKey = project.ProjectKey
+		break
 	}
 	if projectKey == "" {
 		t.Fatal("missing non-hub project")

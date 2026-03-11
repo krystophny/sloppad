@@ -63,6 +63,7 @@ window._taburaApp = {
   sttCancel: voiceModule.sttCancel,
   appendDictationTranscript: dictationModule.maybeHandleDictationTranscript,
   sendDictationDraft: dictationModule.sendDictationDraft,
+  fetchProjects: projectsModule.fetchProjects,
   refreshCompanionState: projectsModule.refreshCompanionState,
   syncCompanionIdleSurface: runtimeUiModule.syncCompanionIdleSurface,
 };

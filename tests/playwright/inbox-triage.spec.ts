@@ -70,16 +70,6 @@ async function seedSphereScenario(page: Page) {
         chat_session_id: 'chat-work',
         canvas_session_id: 'local',
       },
-      {
-        id: 'hub',
-        name: 'Hub',
-        kind: 'hub',
-        sphere: '',
-        project_key: '__hub__',
-        root_path: '/tmp/hub',
-        chat_session_id: 'chat-hub',
-        canvas_session_id: 'local',
-      },
     ], 'private-notes');
     (window as any).__setRuntimeState({ active_sphere: 'private' });
     (window as any).__setItemSidebarWorkspaces([
@@ -313,7 +303,7 @@ test.describe('inbox triage interactions', () => {
     await waitReady(page);
     await seedSphereScenario(page);
 
-    await expect.poll(() => projectButtonTexts(page)).toEqual(['Private Notes', 'Hub']);
+    await expect.poll(() => projectButtonTexts(page)).toEqual(['Private Notes']);
     await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '1');
 
     await clickSphereButton(page, 'work');
@@ -322,7 +312,7 @@ test.describe('inbox triage interactions', () => {
       return log.some((entry: any) => entry?.action === 'runtime_preferences' && entry?.payload?.active_sphere === 'work');
     }).toBe(true);
 
-    await expect.poll(() => projectButtonTexts(page)).toEqual(['Work Tracker', 'Hub']);
+    await expect.poll(() => projectButtonTexts(page)).toEqual(['Work Tracker']);
     await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '1');
     await openInbox(page);
     await expect(page.locator('.sidebar-tab', { hasText: 'Inbox' }).first()).toContainText('1');

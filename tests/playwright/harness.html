@@ -198,7 +198,7 @@
       tts_enabled: true,
       silent_mode: false,
       tool: 'pointer',
-      startup_behavior: 'hub_first',
+      startup_behavior: 'resume_active',
       active_sphere: 'private',
     };
     let dictationState = {
@@ -266,7 +266,7 @@
           : 'pointer';
       }
       if (Object.prototype.hasOwnProperty.call(next, 'startup_behavior')) {
-        runtimeState.startup_behavior = 'hub_first';
+        runtimeState.startup_behavior = 'resume_active';
       }
       if (Object.prototype.hasOwnProperty.call(next, 'active_sphere')) {
         runtimeState.active_sphere = String(next.active_sphere || '').trim().toLowerCase() === 'work' ? 'work' : 'private';
@@ -448,27 +448,10 @@
         review_pending: false,
         run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
       },
-      {
-        id: 'hub',
-        name: 'Hub',
-        kind: 'hub',
-        sphere: '',
-        project_key: '__hub__',
-        root_path: '/tmp/hub',
-        chat_session_id: 'chat-hub',
-        canvas_session_id: 'local',
-        chat_mode: 'chat',
-        chat_model: 'spark',
-        chat_model_reasoning_effort: 'low',
-        unread: false,
-        review_pending: false,
-        run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
-      },
     ];
     let activeProjectId = 'test';
     let harnessProjectRunStates = {
       test: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
-      hub: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
     };
     window.__setProjects = (projects, nextActiveProjectId = '') => {
       const source = Array.isArray(projects) ? projects : [];
@@ -507,6 +490,7 @@
       } else if (!normalized.some((project) => project.id === activeProjectId)) {
         activeProjectId = normalized[0]?.id || '';
       }
+      void window._taburaApp?.fetchProjects?.();
     };
     const defaultItemSidebarActors = () => ([
       { id: 1, name: 'Alice', kind: 'human', email: 'alice@example.com' },
@@ -1249,6 +1233,7 @@
         ...harnessProjectRunStates,
         ...next,
       };
+      void window._taburaApp?.fetchProjects?.();
     };
     window.__setProjectActivity = (states) => {
       const next = states && typeof states === 'object' ? states : {};
@@ -1263,6 +1248,7 @@
           chat_mode: String(patch.chat_mode || harnessProjects[index].chat_mode || 'chat'),
         };
       }
+      void window._taburaApp?.fetchProjects?.();
     };
     const cloneProject = (id) => {
       const project = harnessProjects.find((item) => item.id === id) || harnessProjects[0];
@@ -1377,7 +1363,7 @@
             : 'pointer';
         }
         if (typeof body?.startup_behavior === 'string') {
-          runtimeState.startup_behavior = 'hub_first';
+          runtimeState.startup_behavior = 'resume_active';
         }
         if (typeof body?.active_sphere === 'string') {
           runtimeState.active_sphere = String(body.active_sphere).trim().toLowerCase() === 'work' ? 'work' : 'private';
@@ -1542,7 +1528,7 @@
         }
         harnessProjects.splice(index, 1);
         delete harnessProjectRunStates[projectId];
-        activeProjectId = harnessProjects.some((project) => project.id === 'hub') ? 'hub' : (harnessProjects[0]?.id || '');
+        activeProjectId = harnessProjects[0]?.id || '';
         window.__harnessLog.push({
           type: 'api_fetch',
           action: 'project_discard',

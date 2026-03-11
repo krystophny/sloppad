@@ -67,9 +67,6 @@ func (a *App) projectSourceByID(projectID string) (store.Project, bool, error) {
 	if err != nil {
 		return store.Project{}, false, err
 	}
-	if isHubProject(project) {
-		return store.Project{}, false, nil
-	}
 	return project, true, nil
 }
 
@@ -310,9 +307,6 @@ func (a *App) temporaryProjectDiscardRoot(project store.Project) string {
 }
 
 func (a *App) fallbackProjectAfterDiscard(discardedProjectID string) (store.Project, error) {
-	if hub, err := a.ensureHubProject(); err == nil && hub.ID != strings.TrimSpace(discardedProjectID) {
-		return hub, nil
-	}
 	defaultProject, err := a.ensureDefaultProjectRecord()
 	if err == nil && defaultProject.ID != strings.TrimSpace(discardedProjectID) {
 		return defaultProject, nil

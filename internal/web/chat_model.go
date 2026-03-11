@@ -15,9 +15,6 @@ type appServerModelProfile struct {
 }
 
 func (a *App) effectiveProjectChatModelAlias(project store.Project) string {
-	if isHubProject(project) {
-		return modelprofile.AliasSpark
-	}
 	if alias := modelprofile.ResolveAlias(project.ChatModel, ""); alias != "" {
 		return alias
 	}
@@ -28,9 +25,6 @@ func (a *App) effectiveProjectChatModelAlias(project store.Project) string {
 }
 
 func (a *App) effectiveProjectChatModelReasoningEffort(project store.Project) string {
-	if isHubProject(project) {
-		return modelprofile.ReasoningLow
-	}
 	alias := a.effectiveProjectChatModelAlias(project)
 	effort := modelprofile.NormalizeReasoningEffort(alias, project.ChatModelReasoningEffort)
 	if effort == "" {
@@ -40,16 +34,6 @@ func (a *App) effectiveProjectChatModelReasoningEffort(project store.Project) st
 }
 
 func (a *App) appServerModelProfileForProject(project store.Project) appServerModelProfile {
-	if isHubProject(project) {
-		model := modelprofile.ModelForAlias(modelprofile.AliasSpark)
-		reasoning := appServerReasoningParamsForModel(model, modelprofile.ReasoningLow)
-		return appServerModelProfile{
-			Alias:        modelprofile.AliasSpark,
-			Model:        model,
-			ThreadParams: nil,
-			TurnParams:   reasoning,
-		}
-	}
 	alias := a.effectiveProjectChatModelAlias(project)
 	effort := a.effectiveProjectChatModelReasoningEffort(project)
 	model := modelprofile.ModelForAlias(alias)

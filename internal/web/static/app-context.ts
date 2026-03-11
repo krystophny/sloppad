@@ -126,7 +126,7 @@ export const state = {
     tool: 'pointer',
     toolPinned: false,
   },
-  startupBehavior: 'hub_first',
+  startupBehavior: 'resume_active',
   ttsEnabled: false,
   ttsSilent: false,
   yoloMode: false,

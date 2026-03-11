@@ -161,7 +161,7 @@ func (a *App) zoteroCollectionMappingForAccount(account store.ExternalAccount, m
 
 func (a *App) zoteroProjectHintFromTags(tags []string) *string {
 	for _, tag := range tags {
-		project, err := a.hubFindProjectByName(tag)
+		project, err := a.findProjectByName(tag)
 		if err != nil {
 			continue
 		}

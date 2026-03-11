@@ -280,9 +280,6 @@ func (a *App) listProjectsWithDefault() ([]store.Project, store.Project, error) 
 	if err != nil {
 		return nil, store.Project{}, err
 	}
-	if _, err := a.ensureHubProject(); err != nil {
-		return nil, store.Project{}, err
-	}
 	projects, err := a.store.ListProjects()
 	if err != nil {
 		return nil, store.Project{}, err

@@ -20,16 +20,10 @@ func TestInkSubmitWritesArtifacts(t *testing.T) {
 	if err := json.Unmarshal(rrProjects.Body.Bytes(), &listPayload); err != nil {
 		t.Fatalf("decode projects response: %v", err)
 	}
-	projectID := ""
-	for _, project := range listPayload.Projects {
-		if project.Kind != "hub" {
-			projectID = project.ID
-			break
-		}
+	if len(listPayload.Projects) == 0 {
+		t.Fatalf("expected at least one project")
 	}
-	if projectID == "" {
-		t.Fatalf("expected non-hub project")
-	}
+	projectID := listPayload.Projects[0].ID
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/ink/submit", map[string]any{
 		"project_id":     projectID,

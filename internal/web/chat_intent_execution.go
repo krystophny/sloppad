@@ -85,11 +85,11 @@ func (a *App) systemActionTargetProject(session store.ChatSession) (store.Projec
 	projectKey := strings.TrimSpace(session.ProjectKey)
 	if projectKey != "" {
 		project, err := a.store.GetProjectByProjectKey(projectKey)
-		if err == nil && !isHubProject(project) {
+		if err == nil {
 			return project, nil
 		}
 	}
-	return a.hubPrimaryProject()
+	return a.preferredProject()
 }
 
 func truncateSystemActionOutput(text string, maxBytes int) string {
@@ -201,7 +201,7 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 	switch action.Action {
 	case "switch_project":
 		targetName := systemActionStringParam(action.Params, "name")
-		project, err := a.hubFindProjectByName(targetName)
+		project, err := a.findProjectByName(targetName)
 		if err != nil {
 			return "", nil, err
 		}

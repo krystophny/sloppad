@@ -11,7 +11,7 @@ import (
 
 func (a *App) workspaceForProject(project store.Project) (*store.Workspace, error) {
 	rootPath := filepath.Clean(strings.TrimSpace(project.RootPath))
-	if rootPath == "" || isHubProject(project) {
+	if rootPath == "" {
 		return nil, nil
 	}
 	if workspace, err := a.store.GetWorkspaceByPath(rootPath); err == nil {
@@ -41,9 +41,6 @@ func (a *App) workspaceForProject(project store.Project) (*store.Workspace, erro
 }
 
 func (a *App) ensureWorkspaceForProject(project store.Project, activate bool) (store.Workspace, error) {
-	if isHubProject(project) {
-		return store.Workspace{}, errors.New("hub project has no workspace")
-	}
 	rootPath := filepath.Clean(strings.TrimSpace(project.RootPath))
 	if rootPath == "" {
 		return store.Workspace{}, errors.New("project path is required")

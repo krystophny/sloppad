@@ -139,7 +139,7 @@ func (a *App) evernoteNotebookMappingForAccount(account store.ExternalAccount, m
 
 func (a *App) evernoteProjectHintFromTags(tags []string) *string {
 	for _, tag := range tags {
-		project, err := a.hubFindProjectByName(tag)
+		project, err := a.findProjectByName(tag)
 		if err != nil {
 			continue
 		}

@@ -105,27 +105,6 @@ func normalizeIntentResponseKind(raw string) string {
 	}
 }
 
-func buildHubSystemPrompt() string {
-	return strings.TrimSpace(`You are Tabura Hub, a fast coordinator.
-Output JSON only when classifying a request.
-System commands: ` + strings.Join(intentPromptSystemCommands, ", ") + `.
-Canonical artifact actions: ` + strings.Join(artifactTaxonomy.CanonicalActionOrder, ", ") + `.
-Return exactly one of:
-- {"kind":"system_command","action":"<system_command>", ...params}
-- {"kind":"canonical_action","action":"<canonical_action>", ...params}
-- {"actions":[{"action":"shell",...},{"action":"open_file_canvas","path":"..."}]}
-- {"kind":"dialogue"}
-Use canonical_action for artifact or item work. Do not emit legacy artifact intents such as ` + strings.Join(legacyArtifactIntentNames, ", ") + `.
-Composite operations must be expressed as a canonical action plus parameters or as a multi-step system-command plan.
-For track_item include visible_after or count when relevant.
-For annotate_capture or compose on idea notes include target="idea_note".
-For bundle_review on someday work include target="someday" and operation.
-For dispatch_execute issue filing include target="github_issue" and mode="split" when local items are also required.
-For current-information requests (weather, web search, news, prices, schedules, latest/current updates), MUST use {"kind":"dialogue"} and MUST NOT use shell.
-For uncertain open/show-file requests: shell search first, then open_file_canvas with path="$last_shell_path".
-Use concise plain text only when the request is conversational.`)
-}
-
 func buildIntentLLMSystemPrompt() string {
 	return strings.TrimSpace(`You are Tabura's local router. Output JSON only.
 System commands: ` + strings.Join(intentPromptSystemCommands, ", ") + `.

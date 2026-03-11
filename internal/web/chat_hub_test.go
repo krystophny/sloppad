@@ -180,7 +180,6 @@ func TestParseSystemAction(t *testing.T) {
 
 func TestIntentPromptsSeparateSystemCommandsFromCanonicalActions(t *testing.T) {
 	for name, prompt := range map[string]string{
-		"hub": hubSystemPrompt,
 		"llm": intentLLMSystemPrompt,
 	} {
 		if !strings.Contains(prompt, "System commands:") {
@@ -350,18 +349,18 @@ func TestExecuteSystemActionOpenFileCanvasShowsArtifact(t *testing.T) {
 	}
 }
 
-func TestHubSwitchModelTargetsPrimaryProject(t *testing.T) {
+func TestSwitchModelTargetsActiveProject(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	if _, err := app.activateProject(hub.ID); err != nil {
-		t.Fatalf("activate hub project: %v", err)
+	if _, err := app.activateProject(project.ID); err != nil {
+		t.Fatalf("activate project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 
 	msg, payload, err := app.executeSystemAction(session.ID, session, &SystemAction{
@@ -384,30 +383,15 @@ func TestHubSwitchModelTargetsPrimaryProject(t *testing.T) {
 		t.Fatalf("expected model update message, got %q", msg)
 	}
 
-	defaultProject, err := app.ensureDefaultProjectRecord()
+	updatedProject, err := app.store.GetProject(project.ID)
 	if err != nil {
-		t.Fatalf("ensure default project: %v", err)
+		t.Fatalf("reload project: %v", err)
 	}
-	updatedDefault, err := app.store.GetProject(defaultProject.ID)
-	if err != nil {
-		t.Fatalf("reload default project: %v", err)
+	if updatedProject.ChatModel != "gpt" {
+		t.Fatalf("project chat model = %q, want gpt", updatedProject.ChatModel)
 	}
-	if updatedDefault.ChatModel != "gpt" {
-		t.Fatalf("default project chat model = %q, want gpt", updatedDefault.ChatModel)
-	}
-	if updatedDefault.ChatModelReasoningEffort != "xhigh" {
-		t.Fatalf(
-			"default reasoning effort = %q, want xhigh",
-			updatedDefault.ChatModelReasoningEffort,
-		)
-	}
-
-	updatedHub, err := app.store.GetProject(hub.ID)
-	if err != nil {
-		t.Fatalf("reload hub project: %v", err)
-	}
-	if updatedHub.ChatModel != "spark" {
-		t.Fatalf("hub chat model changed to %q, want spark", updatedHub.ChatModel)
+	if updatedProject.ChatModelReasoningEffort != "xhigh" {
+		t.Fatalf("project reasoning effort = %q, want xhigh", updatedProject.ChatModelReasoningEffort)
 	}
 }
 
@@ -489,15 +473,15 @@ func TestOpenFileCanvasRendersPresentationAsPDF(t *testing.T) {
 	}
 }
 
-func TestHubSwitchProjectActionReturnsActivationPayload(t *testing.T) {
+func TestSwitchProjectActionReturnsActivationPayload(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 
 	linkedDir := t.TempDir()
@@ -535,13 +519,13 @@ func TestHubSwitchProjectActionReturnsActivationPayload(t *testing.T) {
 
 func TestExecuteSystemActionRejectsUnsupportedAction(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 
 	_, _, err = app.executeSystemAction(session.ID, session, &SystemAction{Action: "unknown"})
@@ -553,7 +537,7 @@ func TestExecuteSystemActionRejectsUnsupportedAction(t *testing.T) {
 	}
 }
 
-func TestHubRunTurnKeepsPlainTextAssistantOutput(t *testing.T) {
+func TestRunAssistantTurnKeepsPlainTextAssistantOutput(t *testing.T) {
 	const assistantReply = "All systems nominal."
 	wsServer := setupMockAppServerStatusServer(t, assistantReply)
 	defer wsServer.Close()
@@ -567,23 +551,19 @@ func TestHubRunTurnKeepsPlainTextAssistantOutput(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "status?", "status?", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
 
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
 	lastAssistant := latestAssistantMessage(t, app, session.ID)
 	if lastAssistant != assistantReply {
@@ -591,7 +571,7 @@ func TestHubRunTurnKeepsPlainTextAssistantOutput(t *testing.T) {
 	}
 }
 
-func TestHubRunTurnExecutesHighConfidenceLocalIntent(t *testing.T) {
+func TestRunAssistantTurnExecutesHighConfidenceLocalIntent(t *testing.T) {
 	classifier := setupMockIntentClassifierServer(t, http.StatusOK, map[string]interface{}{
 		"intent":     "toggle_silent",
 		"confidence": 0.95,
@@ -608,29 +588,26 @@ func TestHubRunTurnExecutesHighConfidenceLocalIntent(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "be quiet", "be quiet", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
 	if got := latestAssistantMessage(t, app, session.ID); got != "Toggled silent mode." {
 		t.Fatalf("assistant message = %q, want %q", got, "Toggled silent mode.")
 	}
 }
 
-func TestRunAssistantTurnNonHubExecutesHighConfidenceLocalIntent(t *testing.T) {
+func TestRunAssistantTurnExecutesHighConfidenceLocalIntentInProjectSession(t *testing.T) {
 	classifier := setupMockIntentClassifierServer(t, http.StatusOK, map[string]interface{}{
 		"intent":     "toggle_silent",
 		"confidence": 0.95,
@@ -666,7 +643,7 @@ func TestRunAssistantTurnNonHubExecutesHighConfidenceLocalIntent(t *testing.T) {
 	}
 }
 
-func TestRunAssistantTurnNonHubOpenReadmeUsesMultiActionPlanAndOpensCanvas(t *testing.T) {
+func TestRunAssistantTurnOpenReadmeUsesMultiActionPlanAndOpensCanvas(t *testing.T) {
 	llmCalls := 0
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -747,7 +724,7 @@ func TestRunAssistantTurnNonHubOpenReadmeUsesMultiActionPlanAndOpensCanvas(t *te
 	}
 }
 
-func TestHubRunTurnFallsBackToSparkOnLowIntentConfidence(t *testing.T) {
+func TestRunAssistantTurnFallsBackToAppServerOnLowIntentConfidence(t *testing.T) {
 	const assistantReply = "All systems nominal."
 	wsServer := setupMockAppServerStatusServer(t, assistantReply)
 	defer wsServer.Close()
@@ -772,29 +749,26 @@ func TestHubRunTurnFallsBackToSparkOnLowIntentConfidence(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "be quiet", "be quiet", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
 	if got := latestAssistantMessage(t, app, session.ID); got != assistantReply {
 		t.Fatalf("assistant message = %q, want %q", got, assistantReply)
 	}
 }
 
-func TestHubRunTurnUsesIntentLLMFallbackOnLowIntentConfidence(t *testing.T) {
+func TestRunAssistantTurnUsesIntentLLMFallbackOnLowIntentConfidence(t *testing.T) {
 	classifier := setupMockIntentClassifierServer(t, http.StatusOK, map[string]interface{}{
 		"intent":     "toggle_silent",
 		"confidence": 0.25,
@@ -814,29 +788,26 @@ func TestHubRunTurnUsesIntentLLMFallbackOnLowIntentConfidence(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "be quiet", "be quiet", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
 	if got := latestAssistantMessage(t, app, session.ID); got != "Toggled silent mode." {
 		t.Fatalf("assistant message = %q, want %q", got, "Toggled silent mode.")
 	}
 }
 
-func TestHubRunTurnPreservesClarificationContextForLocalLLM(t *testing.T) {
+func TestRunAssistantTurnPreservesClarificationContextForLocalLLM(t *testing.T) {
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -858,9 +829,9 @@ func TestHubRunTurnPreservesClarificationContextForLocalLLM(t *testing.T) {
 		}
 		last, _ := messages[len(messages)-1].(map[string]interface{})
 		content := strings.TrimSpace(strFromAny(last["content"]))
-		reply := "I lost the original request."
+		reply := `{}`
 		if strings.Contains(content, "Show me my contacts") && strings.Contains(content, "On the canvas") {
-			reply = "Showing your contacts on canvas."
+			reply = `{"action":"toggle_silent"}`
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -885,13 +856,13 @@ func TestHubRunTurnPreservesClarificationContextForLocalLLM(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "Show me my contacts", "Show me my contacts", "text"); err != nil {
 		t.Fatalf("add first user message: %v", err)
@@ -902,19 +873,14 @@ func TestHubRunTurnPreservesClarificationContextForLocalLLM(t *testing.T) {
 	if _, err := app.store.AddChatMessage(session.ID, "user", "On the canvas", "On the canvas", "text"); err != nil {
 		t.Fatalf("add follow-up user message: %v", err)
 	}
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
-
-	if got := latestAssistantMessage(t, app, session.ID); got != "Showing your contacts on canvas." {
-		t.Fatalf("assistant message = %q, want %q", got, "Showing your contacts on canvas.")
+	if got := latestAssistantMessage(t, app, session.ID); got != "Toggled silent mode." {
+		t.Fatalf("assistant message = %q, want %q", got, "Toggled silent mode.")
 	}
 }
 
-func TestHubRunTurnFallsBackToSparkWhenLocalIntentExecutionFails(t *testing.T) {
+func TestRunAssistantTurnFallsBackToAppServerWhenLocalIntentExecutionFails(t *testing.T) {
 	const assistantReply = "All systems nominal."
 	wsServer := setupMockAppServerStatusServer(t, assistantReply)
 	defer wsServer.Close()
@@ -937,79 +903,53 @@ func TestHubRunTurnFallsBackToSparkWhenLocalIntentExecutionFails(t *testing.T) {
 		_ = app.Shutdown(context.Background())
 	})
 
-	hub, err := app.ensureHubProject()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("ensure default project: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(project)
 	if err != nil {
-		t.Fatalf("hub session: %v", err)
+		t.Fatalf("project session: %v", err)
 	}
 	if _, err := app.store.AddChatMessage(session.ID, "user", "switch project", "switch project", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
-	messages, err := app.store.ListChatMessages(session.ID, 100)
-	if err != nil {
-		t.Fatalf("list messages: %v", err)
-	}
-	app.runHubTurn(session.ID, session, messages, turnOutputModeSilent, false)
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
 
 	if got := latestAssistantMessage(t, app, session.ID); got != assistantReply {
 		t.Fatalf("assistant message = %q, want %q", got, assistantReply)
 	}
 }
 
-func TestHubProjectProfileUsesSparkLow(t *testing.T) {
+func TestProjectProfileUsesStoredAliasAndEffort(t *testing.T) {
 	app := newAuthedTestApp(t)
-	hub, err := app.ensureHubProject()
-	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
-	}
-
-	profile := app.appServerModelProfileForProject(hub)
-	if profile.Alias != modelprofile.AliasSpark {
-		t.Fatalf("hub profile alias = %q, want %q", profile.Alias, modelprofile.AliasSpark)
-	}
-	if profile.Model != modelprofile.ModelForAlias(modelprofile.AliasSpark) {
-		t.Fatalf("hub profile model = %q, want spark model", profile.Model)
-	}
-	if profile.ThreadParams != nil {
-		t.Fatalf("hub thread params = %#v, want nil", profile.ThreadParams)
-	}
-	if got := strings.TrimSpace(profile.TurnParams["effort"].(string)); got != modelprofile.ReasoningLow {
-		t.Fatalf("hub turn reasoning = %q, want %q", got, modelprofile.ReasoningLow)
-	}
-}
-
-func TestEnsureHubProjectUsesDedicatedRootWhenLocalProjectConfigured(t *testing.T) {
-	dataDir := t.TempDir()
-	localProjectDir := t.TempDir()
-	app, err := New(dataDir, localProjectDir, "", "", "", "", "", false)
-	if err != nil {
-		t.Fatalf("new app: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = app.Shutdown(context.Background())
-	})
-
-	defaultProject, err := app.ensureDefaultProjectRecord()
+	project, err := app.ensureDefaultProjectRecord()
 	if err != nil {
 		t.Fatalf("ensure default project: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	if err := app.store.UpdateProjectChatModel(project.ID, modelprofile.AliasSpark); err != nil {
+		t.Fatalf("UpdateProjectChatModel() error: %v", err)
+	}
+	if err := app.store.UpdateProjectChatModelReasoningEffort(project.ID, modelprofile.ReasoningLow); err != nil {
+		t.Fatalf("UpdateProjectChatModelReasoningEffort() error: %v", err)
+	}
+	project, err = app.store.GetProject(project.ID)
 	if err != nil {
-		t.Fatalf("ensure hub project: %v", err)
+		t.Fatalf("reload project: %v", err)
 	}
 
-	if strings.TrimSpace(hub.ProjectKey) != HubProjectKey {
-		t.Fatalf("hub key = %q, want %q", hub.ProjectKey, HubProjectKey)
+	profile := app.appServerModelProfileForProject(project)
+	if profile.Alias != modelprofile.AliasSpark {
+		t.Fatalf("project profile alias = %q, want %q", profile.Alias, modelprofile.AliasSpark)
 	}
-	if filepath.Clean(hub.RootPath) == filepath.Clean(defaultProject.RootPath) {
-		t.Fatalf("hub root path collides with default project root: %q", hub.RootPath)
+	if profile.Model != modelprofile.ModelForAlias(modelprofile.AliasSpark) {
+		t.Fatalf("project profile model = %q, want spark model", profile.Model)
 	}
-
-	expectedHubRoot := filepath.Join(dataDir, "projects", "hub")
-	if filepath.Clean(hub.RootPath) != filepath.Clean(expectedHubRoot) {
-		t.Fatalf("hub root path = %q, want %q", hub.RootPath, expectedHubRoot)
+	if profile.ThreadParams != nil {
+		t.Fatalf("project thread params = %#v, want nil", profile.ThreadParams)
+	}
+	if got := strings.TrimSpace(profile.TurnParams["effort"].(string)); got != modelprofile.ReasoningLow {
+		t.Fatalf("project turn reasoning = %q, want %q", got, modelprofile.ReasoningLow)
 	}
 }

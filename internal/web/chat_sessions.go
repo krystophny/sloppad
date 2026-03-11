@@ -8,13 +8,6 @@ import (
 )
 
 func (a *App) chatSessionForProject(project store.Project) (store.ChatSession, error) {
-	if isHubProject(project) {
-		primary, err := a.hubPrimaryProject()
-		if err != nil {
-			return store.ChatSession{}, err
-		}
-		return a.store.GetOrCreateChatSession(primary.ProjectKey)
-	}
 	return a.store.GetOrCreateChatSession(project.ProjectKey)
 }
 
@@ -109,18 +102,6 @@ func (a *App) resolveChatSessionTarget(projectID, projectKey string, workspaceID
 		return store.Workspace{}, nil, err
 	}
 	return loadProject(project)
-}
-
-func (a *App) activeProjectIsHub() bool {
-	activeProjectID, err := a.store.ActiveProjectID()
-	if err != nil || strings.TrimSpace(activeProjectID) == "" {
-		return false
-	}
-	project, err := a.store.GetProject(activeProjectID)
-	if err != nil {
-		return false
-	}
-	return isHubProject(project)
 }
 
 func (a *App) chatSessionForProjectKey(projectKey string) (store.ChatSession, error) {

@@ -423,7 +423,7 @@ func (a *App) executeMapTodoistProjectAction(session store.ChatSession, action *
 		}, nil
 	}
 	if targetProjectName := strings.TrimSpace(systemActionStringParam(action.Params, "target_project")); targetProjectName != "" {
-		project, err := a.hubFindProjectByName(targetProjectName)
+		project, err := a.findProjectByName(targetProjectName)
 		if err != nil {
 			return "", nil, err
 		}

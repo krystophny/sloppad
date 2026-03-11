@@ -58,12 +58,6 @@ func (s *Store) resolveChatSessionWorkspace(ref string) (Workspace, error) {
 	cleanRef := strings.TrimSpace(ref)
 	if cleanRef != "" {
 		if project, err := s.GetProjectByProjectKey(cleanRef); err == nil {
-			if strings.EqualFold(strings.TrimSpace(project.Kind), "hub") {
-				if workspace, activeErr := s.ActiveWorkspace(); activeErr == nil {
-					return workspace, nil
-				}
-				return Workspace{}, sql.ErrNoRows
-			}
 			if workspaceID, findErr := s.FindWorkspaceContainingPath(project.RootPath); findErr != nil {
 				return Workspace{}, findErr
 			} else if workspaceID != nil {
@@ -95,9 +89,6 @@ func (s *Store) resolveChatSessionWorkspace(ref string) (Workspace, error) {
 		project, err := s.GetProject(activeProjectID)
 		if err != nil {
 			return Workspace{}, err
-		}
-		if strings.EqualFold(strings.TrimSpace(project.Kind), "hub") {
-			return Workspace{}, sql.ErrNoRows
 		}
 		return s.ensureWorkspaceForLegacyProject(project)
 	}
@@ -249,13 +240,6 @@ func (s *Store) migrateChatSessionWorkspaceKey() error {
 				return err
 			}
 			projectKey = strings.TrimSpace(projectKey)
-			if projectKey != "" {
-				if project, err := s.GetProjectByProjectKey(projectKey); err == nil && strings.EqualFold(strings.TrimSpace(project.Kind), "hub") {
-					continue
-				} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
-			}
 			if item.WorkspaceID <= 0 {
 				workspace, err := s.resolveChatSessionWorkspace(projectKey)
 				if err != nil {
@@ -281,13 +265,6 @@ func (s *Store) migrateChatSessionWorkspaceKey() error {
 				return err
 			}
 			projectKey = strings.TrimSpace(projectKey)
-			if projectKey != "" {
-				if project, err := s.GetProjectByProjectKey(projectKey); err == nil && strings.EqualFold(strings.TrimSpace(project.Kind), "hub") {
-					continue
-				} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
-			}
 			workspace, err := s.resolveChatSessionWorkspace(projectKey)
 			if err != nil {
 				return fmt.Errorf("resolve chat session workspace for %q: %w", item.ID, err)

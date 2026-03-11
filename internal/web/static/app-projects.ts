@@ -7,16 +7,12 @@ const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANIO
 const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const switchProject = (...args) => refs.switchProject(...args);
-const switchToHub = (...args) => refs.switchToHub(...args);
 const openChatWs = (...args) => refs.openChatWs(...args);
 const closeChatWs = (...args) => refs.closeChatWs(...args);
 const appendPlainMessage = (...args) => refs.appendPlainMessage(...args);
 const appendRenderedAssistant = (...args) => refs.appendRenderedAssistant(...args);
 const activeProject = (...args) => refs.activeProject(...args);
 const activeProjectKey = (...args) => refs.activeProjectKey(...args);
-const isHubProject = (...args) => refs.isHubProject(...args);
-const hubProject = (...args) => refs.hubProject(...args);
-const isHubActive = (...args) => refs.isHubActive(...args);
 const setChatMode = (...args) => refs.setChatMode(...args);
 const resetCompanionState = (...args) => refs.resetCompanionState(...args);
 const applyCompanionState = (...args) => refs.applyCompanionState(...args);
@@ -74,7 +70,6 @@ export async function fetchProjects() {
 
 export function projectMatchesSphere(project, sphere = state.activeSphere) {
   if (!project) return false;
-  if (isHubProject(project)) return true;
   const activeSphere = normalizeActiveSphere(sphere);
   const projectSphere = String(project?.sphere || '').trim().toLowerCase();
   return !projectSphere || projectSphere === activeSphere;
@@ -96,8 +91,7 @@ async function ensureVisibleActiveProject() {
   if (!current || projectMatchesSphere(current, state.activeSphere)) {
     return;
   }
-  const fallback = visibleProjectsForSphere().find((project) => isHubProject(project))
-    || visibleProjectsForSphere().find((project) => project.id !== current.id)
+  const fallback = visibleProjectsForSphere().find((project) => project.id !== current.id)
     || null;
   if (!fallback || fallback.id === current.id) {
     renderEdgeTopProjects();
@@ -186,7 +180,7 @@ export function upsertProject(project) {
 
 export async function refreshCompanionState(projectID = state.activeProjectId) {
   const project = state.projects.find((item) => item.id === String(projectID || '').trim()) || null;
-  if (!project || isHubProject(project)) {
+  if (!project) {
     resetCompanionState();
     return null;
   }
@@ -204,7 +198,7 @@ export async function refreshCompanionState(projectID = state.activeProjectId) {
 
 export async function updateCompanionConfig(patch) {
   const project = activeProject();
-  if (!project || !project.id || isHubProject(project)) return null;
+  if (!project || !project.id) return null;
   const resp = await fetch(apiURL(`projects/${encodeURIComponent(project.id)}/companion/config`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -244,7 +238,7 @@ export async function toggleCompanionIdleSurfacePreference() {
 export async function activateLiveSession(mode) {
   const normalized = String(mode || '').trim().toLowerCase();
   if (normalized !== LIVE_SESSION_MODE_DIALOGUE && normalized !== LIVE_SESSION_MODE_MEETING) return false;
-  if (!activeProject() || isHubActive()) return false;
+  if (!activeProject()) return false;
   const wasMeeting = isMeetingLiveSession();
   if (state.liveSessionActive) {
     stopLiveSession();
@@ -291,10 +285,6 @@ export function resolveInitialProjectID() {
   if (reloadProjectID && state.projects.some((project) => project.id === reloadProjectID)) {
     return reloadProjectID;
   }
-  if (state.startupBehavior === 'hub_first') {
-    const hub = hubProject();
-    if (hub?.id) return hub.id;
-  }
   if (state.serverActiveProjectId && state.projects.some((project) => project.id === state.serverActiveProjectId)) {
     return state.serverActiveProjectId;
   }
@@ -317,9 +307,6 @@ export function renderEdgeTopProjects() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'edge-project-btn';
-    if (isHubProject(project)) {
-      button.classList.add('edge-hub-btn');
-    }
     if (project.id === state.activeProjectId) {
       button.classList.add('is-active');
     }
@@ -342,10 +329,6 @@ export function renderEdgeTopProjects() {
     button.title = rootPath ? `${summary} | ${rootPath}` : summary;
     button.setAttribute('aria-label', `${String(project.name || project.id || 'Workspace')}: ${summary}`);
     button.addEventListener('click', () => {
-      if (isHubProject(project)) {
-        void switchToHub();
-        return;
-      }
       if (project.id === state.activeProjectId) return;
       void switchProject(project.id);
     });
@@ -378,7 +361,6 @@ export function renderEdgeTopModelButtons() {
   host.appendChild(sphereWrap);
 
   const project = activeProject();
-  const hubActive = isHubActive();
   const selectedAlias = activeProjectChatModelAlias();
   const selectedEffort = activeProjectChatModelReasoningEffort();
   const effortOptions = reasoningEffortOptionsForAlias(selectedAlias);
@@ -390,7 +372,7 @@ export function renderEdgeTopModelButtons() {
     if (alias === selectedAlias) {
       button.classList.add('is-active');
     }
-    button.disabled = !project || hubActive || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+    button.disabled = !project || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
     button.addEventListener('click', () => {
       void switchProjectChatModel(alias);
     });
@@ -409,7 +391,7 @@ export function renderEdgeTopModelButtons() {
     effortSelect.appendChild(option);
   }
   effortSelect.value = effortOptions.includes(selectedEffort) ? selectedEffort : (effortOptions[0] || '');
-  effortSelect.disabled = !project || hubActive || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  effortSelect.disabled = !project || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
   effortSelect.addEventListener('change', () => {
     const nextEffort = normalizeProjectChatModelReasoningEffort(effortSelect.value, selectedAlias);
     void switchProjectChatModel(selectedAlias, nextEffort);
@@ -422,7 +404,7 @@ export function renderEdgeTopModelButtons() {
   liveLabel.textContent = 'Live';
   host.appendChild(liveLabel);
 
-  const liveDisabled = !project || hubActive || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  const liveDisabled = !project || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
   if (state.liveSessionActive) {
     const liveStatus = document.createElement('span');
     liveStatus.className = 'edge-project-btn edge-model-btn edge-live-status';
@@ -528,13 +510,13 @@ export function renderEdgeTopModelButtons() {
   if (state.companionIdleSurface === COMPANION_IDLE_SURFACES.BLACK) {
     blackButton.classList.add('is-active');
   }
-  blackButton.disabled = !project || hubActive || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
+  blackButton.disabled = !project || state.projectSwitchInFlight || state.projectModelSwitchInFlight;
   blackButton.addEventListener('click', () => {
     void toggleCompanionIdleSurfacePreference();
   });
   host.appendChild(blackButton);
 
-  const temporarySourceProjectID = project && !isHubProject(project) ? String(project.id || '').trim() : '';
+  const temporarySourceProjectID = project ? String(project.id || '').trim() : '';
   const temporaryButtons = isTemporaryProjectKind(project?.kind)
     ? [
         {
@@ -695,7 +677,7 @@ export async function discardTemporaryProject(projectID) {
       throw new Error(detail);
     }
     const payload = await resp.json();
-    const nextProjectID = String(payload?.active_project_id || '').trim() || state.defaultProjectId || hubProject()?.id || '';
+    const nextProjectID = String(payload?.active_project_id || '').trim() || state.defaultProjectId || state.projects[0]?.id || '';
     await fetchProjects();
     if (nextProjectID) {
       await switchProject(nextProjectID);

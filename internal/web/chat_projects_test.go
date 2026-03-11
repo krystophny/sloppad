@@ -47,11 +47,11 @@ func TestClassifyAndExecuteSystemActionAssignWorkspaceProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createProject() error: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensureHubProject() error: %v", err)
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(defaultProject)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession() error: %v", err)
 	}
@@ -91,11 +91,11 @@ func TestClassifyAndExecuteSystemActionShowProjectItemsByName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createProject() error: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensureHubProject() error: %v", err)
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(defaultProject)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession() error: %v", err)
 	}
@@ -141,11 +141,11 @@ func TestClassifyAndExecuteSystemActionSyncProjectSkipsNonGitWorkspace(t *testin
 	if err != nil {
 		t.Fatalf("createProject() error: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensureHubProject() error: %v", err)
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(defaultProject)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession() error: %v", err)
 	}
@@ -186,11 +186,11 @@ func TestClassifyAndExecuteSystemActionSyncProjectPullsGitWorkspace(t *testing.T
 	if err != nil {
 		t.Fatalf("createProject() error: %v", err)
 	}
-	hub, err := app.ensureHubProject()
+	defaultProject, err := app.ensureDefaultProjectRecord()
 	if err != nil {
-		t.Fatalf("ensureHubProject() error: %v", err)
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
 	}
-	session, err := app.chatSessionForProject(hub)
+	session, err := app.chatSessionForProject(defaultProject)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession() error: %v", err)
 	}
