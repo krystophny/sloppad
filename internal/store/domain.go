@@ -92,6 +92,7 @@ type ItemListFilter struct {
 	WorkspaceID         *int64  `json:"workspace_id,omitempty"`
 	WorkspaceUnassigned bool    `json:"workspace_unassigned,omitempty"`
 	ProjectID           *string `json:"project_id,omitempty"`
+	ContextID           *int64  `json:"context_id,omitempty"`
 }
 
 type Context struct {

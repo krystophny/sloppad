@@ -41,6 +41,8 @@ export function normalizeItemSidebarFilters(rawFilters = null) {
   const filters = rawFilters && typeof rawFilters === 'object' ? rawFilters : {};
   const source = String(filters.source || '').trim().toLowerCase();
   const projectID = String(filters.project_id || '').trim();
+  const contextIDRaw = Number(filters.context_id || 0);
+  const contextID = Number.isFinite(contextIDRaw) && contextIDRaw > 0 ? Math.trunc(contextIDRaw) : null;
   const allSpheres = filters.all_spheres === true;
   const workspaceRaw = filters.workspace_id;
   const workspaceUnassigned = String(workspaceRaw || '').trim().toLowerCase() === 'null'
@@ -54,6 +56,7 @@ export function normalizeItemSidebarFilters(rawFilters = null) {
     source,
     workspace_id: workspaceID,
     project_id: projectID,
+    context_id: contextID,
     workspace_unassigned: workspaceUnassigned,
   };
 }
@@ -71,6 +74,9 @@ function appendItemSidebarFilterQuery(path, filters = state.itemSidebarFilters) 
   }
   if (normalized.project_id) {
     nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}project_id=${encodeURIComponent(normalized.project_id)}`;
+  }
+  if (Number.isFinite(normalized.context_id) && normalized.context_id > 0) {
+    nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}context_id=${encodeURIComponent(String(normalized.context_id))}`;
   }
   return nextPath;
 }
@@ -143,7 +149,7 @@ export async function refreshItemSidebarCounts() {
     applyItemSidebarCounts(defaultItemSidebarCounts());
     return false;
   }
-  const resp = await fetch(apiURL(appendSphereQuery('items/counts')), { cache: 'no-store' });
+  const resp = await fetch(apiURL(itemSidebarCountsEndpoint(state.itemSidebarFilters)), { cache: 'no-store' });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
@@ -328,6 +334,101 @@ export async function fetchItemSidebarProjects() {
       && project.name
       && project.id !== 'hub'
       && (!project.sphere || project.sphere === normalizeActiveSphere(state.activeSphere)));
+}
+
+export async function fetchItemSidebarContexts() {
+  const resp = await fetch(apiURL('contexts'), { cache: 'no-store' });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  const contexts = Array.isArray(payload?.contexts) ? payload.contexts : [];
+  const normalized = contexts
+    .map((entry) => ({
+      id: Number(entry?.id || 0),
+      name: String(entry?.name || '').trim(),
+      parent_id: Number(entry?.parent_id || 0) > 0 ? Number(entry.parent_id) : null,
+    }))
+    .filter((entry) => entry.id > 0 && entry.name);
+  const parentByID = new Map(normalized.map((entry) => [entry.id, entry.parent_id]));
+  const depthFor = (id, seen = new Set()) => {
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const parentID = parentByID.get(id);
+    if (!Number.isFinite(parentID) || Number(parentID) <= 0) return 0;
+    return depthFor(Number(parentID), seen) + 1;
+  };
+  const withDepth = normalized.map((entry) => ({
+    ...entry,
+    depth: depthFor(entry.id),
+  }));
+  const childrenByParent = withDepth.reduce((acc, entry) => {
+    const parentID = Number(entry?.parent_id || 0);
+    if (!acc.has(parentID)) acc.set(parentID, []);
+    acc.get(parentID).push(entry);
+    return acc;
+  }, new Map());
+  childrenByParent.forEach((entries) => {
+    entries.sort((left, right) => {
+      const nameCompare = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' });
+      if (nameCompare !== 0) return nameCompare;
+      return Number(left?.id || 0) - Number(right?.id || 0);
+    });
+  });
+  const ordered = [];
+  const visit = (parentID = 0) => {
+    const children = childrenByParent.get(parentID) || [];
+    children.forEach((entry) => {
+      ordered.push(entry);
+      visit(entry.id);
+    });
+  };
+  visit(0);
+  return ordered;
+}
+
+export async function applyItemSidebarContextFilter(contextID = 0, contextLabel = '') {
+  const normalizedContextID = Number.isFinite(Number(contextID)) && Number(contextID) > 0
+    ? Math.trunc(Number(contextID))
+    : 0;
+  state.itemSidebarContextLabel = normalizedContextID > 0
+    ? (String(contextLabel || '').trim() || `Context ${normalizedContextID}`)
+    : '';
+  const nextFilters = {
+    ...state.itemSidebarFilters,
+    context_id: normalizedContextID > 0 ? normalizedContextID : null,
+  };
+  await loadItemSidebarView(state.itemSidebarView, nextFilters);
+  showStatus(normalizedContextID > 0
+    ? `context filter: ${state.itemSidebarContextLabel}`
+    : 'context filter cleared');
+  return true;
+}
+
+export async function showItemSidebarContextFilterMenu(x, y) {
+  try {
+    const contexts = await fetchItemSidebarContexts();
+    const currentContextID = Number(state.itemSidebarFilters?.context_id || 0);
+    const entries = [{
+      label: currentContextID > 0 ? 'All contexts' : 'All contexts (current)',
+      action: 'clear_context_filter',
+      onClick: () => applyItemSidebarContextFilter(0, ''),
+    }];
+    contexts.forEach((entry) => {
+      const prefix = entry.depth > 0 ? `${'  '.repeat(entry.depth)}↳ ` : '';
+      entries.push({
+        label: entry.id === currentContextID ? `${prefix}${entry.name} (current)` : `${prefix}${entry.name}`,
+        action: 'set_context_filter',
+        onClick: () => applyItemSidebarContextFilter(entry.id, entry.name),
+      });
+    });
+    showItemSidebarMenu(entries, x, y);
+    return true;
+  } catch (err) {
+    showStatus(`context filter failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
 }
 
 export async function performItemSidebarSphereUpdate(item, nextSphere) {

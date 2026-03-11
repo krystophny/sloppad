@@ -141,3 +141,73 @@ func TestClassifyAndExecuteSystemActionShowFilteredItems(t *testing.T) {
 		t.Fatalf("filters = %#v, want all_spheres=true", filters)
 	}
 }
+
+func TestExecuteFilteredItemViewActionSupportsContextFilter(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	parent, err := app.store.CreateContext("Work", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(parent) error: %v", err)
+	}
+	child, err := app.store.CreateContext("W7x", &parent.ID)
+	if err != nil {
+		t.Fatalf("CreateContext(child) error: %v", err)
+	}
+	other, err := app.store.CreateContext("Private", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(other) error: %v", err)
+	}
+
+	workspace, err := app.store.CreateWorkspace("Workstream", filepath.Join(t.TempDir(), "workstream"), store.SpherePrivate)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	if err := app.store.LinkContextToWorkspace(child.ID, workspace.ID); err != nil {
+		t.Fatalf("LinkContextToWorkspace() error: %v", err)
+	}
+	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	if _, err := app.store.CreateItem("Review W7x backlog", store.ItemOptions{
+		State:        store.ItemStateInbox,
+		WorkspaceID:  &workspace.ID,
+		VisibleAfter: &past,
+	}); err != nil {
+		t.Fatalf("CreateItem(work item) error: %v", err)
+	}
+	privateItem, err := app.store.CreateItem("Reply to family email", store.ItemOptions{
+		State:        store.ItemStateInbox,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(private item) error: %v", err)
+	}
+	if err := app.store.LinkContextToItem(other.ID, privateItem.ID); err != nil {
+		t.Fatalf("LinkContextToItem() error: %v", err)
+	}
+
+	message, payload, err := app.executeFilteredItemViewAction(&SystemAction{
+		Action: "show_filtered_items",
+		Params: map[string]interface{}{
+			"view": store.ItemStateInbox,
+			"filters": map[string]interface{}{
+				"context_id": parent.ID,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("executeFilteredItemViewAction() error: %v", err)
+	}
+	if message != "Opened inbox filtered to one context with 1 item(s)." {
+		t.Fatalf("message = %q", message)
+	}
+	filters, ok := payload["filters"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("filters payload = %#v", payload)
+	}
+	gotContextID, ok := filters["context_id"].(int64)
+	if !ok {
+		t.Fatalf("filters.context_id type = %T", filters["context_id"])
+	}
+	if gotContextID != parent.ID {
+		t.Fatalf("filters.context_id = %d, want %d", gotContextID, parent.ID)
+	}
+}

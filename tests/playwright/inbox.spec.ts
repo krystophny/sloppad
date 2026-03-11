@@ -312,4 +312,77 @@ test.describe('item inbox sidebar', () => {
     const itemListFetch = [...log].reverse().find((entry: any) => entry?.action === 'item_list');
     expect(String(itemListFetch?.url || '')).not.toContain('sphere=private');
   });
+
+  test('context filter narrows the inbox and parent contexts include child items', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+
+    await page.evaluate(() => {
+      (window as any).__setItemSidebarContexts?.([
+        { id: 10, name: 'Work', parent_id: null },
+        { id: 11, name: 'W7x', parent_id: 10 },
+        { id: 12, name: 'Private', parent_id: null },
+      ]);
+      (window as any).__setItemSidebarData({
+        inbox: [
+          {
+            id: 901,
+            title: 'Review W7x backlog',
+            state: 'inbox',
+            sphere: 'private',
+            context_ids: [11],
+            artifact_title: 'W7x backlog',
+            artifact_kind: 'plan_note',
+            created_at: '2026-03-08 09:40:00',
+            updated_at: '2026-03-08 09:58:00',
+          },
+          {
+            id: 902,
+            title: 'Reply to family email',
+            state: 'inbox',
+            sphere: 'private',
+            context_ids: [12],
+            artifact_title: 'Family',
+            artifact_kind: 'email',
+            created_at: '2026-03-08 09:10:00',
+            updated_at: '2026-03-08 09:12:00',
+          },
+        ],
+        waiting: [],
+        someday: [],
+        done: [],
+      });
+    });
+
+    await injectChatEvent(page, {
+      type: 'system_action',
+      action: {
+        type: 'show_item_sidebar_view',
+        view: 'inbox',
+      },
+    });
+    await expect(page.locator('#pr-file-pane')).toHaveClass(/is-open/);
+    await expect(page.locator('#item-sidebar-context-filter')).toBeVisible();
+    await expect(page.locator('#pr-file-list')).toContainText('Review W7x backlog');
+    await expect(page.locator('#pr-file-list')).toContainText('Reply to family email');
+
+    await page.locator('#item-sidebar-context-filter').click();
+    await page.locator('#item-sidebar-menu').getByRole('button', { name: 'Work' }).click();
+
+    await expect(page.locator('#item-sidebar-context-filter')).toContainText('Context: Work');
+    await expect(page.locator('#pr-file-list')).toContainText('Review W7x backlog');
+    await expect(page.locator('#pr-file-list')).not.toContainText('Reply to family email');
+
+    await page.locator('#item-sidebar-context-clear').click();
+
+    await expect(page.locator('#item-sidebar-context-filter')).toContainText('Filter by Context');
+    await expect(page.locator('#pr-file-list')).toContainText('Review W7x backlog');
+    await expect(page.locator('#pr-file-list')).toContainText('Reply to family email');
+
+    const log = await page.evaluate(() => (window as any).__harnessLog || []);
+    const itemFetch = log.find((entry: any) => entry?.action === 'item_list' && String(entry?.url || '').includes('/api/items/inbox?') && String(entry?.url || '').includes('context_id=10'));
+    const clearedFetch = [...log].reverse().find((entry: any) => entry?.action === 'item_list' && String(entry?.url || '').includes('/api/items/inbox') && !String(entry?.url || '').includes('context_id='));
+    expect(itemFetch).toBeTruthy();
+    expect(clearedFetch).toBeTruthy();
+  });
 });

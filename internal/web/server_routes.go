@@ -89,6 +89,7 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/actors", a.handleActorCreate)
 	r.Get("/api/actors/{actor_id}", a.handleActorGet)
 	r.Delete("/api/actors/{actor_id}", a.handleActorDelete)
+	r.Get("/api/contexts", a.handleContextList)
 	r.Get("/api/artifacts", a.handleArtifactList)
 	r.Get("/api/artifacts/taxonomy", a.handleArtifactTaxonomyGet)
 	r.Post("/api/artifacts", a.handleArtifactCreate)

@@ -153,6 +153,14 @@ func itemFilterFromActionParams(params map[string]interface{}) (store.ItemListFi
 	if projectID != "" && projectID != "<nil>" {
 		filter.ProjectID = &projectID
 	}
+	contextValue := strings.TrimSpace(fmt.Sprint(filterParams["context_id"]))
+	if contextValue != "" && contextValue != "<nil>" {
+		contextID := systemActionItemID(map[string]interface{}{"item_id": filterParams["context_id"]})
+		if contextID <= 0 {
+			return store.ItemListFilter{}, errors.New("context_id must be positive")
+		}
+		filter.ContextID = &contextID
+	}
 	return filter, nil
 }
 
@@ -185,6 +193,8 @@ func filteredItemViewMessage(view string, filter store.ItemListFilter, count int
 		filterText += " filtered to one workspace"
 	case filter.ProjectID != nil:
 		filterText += " filtered to one project"
+	case filter.ContextID != nil:
+		filterText += " filtered to one context"
 	}
 	if count == 0 {
 		return fmt.Sprintf("Opened %s%s. There are no matching items right now.", listName, filterText)
@@ -205,6 +215,9 @@ func itemFilterPayload(filter store.ItemListFilter, allSpheres bool) map[string]
 	}
 	if filter.ProjectID != nil {
 		payload["project_id"] = *filter.ProjectID
+	}
+	if filter.ContextID != nil {
+		payload["context_id"] = *filter.ContextID
 	}
 	if allSpheres {
 		payload["all_spheres"] = true

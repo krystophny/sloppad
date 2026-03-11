@@ -663,6 +663,103 @@ func TestItemStateViewAPIFiltersBySourceWorkspaceAndProject(t *testing.T) {
 	}
 }
 
+func TestItemStateViewAPIFiltersByContextIncludingDescendants(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	parent, err := app.store.CreateContext("Work", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(parent) error: %v", err)
+	}
+	child, err := app.store.CreateContext("W7x", &parent.ID)
+	if err != nil {
+		t.Fatalf("CreateContext(child) error: %v", err)
+	}
+	privateCtx, err := app.store.CreateContext("Private", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(private) error: %v", err)
+	}
+
+	workspace, err := app.store.CreateWorkspace("Inbox Workspace", filepath.Join(t.TempDir(), "workspace"))
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	if err := app.store.LinkContextToWorkspace(child.ID, workspace.ID); err != nil {
+		t.Fatalf("LinkContextToWorkspace() error: %v", err)
+	}
+
+	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
+	workItem, err := app.store.CreateItem("Workspace W7x", store.ItemOptions{
+		State:        store.ItemStateInbox,
+		WorkspaceID:  &workspace.ID,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(work item) error: %v", err)
+	}
+	privateItem, err := app.store.CreateItem("Private inbox", store.ItemOptions{
+		State:        store.ItemStateInbox,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(private item) error: %v", err)
+	}
+	if err := app.store.LinkContextToItem(privateCtx.ID, privateItem.ID); err != nil {
+		t.Fatalf("LinkContextToItem() error: %v", err)
+	}
+	directChildItem, err := app.store.CreateItem("Direct child", store.ItemOptions{
+		State:        store.ItemStateInbox,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(direct child) error: %v", err)
+	}
+	if err := app.store.LinkContextToItem(child.ID, directChildItem.ID); err != nil {
+		t.Fatalf("LinkContextToItem(child) error: %v", err)
+	}
+
+	rrInbox := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/inbox?context_id="+itoa(parent.ID), nil)
+	if rrInbox.Code != http.StatusOK {
+		t.Fatalf("context inbox status = %d, want 200: %s", rrInbox.Code, rrInbox.Body.String())
+	}
+	items, ok := decodeJSONResponse(t, rrInbox)["items"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("context inbox payload = %#v", decodeJSONResponse(t, rrInbox))
+	}
+	gotTitles := map[string]bool{}
+	gotIDs := map[int64]bool{}
+	for _, raw := range items {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("context inbox entry = %#v", raw)
+		}
+		gotTitles[strFromAny(entry["title"])] = true
+		gotIDs[int64(entry["id"].(float64))] = true
+	}
+	if !gotTitles["Workspace W7x"] || !gotTitles["Direct child"] {
+		t.Fatalf("context inbox titles = %#v, want Workspace W7x and Direct child", gotTitles)
+	}
+	if !gotIDs[workItem.ID] || !gotIDs[directChildItem.ID] {
+		t.Fatalf("context inbox ids = %#v, want %d and %d", gotIDs, workItem.ID, directChildItem.ID)
+	}
+
+	rrCounts := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/counts?context_id="+itoa(parent.ID), nil)
+	if rrCounts.Code != http.StatusOK {
+		t.Fatalf("context counts status = %d, want 200: %s", rrCounts.Code, rrCounts.Body.String())
+	}
+	counts, ok := decodeJSONResponse(t, rrCounts)["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("context counts payload = %#v", decodeJSONResponse(t, rrCounts))
+	}
+	if got := int(counts[store.ItemStateInbox].(float64)); got != 2 {
+		t.Fatalf("context counts[inbox] = %d, want 2", got)
+	}
+
+	rrBad := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/inbox?context_id=bad", nil)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Fatalf("bad context filter status = %d, want 400: %s", rrBad.Code, rrBad.Body.String())
+	}
+}
+
 func TestItemDomainAPIRejectsConflictAndInvalidState(t *testing.T) {
 	app := newAuthedTestApp(t)
 
