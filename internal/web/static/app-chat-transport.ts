@@ -412,6 +412,11 @@ export function handleChatEvent(payload) {
     return;
   }
 
+  if (type === 'items_ingested') {
+    refreshBatchItemSidebar();
+    return;
+  }
+
   if (type === 'mode_changed') {
     const nextMode = String(payload.mode || 'chat').trim().toLowerCase();
     setChatMode(nextMode);

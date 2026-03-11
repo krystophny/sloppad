@@ -180,7 +180,7 @@ func TestGitHubIssueSyncMigratesLegacyBugReportItems(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	repoDir := filepath.Join(t.TempDir(), "workspace")
-	initGitHubWorkspaceRepo(t, repoDir, "https://github.com/owner/tabula.git")
+	initGitHubWorkspaceRepo(t, repoDir, "https://github.com/krystophny/tabura.git")
 	workspace, err := app.store.CreateWorkspace("Repo", repoDir)
 	if err != nil {
 		t.Fatalf("CreateWorkspace() error: %v", err)
@@ -196,12 +196,11 @@ func TestGitHubIssueSyncMigratesLegacyBugReportItems(t *testing.T) {
 		t.Fatalf("CreateItem(legacy bug report) error: %v", err)
 	}
 
+	var calls [][]string
 	app.ghCommandRunner = func(_ context.Context, cwd string, args ...string) (string, error) {
-		if cwd != repoDir {
-			t.Fatalf("gh cwd = %q, want %q", cwd, repoDir)
-		}
+		calls = append(calls, append([]string(nil), args...))
 		return `[
-			{"number":77,"title":"Bug report: Inbox sync migration","url":"https://github.com/owner/tabula/issues/77","state":"CLOSED","labels":[{"name":"bug"}],"assignees":[]}
+			{"number":77,"title":"Bug report: Inbox sync migration","url":"https://github.com/krystophny/tabura/issues/77","state":"CLOSED","labels":[{"name":"bug"}],"assignees":[]}
 		]`, nil
 	}
 
@@ -212,7 +211,7 @@ func TestGitHubIssueSyncMigratesLegacyBugReportItems(t *testing.T) {
 		t.Fatalf("sync status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
 
-	migrated, err := app.store.GetItemBySource("github", "owner/tabula#77")
+	migrated, err := app.store.GetItemBySource("github", "krystophny/tabura#77")
 	if err != nil {
 		t.Fatalf("GetItemBySource(migrated) error: %v", err)
 	}
@@ -227,6 +226,75 @@ func TestGitHubIssueSyncMigratesLegacyBugReportItems(t *testing.T) {
 	}
 	if _, err := app.store.GetItemBySource("bug_report", "issue:77"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("legacy bug report source lookup error = %v, want sql.ErrNoRows", err)
+	}
+	if len(calls) == 0 {
+		t.Fatal("expected gh invocation")
+	}
+	command := strings.Join(calls[0], " ")
+	if !strings.Contains(command, "--repo "+taburaBugReportOwnerRepo) {
+		t.Fatalf("gh args = %q, want explicit repo %q", command, taburaBugReportOwnerRepo)
+	}
+}
+
+func TestTrackedGitHubIssueSyncUsesSourceRefRepo(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	workspaceDir := filepath.Join(t.TempDir(), "workspace")
+	initGitHubWorkspaceRepo(t, workspaceDir, "https://github.com/example/customer-project.git")
+	workspace, err := app.store.CreateWorkspace("Customer Repo", workspaceDir)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+
+	source := "github"
+	sourceRef := githubIssueSourceRef(taburaBugReportOwnerRepo, 77)
+	item, err := app.store.CreateItem("Bug report: stale sidebar entry", store.ItemOptions{
+		WorkspaceID: &workspace.ID,
+		Source:      &source,
+		SourceRef:   &sourceRef,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(tracked github issue) error: %v", err)
+	}
+
+	var calls [][]string
+	app.ghCommandRunner = func(_ context.Context, cwd string, args ...string) (string, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return `[
+			{"number":77,"title":"Bug report: sidebar closes on sync","url":"https://github.com/krystophny/tabura/issues/77","state":"CLOSED","labels":[{"name":"bug"}],"assignees":[]}
+		]`, nil
+	}
+
+	changed, err := app.syncTrackedGitHubIssues(context.Background(), &workspace.ID, nil)
+	if err != nil {
+		t.Fatalf("syncTrackedGitHubIssues() error: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("syncTrackedGitHubIssues() changed = %d, want 1", changed)
+	}
+
+	synced, err := app.store.GetItemBySource("github", sourceRef)
+	if err != nil {
+		t.Fatalf("GetItemBySource(synced) error: %v", err)
+	}
+	if synced.ID != item.ID {
+		t.Fatalf("synced item ID = %d, want %d", synced.ID, item.ID)
+	}
+	if synced.State != store.ItemStateDone {
+		t.Fatalf("synced item state = %q, want %q", synced.State, store.ItemStateDone)
+	}
+	if synced.Title != "Bug report: sidebar closes on sync" {
+		t.Fatalf("synced item title = %q, want synced title", synced.Title)
+	}
+	if synced.ArtifactID == nil {
+		t.Fatal("expected synced item artifact")
+	}
+	if len(calls) != 1 {
+		t.Fatalf("gh call count = %d, want 1", len(calls))
+	}
+	command := strings.Join(calls[0], " ")
+	if !strings.Contains(command, "--repo "+taburaBugReportOwnerRepo) {
+		t.Fatalf("gh args = %q, want explicit repo %q", command, taburaBugReportOwnerRepo)
 	}
 }
 
