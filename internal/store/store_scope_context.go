@@ -172,7 +172,7 @@ func (s *Store) currentScopedContext(scopeExpr string, args ...any) (string, err
 	return normalizeSphere(scope.String), nil
 }
 
-func (s *Store) migrateSphereToContextSupport() error {
+func (s *Store) migrateSphereToContextSupport() (err error) {
 	if err := s.ensureScopedContexts(); err != nil {
 		return err
 	}
@@ -186,6 +186,18 @@ func (s *Store) migrateSphereToContextSupport() error {
 		!tableColumns["external_accounts"]["sphere"] &&
 		!tableColumns["external_container_mappings"]["sphere"] {
 		return nil
+	}
+	// Keep dependent foreign keys pointed at the final table names while legacy
+	// sphere tables are renamed out of the way and recreated without that column.
+	if _, err := s.db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = s.db.Exec(`PRAGMA legacy_alter_table = OFF`)
+		_, _ = s.db.Exec(`PRAGMA foreign_keys = ON`)
+	}()
+	if _, err := s.db.Exec(`PRAGMA legacy_alter_table = ON`); err != nil {
+		return err
 	}
 
 	tx, err := s.db.Begin()
@@ -433,47 +445,39 @@ JOIN contexts c ON c.parent_id IS NULL AND lower(c.name) = lower(m.sphere)`); er
   ON external_container_mappings(lower(provider), lower(container_type), lower(container_ref))`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE context_items (
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS context_items (
   context_id INTEGER NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   PRIMARY KEY (context_id, item_id)
 )`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE context_workspaces (
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS context_workspaces (
   context_id INTEGER NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
   workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   PRIMARY KEY (context_id, workspace_id)
 )`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE context_external_accounts (
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS context_external_accounts (
   context_id INTEGER NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
   account_id INTEGER NOT NULL REFERENCES external_accounts(id) ON DELETE CASCADE,
   PRIMARY KEY (context_id, account_id)
 )`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE context_external_container_mappings (
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS context_external_container_mappings (
   context_id INTEGER NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
   mapping_id INTEGER NOT NULL REFERENCES external_container_mappings(id) ON DELETE CASCADE,
   PRIMARY KEY (context_id, mapping_id)
 )`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE context_time_entries (
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS context_time_entries (
   context_id INTEGER NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
   time_entry_id INTEGER NOT NULL REFERENCES time_entries(id) ON DELETE CASCADE,
   PRIMARY KEY (context_id, time_entry_id)
 )`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO context_items (context_id, item_id)
-SELECT context_id, item_id FROM context_items_existing`); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO context_workspaces (context_id, workspace_id)
-SELECT context_id, workspace_id FROM context_workspaces_existing`); err != nil {
 		return err
 	}
 
