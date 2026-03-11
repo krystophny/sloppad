@@ -536,6 +536,10 @@ func TestClassifyAndExecuteSystemActionWorkspaceManagement(t *testing.T) {
 		t.Fatalf("renamed.Name = %q, want %q", renamed.Name, "Research Notes")
 	}
 
+	if err := app.setActiveWorkspaceTracked(workspaceID, "workspace_switch"); err != nil {
+		t.Fatalf("setActiveWorkspaceTracked() error: %v", err)
+	}
+
 	message, payloads, handled = app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "delete workspace Research Notes")
 	if !handled {
 		t.Fatal("expected delete workspace command to be handled")
@@ -548,6 +552,19 @@ func TestClassifyAndExecuteSystemActionWorkspaceManagement(t *testing.T) {
 	}
 	if _, err := app.store.GetWorkspace(workspaceID); err == nil {
 		t.Fatal("expected deleted workspace to be gone")
+	}
+	active, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace() after delete error: %v", err)
+	}
+	if active.ID == workspaceID {
+		t.Fatalf("active workspace id = %d, want deleted workspace to be replaced", active.ID)
+	}
+	if !active.IsDaily {
+		t.Fatalf("active workspace is_daily = %v, want true", active.IsDaily)
+	}
+	if _, err := app.store.GetChatSessionByWorkspaceID(active.ID); err != nil {
+		t.Fatalf("GetChatSessionByWorkspaceID(active) error: %v", err)
 	}
 }
 

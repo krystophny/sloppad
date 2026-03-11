@@ -169,6 +169,37 @@ func (a *App) handleWorkspaceGet(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) deleteWorkspaceAndRepairState(workspaceID int64) error {
+	active, activeErr := a.store.ActiveWorkspace()
+	switch {
+	case activeErr == nil:
+	case isNoRows(activeErr):
+	default:
+		return activeErr
+	}
+	repairActiveWorkspace := (activeErr == nil && active.ID == workspaceID) || isNoRows(activeErr)
+	focusedID, err := a.store.FocusedWorkspaceID()
+	if err != nil {
+		return err
+	}
+	deletedFocusedWorkspace := focusedID == workspaceID
+	if err := a.store.DeleteWorkspace(workspaceID); err != nil {
+		return err
+	}
+	if deletedFocusedWorkspace {
+		if err := a.setFocusedWorkspace(0); err != nil {
+			return err
+		}
+		a.broadcastWorkspaceFocusChanged()
+	}
+	if repairActiveWorkspace {
+		if _, err := a.ensureStartupWorkspace(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *App) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -178,7 +209,7 @@ func (a *App) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.store.DeleteWorkspace(workspaceID); err != nil {
+	if err := a.deleteWorkspaceAndRepairState(workspaceID); err != nil {
 		writeDomainStoreError(w, err)
 		return
 	}

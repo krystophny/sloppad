@@ -644,7 +644,7 @@ func (a *App) executeDeleteWorkspaceAction(session store.ChatSession, action *Sy
 	if err != nil {
 		return "", nil, err
 	}
-	if err := a.store.DeleteWorkspace(workspace.ID); err != nil {
+	if err := a.deleteWorkspaceAndRepairState(workspace.ID); err != nil {
 		return "", nil, err
 	}
 	return fmt.Sprintf("Deleted workspace %s.", workspace.Name), map[string]interface{}{
