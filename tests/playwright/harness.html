@@ -517,6 +517,11 @@
       { id: 1, name: 'Alpha', dir_path: '/tmp/alpha', sphere: 'private', is_active: true },
       { id: 2, name: 'Beta', dir_path: '/tmp/beta', sphere: 'work', is_active: false },
     ]);
+    const defaultItemSidebarContexts = () => ([
+      { id: 1, name: 'Work', parent_id: null },
+      { id: 2, name: 'W7x', parent_id: 1 },
+      { id: 3, name: 'Private', parent_id: null },
+    ]);
     const defaultItemSidebarArtifacts = () => ({
       501: {
         id: 501,
@@ -591,6 +596,7 @@
           title: 'Review parser cleanup',
           state: 'inbox',
           sphere: 'private',
+          context_ids: [3],
           artifact_id: 501,
           source: 'github',
           source_ref: 'owner/repo#177',
@@ -605,6 +611,7 @@
           title: 'Answer triage email',
           state: 'inbox',
           sphere: 'private',
+          context_ids: [3],
           artifact_id: 502,
           source: 'exchange',
           source_ref: 'msg-102',
@@ -621,6 +628,7 @@
           title: 'Await review feedback',
           state: 'waiting',
           sphere: 'private',
+          context_ids: [3],
           artifact_id: 0,
           source: 'github',
           source_ref: 'owner/repo#144',
@@ -637,6 +645,7 @@
           title: 'Sketch mobile inbox gestures',
           state: 'someday',
           sphere: 'private',
+          context_ids: [3],
           artifact_id: 503,
           source: '',
           source_ref: '',
@@ -653,6 +662,7 @@
           title: 'Ship capture flow',
           state: 'done',
           sphere: 'private',
+          context_ids: [3],
           artifact_id: 504,
           source: 'github',
           source_ref: 'owner/repo#90',
@@ -719,6 +729,7 @@
     window.__itemSidebarData = defaultItemSidebarData();
     window.__itemSidebarActors = defaultItemSidebarActors();
     window.__itemSidebarWorkspaces = defaultItemSidebarWorkspaces();
+    window.__itemSidebarContexts = defaultItemSidebarContexts();
     window.__itemSidebarArtifacts = defaultItemSidebarArtifacts();
     window.__mailDrafts = {};
     window.__mailDraftCounters = {
@@ -797,6 +808,11 @@
       window.__itemSidebarWorkspaces = Array.isArray(next)
         ? next.map((workspace) => ({ ...workspace }))
         : defaultItemSidebarWorkspaces();
+    };
+    window.__setItemSidebarContexts = (next) => {
+      window.__itemSidebarContexts = Array.isArray(next)
+        ? next.map((entry) => ({ ...entry }))
+        : defaultItemSidebarContexts();
     };
     window.__setItemSidebarArtifacts = (next) => {
       const source = next && typeof next === 'object' ? next : {};
@@ -1270,14 +1286,39 @@
         const source = String(parsed.searchParams.get('source') || '').trim().toLowerCase();
         const workspaceRaw = String(parsed.searchParams.get('workspace_id') || '').trim().toLowerCase();
         const projectID = String(parsed.searchParams.get('project_id') || '').trim();
+        const contextID = Number(parsed.searchParams.get('context_id') || 0);
         return {
           source,
           workspace_id: workspaceRaw === 'null' || workspaceRaw === '' ? workspaceRaw : Number(workspaceRaw),
           project_id: projectID,
+          context_id: Number.isFinite(contextID) && contextID > 0 ? contextID : 0,
         };
       } catch (_) {
-        return { source: '', workspace_id: '', project_id: '' };
+        return { source: '', workspace_id: '', project_id: '', context_id: 0 };
       }
+    }
+    function descendantContextIDs(contextID) {
+      const cleanID = Number(contextID || 0);
+      if (!(cleanID > 0)) return [];
+      const contexts = Array.isArray(window.__itemSidebarContexts) ? window.__itemSidebarContexts : defaultItemSidebarContexts();
+      const childrenByParent = contexts.reduce((acc, entry) => {
+        const parentID = Number(entry?.parent_id || 0);
+        if (!acc.has(parentID)) acc.set(parentID, []);
+        acc.get(parentID).push(Number(entry?.id || 0));
+        return acc;
+      }, new Map());
+      const out = [];
+      const queue = [cleanID];
+      const seen = new Set();
+      while (queue.length > 0) {
+        const nextID = Number(queue.shift() || 0);
+        if (!(nextID > 0) || seen.has(nextID)) continue;
+        seen.add(nextID);
+        out.push(nextID);
+        const children = childrenByParent.get(nextID) || [];
+        children.forEach((childID) => queue.push(childID));
+      }
+      return out;
     }
     function matchesItemFilters(item, sphere, filters) {
       const itemSphere = String(item?.sphere || '').trim().toLowerCase();
@@ -1292,6 +1333,11 @@
       }
       if (filters?.project_id) {
         return String(item?.project_id || '').trim() === filters.project_id;
+      }
+      if (Number(filters?.context_id || 0) > 0) {
+        const allowed = new Set(descendantContextIDs(filters.context_id));
+        const itemContextIDs = Array.isArray(item?.context_ids) ? item.context_ids.map((value) => Number(value || 0)) : [];
+        return itemContextIDs.some((value) => allowed.has(value));
       }
       return true;
     }
@@ -1788,6 +1834,10 @@
         const sphere = requestedSphere(u);
         const filtered = workspaces.filter((workspace) => !sphere || String(workspace?.sphere || '').trim().toLowerCase() === sphere);
         return new Response(JSON.stringify({ ok: true, workspaces: filtered }), { status: 200 });
+      }
+      if (u.includes('/api/contexts')) {
+        const contexts = Array.isArray(window.__itemSidebarContexts) ? window.__itemSidebarContexts : defaultItemSidebarContexts();
+        return new Response(JSON.stringify({ ok: true, contexts }), { status: 200 });
       }
       if (/\/api\/items(?:\?|$)/.test(u) && opts?.method === 'POST') {
         let body = {};

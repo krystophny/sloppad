@@ -414,64 +414,6 @@ func normalizeWorkspaceWatchPollIntervalSeconds(raw int) int {
 	return raw
 }
 
-func normalizeItemListFilter(filter ItemListFilter) (ItemListFilter, error) {
-	normalized := ItemListFilter{
-		Source:              normalizeOptionalSourceFilter(filter.Source),
-		WorkspaceUnassigned: filter.WorkspaceUnassigned,
-	}
-	sphere, err := normalizeOptionalSphereFilter(filter.Sphere)
-	if err != nil {
-		return ItemListFilter{}, err
-	}
-	normalized.Sphere = sphere
-	if filter.WorkspaceID != nil {
-		if *filter.WorkspaceID <= 0 {
-			return ItemListFilter{}, errors.New("workspace_id must be a positive integer")
-		}
-		value := *filter.WorkspaceID
-		normalized.WorkspaceID = &value
-	}
-	if normalized.WorkspaceID != nil && normalized.WorkspaceUnassigned {
-		return ItemListFilter{}, errors.New("workspace_id cannot be combined with workspace_id=null")
-	}
-	if filter.ProjectID != nil {
-		projectID := strings.TrimSpace(*filter.ProjectID)
-		if projectID != "" {
-			normalized.ProjectID = &projectID
-		}
-	}
-	return normalized, nil
-}
-
-func appendItemFilterClauses(parts []string, args []any, filter ItemListFilter, alias string) ([]string, []any) {
-	column := func(name string) string {
-		return alias + name
-	}
-	workspaceProjectColumn := func() string {
-		return `(SELECT project_id FROM workspaces WHERE id = ` + column("workspace_id") + `)`
-	}
-	if filter.Sphere != "" {
-		parts = append(parts, column("sphere")+" = ?")
-		args = append(args, filter.Sphere)
-	}
-	if filter.Source != "" {
-		parts = append(parts, "lower(trim("+column("source")+")) = ?")
-		args = append(args, filter.Source)
-	}
-	if filter.WorkspaceID != nil {
-		parts = append(parts, column("workspace_id")+" = ?")
-		args = append(args, *filter.WorkspaceID)
-	}
-	if filter.WorkspaceUnassigned {
-		parts = append(parts, column("workspace_id")+" IS NULL")
-	}
-	if filter.ProjectID != nil {
-		parts = append(parts, `COALESCE(`+column("project_id")+`, `+workspaceProjectColumn()+`) = ?`)
-		args = append(args, *filter.ProjectID)
-	}
-	return parts, args
-}
-
 func normalizeArtifactKind(kind ArtifactKind) ArtifactKind {
 	return ArtifactKind(strings.TrimSpace(string(kind)))
 }

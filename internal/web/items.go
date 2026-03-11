@@ -109,6 +109,16 @@ func parseItemListFilterQuery(r *http.Request) (store.ItemListFilter, error) {
 		}
 		filter.ProjectID = &rawProjectID
 	}
+	if rawContextID := strings.TrimSpace(r.URL.Query().Get("context_id")); rawContextID != "" {
+		if strings.EqualFold(rawContextID, "null") {
+			return store.ItemListFilter{}, errors.New("context_id must be a positive integer")
+		}
+		contextID, err := strconv.ParseInt(rawContextID, 10, 64)
+		if err != nil || contextID <= 0 {
+			return store.ItemListFilter{}, errors.New("context_id must be a positive integer")
+		}
+		filter.ContextID = &contextID
+	}
 	return filter, nil
 }
 

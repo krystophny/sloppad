@@ -1276,6 +1276,86 @@ func TestItemSummaryFilters(t *testing.T) {
 	}
 }
 
+func TestItemSummaryFiltersByContextIncludingDescendants(t *testing.T) {
+	s := newTestStore(t)
+
+	parent, err := s.CreateContext("Work", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(parent) error: %v", err)
+	}
+	child, err := s.CreateContext("W7x", &parent.ID)
+	if err != nil {
+		t.Fatalf("CreateContext(child) error: %v", err)
+	}
+	privateCtx, err := s.CreateContext("Private", nil)
+	if err != nil {
+		t.Fatalf("CreateContext(private) error: %v", err)
+	}
+
+	workspace, err := s.CreateWorkspace("Alpha", filepath.Join(t.TempDir(), "alpha"))
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	if err := s.LinkContextToWorkspace(child.ID, workspace.ID); err != nil {
+		t.Fatalf("LinkContextToWorkspace() error: %v", err)
+	}
+
+	now := time.Date(2026, time.March, 8, 10, 0, 0, 0, time.UTC)
+	past := now.Add(-1 * time.Hour).Format(time.RFC3339)
+	workspaceItem, err := s.CreateItem("Workspace child context item", ItemOptions{
+		State:        ItemStateInbox,
+		WorkspaceID:  &workspace.ID,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(workspace) error: %v", err)
+	}
+	privateItem, err := s.CreateItem("Private context item", ItemOptions{
+		State:        ItemStateInbox,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(private) error: %v", err)
+	}
+	if err := s.LinkContextToItem(privateCtx.ID, privateItem.ID); err != nil {
+		t.Fatalf("LinkContextToItem() error: %v", err)
+	}
+	directChildItem, err := s.CreateItem("Direct child context item", ItemOptions{
+		State:        ItemStateInbox,
+		VisibleAfter: &past,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(direct child) error: %v", err)
+	}
+	if err := s.LinkContextToItem(child.ID, directChildItem.ID); err != nil {
+		t.Fatalf("LinkContextToItem(child) error: %v", err)
+	}
+
+	parentFilter := ItemListFilter{ContextID: &parent.ID}
+	parentItems, err := s.ListInboxItemsFiltered(now, parentFilter)
+	if err != nil {
+		t.Fatalf("ListInboxItemsFiltered(parent) error: %v", err)
+	}
+	if len(parentItems) != 2 {
+		t.Fatalf("ListInboxItemsFiltered(parent) len = %d, want 2", len(parentItems))
+	}
+	gotIDs := map[int64]bool{}
+	for _, item := range parentItems {
+		gotIDs[item.ID] = true
+	}
+	if !gotIDs[workspaceItem.ID] || !gotIDs[directChildItem.ID] {
+		t.Fatalf("ListInboxItemsFiltered(parent) = %+v, want items %d and %d", parentItems, workspaceItem.ID, directChildItem.ID)
+	}
+
+	counts, err := s.CountItemsByStateFiltered(now, parentFilter)
+	if err != nil {
+		t.Fatalf("CountItemsByStateFiltered(parent) error: %v", err)
+	}
+	if got := counts[ItemStateInbox]; got != 2 {
+		t.Fatalf("CountItemsByStateFiltered(parent)[inbox] = %d, want 2", got)
+	}
+}
+
 func TestFindWorkspaceContainingPathPrefersDeepestMatch(t *testing.T) {
 	s := newTestStore(t)
 
