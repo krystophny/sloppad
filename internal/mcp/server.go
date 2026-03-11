@@ -21,7 +21,7 @@ import (
 
 const (
 	ServerName             = "tabura"
-	ServerVersion          = "0.1.9"
+	ServerVersion          = "0.1.10-dev"
 	LatestProtocolVersion  = "2025-03-26"
 	defaultProducerMCPURL  = "http://127.0.0.1:8090/mcp"
 	handoffKindFile        = "file"
