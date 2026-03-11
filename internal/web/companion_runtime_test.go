@@ -82,6 +82,7 @@ func TestCompanionRuntimeProtocolEmitsListeningAndTranscriptEvents(t *testing.T)
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 	chatSession, err := app.store.GetOrCreateChatSession(project.ProjectKey)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession: %v", err)
@@ -159,6 +160,7 @@ func TestCompanionRuntimeProtocolTransitionsThroughTalkingAndBackToListening(t *
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 	chatSession, err := app.store.GetOrCreateChatSession(project.ProjectKey)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession: %v", err)
@@ -221,6 +223,7 @@ func TestInterruptCompanionPendingTurnBroadcastsListeningState(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 	chatSession, err := app.store.GetOrCreateChatSession(project.ProjectKey)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession: %v", err)

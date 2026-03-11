@@ -144,6 +144,7 @@ export const state = {
   assistantCancelInFlight: false,
   assistantLastError: '',
   ttsPlaying: false,
+  livePolicy: 'dialogue',
   liveSessionActive: false,
   liveSessionMode: '',
   liveSessionHotword: LIVE_SESSION_HOTWORD_DEFAULT,

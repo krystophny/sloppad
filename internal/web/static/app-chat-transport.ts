@@ -379,6 +379,15 @@ export function handleChatEvent(payload) {
     return;
   }
 
+  if (type === 'live_policy_changed') {
+    state.livePolicy = String(payload?.policy || state.livePolicy || LIVE_SESSION_MODE_DIALOGUE).trim().toLowerCase() === LIVE_SESSION_MODE_MEETING
+      ? LIVE_SESSION_MODE_MEETING
+      : LIVE_SESSION_MODE_DIALOGUE;
+    renderEdgeTopModelButtons();
+    updateAssistantActivityIndicator();
+    return;
+  }
+
   if (type === 'mode_changed') {
     const nextMode = String(payload.mode || 'chat').trim().toLowerCase();
     setChatMode(nextMode);

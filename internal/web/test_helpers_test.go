@@ -27,6 +27,13 @@ func newAuthedTestApp(t *testing.T) *App {
 	return app
 }
 
+func setLivePolicyForTest(t *testing.T, app *App, policy LivePolicy) {
+	t.Helper()
+	if _, err := app.setLivePolicy(policy); err != nil {
+		t.Fatalf("set live policy: %v", err)
+	}
+}
+
 func holdAssistantTurnWorker(t *testing.T, app *App, sessionID string) {
 	t.Helper()
 	if app == nil || app.turns == nil {

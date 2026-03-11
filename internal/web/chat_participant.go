@@ -42,7 +42,7 @@ func handleParticipantStart(a *App, conn *chatWSConn, chatSessionID string) {
 	if projectKey == "" {
 		projectKey = "default"
 	}
-	if !cfg.CompanionEnabled {
+	if !cfg.CompanionEnabled || !a.livePolicyConfig().CaptureDecisions {
 		_ = conn.writeJSON(participantMessage{Type: "participant_error", Error: "meeting mode is disabled"})
 		return
 	}
@@ -280,7 +280,7 @@ func (a *App) maybeTriggerCompanionResponse(participantSessionID string, seg sto
 		return
 	}
 	cfg := a.loadCompanionConfig(project)
-	if !cfg.CompanionEnabled || !cfg.DirectedSpeechGateEnabled {
+	if !a.livePolicyConfig().CaptureDecisions || !cfg.CompanionEnabled || !cfg.DirectedSpeechGateEnabled {
 		return
 	}
 	segments, err := a.store.ListParticipantSegments(participantSessionID, 0, 0)

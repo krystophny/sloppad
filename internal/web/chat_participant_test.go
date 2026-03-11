@@ -29,6 +29,7 @@ func enableCompanionForTestProject(t *testing.T, app *App, projectKey string) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 }
 
 func createParticipantSessionProject(t *testing.T, app *App, key string) store.Project {

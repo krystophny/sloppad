@@ -146,6 +146,7 @@ func TestProjectCompanionStateReportsListeningWhenEnabled(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
 	if err != nil {
 		t.Fatalf("GetOrCreateChatSession: %v", err)
@@ -197,6 +198,7 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	sess, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {

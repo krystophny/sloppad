@@ -151,6 +151,7 @@ func TestCompanionResponseTriggerExecutesAssistantTurn(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -230,6 +231,7 @@ func TestCompanionResponseTriggerSkipsWhenCompanionDisabled(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -283,6 +285,7 @@ func TestCompanionResponseTriggerSkipsFalseTriggerTranscript(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -348,6 +351,7 @@ func TestCompanionResponseTriggerUsesSilentModeOutputQueue(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -398,6 +402,7 @@ func TestCompanionResponseTriggerDoesNotDuplicateSegment(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -453,6 +458,7 @@ func TestCompanionResponseTriggerInterruptsPendingTurn(t *testing.T) {
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {
@@ -563,6 +569,7 @@ func TestCompanionResponseTriggerIncludesProjectScopedCompanionContext(t *testin
 	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
 		t.Fatalf("save companion config: %v", err)
 	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
 
 	participantSession, err := app.store.AddParticipantSession(project.ProjectKey, "{}")
 	if err != nil {

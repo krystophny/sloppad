@@ -481,6 +481,9 @@ export function applyRuntimePreferences(runtime) {
   }
   const runtimeSilent = parseOptionalBoolean(runtime?.silent_mode);
   state.ttsSilent = runtimeSilent === true;
+  state.livePolicy = String(runtime?.live_policy || state.livePolicy || LIVE_SESSION_MODE_DIALOGUE).trim().toLowerCase() === LIVE_SESSION_MODE_MEETING
+    ? LIVE_SESSION_MODE_MEETING
+    : LIVE_SESSION_MODE_DIALOGUE;
   state.interaction.tool = normalizeInteractionTool(runtime?.tool || 'pointer');
   state.interaction.toolPinned = false;
   state.interaction.conversation = interactionConversationMode();

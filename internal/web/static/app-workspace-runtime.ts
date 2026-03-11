@@ -221,6 +221,30 @@ export async function updateCompanionConfig(patch) {
   return payload;
 }
 
+function normalizeLivePolicy(policy) {
+  return String(policy || '').trim().toLowerCase() === LIVE_SESSION_MODE_MEETING
+    ? LIVE_SESSION_MODE_MEETING
+    : LIVE_SESSION_MODE_DIALOGUE;
+}
+
+export async function updateLivePolicy(policy) {
+  const nextPolicy = normalizeLivePolicy(policy);
+  const resp = await fetch(apiURL('live-policy'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ policy: nextPolicy }),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  state.livePolicy = normalizeLivePolicy(payload?.policy || nextPolicy);
+  renderEdgeTopModelButtons();
+  updateAssistantActivityIndicator();
+  return payload;
+}
+
 export async function toggleCompanionIdleSurfacePreference() {
   const nextSurface = state.companionIdleSurface === COMPANION_IDLE_SURFACES.BLACK
     ? COMPANION_IDLE_SURFACES.ROBOT
@@ -240,6 +264,7 @@ export async function activateLiveSession(mode) {
   if (normalized !== LIVE_SESSION_MODE_DIALOGUE && normalized !== LIVE_SESSION_MODE_MEETING) return false;
   if (!activeProject()) return false;
   const wasMeeting = isMeetingLiveSession();
+  await updateLivePolicy(normalized);
   if (state.liveSessionActive) {
     stopLiveSession();
     applyLiveSessionStateSnapshot();
@@ -432,6 +457,10 @@ export function renderEdgeTopModelButtons() {
     dialogueButton.type = 'button';
     dialogueButton.className = 'edge-project-btn edge-model-btn edge-live-dialogue-btn';
     dialogueButton.textContent = 'Dialogue';
+    dialogueButton.setAttribute('aria-pressed', state.livePolicy === LIVE_SESSION_MODE_DIALOGUE ? 'true' : 'false');
+    if (state.livePolicy === LIVE_SESSION_MODE_DIALOGUE) {
+      dialogueButton.classList.add('is-active');
+    }
     dialogueButton.disabled = liveDisabled || !state.ttsEnabled;
     dialogueButton.addEventListener('click', () => {
       void activateLiveSession(LIVE_SESSION_MODE_DIALOGUE)
@@ -453,6 +482,10 @@ export function renderEdgeTopModelButtons() {
     meetingButton.type = 'button';
     meetingButton.className = 'edge-project-btn edge-model-btn edge-live-meeting-btn';
     meetingButton.textContent = 'Meeting';
+    meetingButton.setAttribute('aria-pressed', state.livePolicy === LIVE_SESSION_MODE_MEETING ? 'true' : 'false');
+    if (state.livePolicy === LIVE_SESSION_MODE_MEETING) {
+      meetingButton.classList.add('is-active');
+    }
     meetingButton.disabled = liveDisabled;
     meetingButton.addEventListener('click', () => {
       void activateLiveSession(LIVE_SESSION_MODE_MEETING)

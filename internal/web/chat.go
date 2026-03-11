@@ -577,6 +577,10 @@ func (a *App) handleChatWS(w http.ResponseWriter, r *http.Request) {
 			"mode": session.Mode,
 		})
 	}
+	_ = conn.writeJSON(map[string]interface{}{
+		"type":   "live_policy_changed",
+		"policy": a.LivePolicy().String(),
+	})
 	for {
 		mt, data, err := ws.ReadMessage()
 		if err != nil {

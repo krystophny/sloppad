@@ -197,6 +197,7 @@
       started_at: '2026-03-08T14:00:00Z',
       tts_enabled: true,
       silent_mode: false,
+      live_policy: harnessParams.get('live_policy') === 'meeting' ? 'meeting' : 'dialogue',
       tool: 'pointer',
       startup_behavior: 'resume_active',
       active_sphere: 'private',
@@ -258,6 +259,9 @@
       }
       if (Object.prototype.hasOwnProperty.call(next, 'silent_mode')) {
         runtimeState.silent_mode = Boolean(next.silent_mode);
+      }
+      if (Object.prototype.hasOwnProperty.call(next, 'live_policy')) {
+        runtimeState.live_policy = String(next.live_policy || '').trim().toLowerCase() === 'meeting' ? 'meeting' : 'dialogue';
       }
       if (Object.prototype.hasOwnProperty.call(next, 'tool')) {
         const normalized = String(next.tool || '').trim().toLowerCase();
@@ -1378,10 +1382,27 @@
         return new Response(JSON.stringify({
           ok: true,
           silent_mode: runtimeState.silent_mode,
+          live_policy: runtimeState.live_policy,
           tool: runtimeState.tool,
           startup_behavior: runtimeState.startup_behavior,
           active_sphere: runtimeState.active_sphere,
         }), { status: 200 });
+      }
+      if (u.includes('/api/live-policy') && opts?.method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        runtimeState.live_policy = String(body.policy || '').trim().toLowerCase() === 'meeting' ? 'meeting' : 'dialogue';
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'live_policy',
+          method: opts?.method || 'POST',
+          url: u,
+          payload: { policy: runtimeState.live_policy },
+        });
+        return new Response(JSON.stringify({ policy: runtimeState.live_policy }), { status: 200 });
+      }
+      if (u.includes('/api/live-policy')) {
+        return new Response(JSON.stringify({ policy: runtimeState.live_policy }), { status: 200 });
       }
       if (u.includes('/api/bugs/report') && opts?.method === 'POST') {
         let body = {};

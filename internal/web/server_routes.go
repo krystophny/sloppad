@@ -25,6 +25,8 @@ func (a *App) Router() http.Handler {
 	r.Patch("/api/runtime/preferences", a.handleRuntimePreferencesUpdate)
 	r.Post("/api/runtime/yolo", a.handleRuntimeYoloModeUpdate)
 	r.Post("/api/runtime/disclaimer-ack", a.handleRuntimeDisclaimerAck)
+	r.Get("/api/live-policy", a.handleLivePolicyGet)
+	r.Post("/api/live-policy", a.handleLivePolicyPost)
 	r.Get("/api/plugins", a.handlePlugins)
 	r.Post("/api/plugins/meeting-partner/decide", a.handleMeetingPartnerDecide)
 	r.Get("/api/extensions", a.handleExtensions)

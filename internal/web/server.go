@@ -97,6 +97,9 @@ type App struct {
 
 	upgrader websocket.Upgrader
 
+	livePolicyMu sync.Mutex
+	livePolicy   LivePolicy
+
 	mu                      sync.Mutex
 	confirmMu               sync.Mutex
 	approvalMu              sync.Mutex
@@ -316,6 +319,10 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		_ = s.Close()
 		return nil, err
 	}
+	if err := app.initializeLivePolicy(); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
 	if err := app.ensurePromptContractFresh(); err != nil {
 		_ = s.Close()
 		return nil, err
@@ -512,6 +519,7 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		"stt_url":                     a.sttURL,
 		"tts_enabled":                 a.ttsURL != "",
 		"silent_mode":                 a.silentModeEnabled(),
+		"live_policy":                 a.LivePolicy().String(),
 		"tool":                        a.runtimeTool(),
 		"startup_behavior":            a.runtimeStartupBehavior(),
 		"active_sphere":               a.runtimeActiveSphere(),

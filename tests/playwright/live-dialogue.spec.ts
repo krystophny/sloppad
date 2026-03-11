@@ -183,6 +183,48 @@ test('Meeting entry shows active status and returns to choices on Stop', async (
   await expect(page.locator('#edge-top-models .edge-live-meeting-btn')).toBeVisible();
 });
 
+test('Live policy persists from runtime and reacts to websocket policy changes', async ({ page }) => {
+  await page.goto('/tests/playwright/harness.html?live_policy=meeting');
+  await page.waitForFunction(() => {
+    const app = (window as any)._taburaApp;
+    if (typeof app?.getState !== 'function') return false;
+    const s = app.getState();
+    return s.chatWs && s.chatWs.readyState === (window as any).WebSocket.OPEN;
+  }, null, { timeout: 5_000 });
+  await page.waitForTimeout(200);
+  await waitForEdgeButtons(page);
+
+  await expect(page.locator('#edge-top-models .edge-live-meeting-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#edge-top-models .edge-live-dialogue-btn')).toHaveAttribute('aria-pressed', 'false');
+
+  await clearLog(page);
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-live-dialogue-btn');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('dialogue button not found');
+    }
+    button.click();
+  });
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.find((entry) => entry.action === 'live_policy')?.payload || null;
+  }).toEqual({ policy: 'dialogue' });
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Dialogue');
+
+  await page.evaluate(() => {
+    const button = document.querySelector('#edge-top-models .edge-live-stop-btn');
+    if (button instanceof HTMLButtonElement) {
+      button.click();
+    }
+  });
+  await expect(page.locator('#edge-top-models .edge-live-dialogue-btn')).toBeVisible();
+
+  await injectChatEvent(page, { type: 'live_policy_changed', policy: 'meeting' });
+  await expect(page.locator('#edge-top-models .edge-live-meeting-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#edge-top-models .edge-live-dialogue-btn')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('Dialogue shows listening indicator after TTS playback completes', async ({ page }) => {
   await setDialogueListenWindowMs(page, 1_200);
   await setDialogueMode(page, true);
