@@ -22,6 +22,7 @@ import (
 	"github.com/krystophny/tabura/internal/cerebras"
 	"github.com/krystophny/tabura/internal/email"
 	"github.com/krystophny/tabura/internal/extensions"
+	"github.com/krystophny/tabura/internal/gemini"
 	"github.com/krystophny/tabura/internal/ics"
 	"github.com/krystophny/tabura/internal/modelprofile"
 	"github.com/krystophny/tabura/internal/plugins"
@@ -39,6 +40,7 @@ const (
 	DefaultSTTPreVADThresholdDB = -58.0
 	DefaultSTTPreVADMinSpeechMS = 120
 	DefaultCerebrasSecretFile   = "cerebras-api-key"
+	DefaultGeminiSecretFile     = "gemini-api-key"
 	SessionCookie               = "tabura_session"
 	cookieMaxAgeSec             = 60 * 60 * 24 * 365
 	DaemonPort                  = 9420
@@ -68,6 +70,7 @@ type App struct {
 	appServerSparkReasoningEffort string
 	cerebrasClient                *cerebras.Client
 	cerebrasReasoningEffort       string
+	geminiClient                  *gemini.Client
 	intentLLMURL                  string
 	intentLLMModel                string
 	intentLLMProfile              string
@@ -205,6 +208,28 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 			resolvedCerebrasReasoningEffort,
 		)
 	}
+	resolvedGeminiURL := strings.TrimSpace(os.Getenv("TABURA_GEMINI_URL"))
+	if strings.EqualFold(resolvedGeminiURL, "off") {
+		resolvedGeminiURL = ""
+	} else if resolvedGeminiURL == "" {
+		resolvedGeminiURL = gemini.DefaultBaseURL
+	}
+	resolvedGeminiAPIKey := strings.TrimSpace(os.Getenv("TABURA_GEMINI_API_KEY"))
+	if resolvedGeminiAPIKey == "" {
+		resolvedGeminiAPIKey = readOptionalSecretFile(defaultSecretPath(DefaultGeminiSecretFile))
+	}
+	resolvedGeminiModel := strings.TrimSpace(os.Getenv("TABURA_GEMINI_MODEL"))
+	if resolvedGeminiModel == "" {
+		resolvedGeminiModel = gemini.DefaultModel
+	}
+	var geminiClient *gemini.Client
+	if resolvedGeminiURL != "" && resolvedGeminiAPIKey != "" {
+		geminiClient = gemini.NewClient(
+			resolvedGeminiURL,
+			resolvedGeminiAPIKey,
+			resolvedGeminiModel,
+		)
+	}
 	resolvedIntentLLMModel := strings.TrimSpace(os.Getenv("TABURA_INTENT_LLM_MODEL"))
 	if strings.EqualFold(resolvedIntentLLMModel, "off") {
 		resolvedIntentLLMModel = ""
@@ -295,6 +320,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		appServerSparkReasoningEffort: resolvedSparkReasoningEffort,
 		cerebrasClient:                cerebrasClient,
 		cerebrasReasoningEffort:       resolvedCerebrasReasoningEffort,
+		geminiClient:                  geminiClient,
 		intentLLMURL:                  resolvedIntentLLMURL,
 		intentLLMModel:                resolvedIntentLLMModel,
 		intentLLMProfile:              resolvedIntentLLMProfile,

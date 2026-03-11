@@ -223,6 +223,7 @@ func (a *App) runAssistantTurnParallel(
 
 	localCh := make(chan localTurnEvaluation, 1)
 	cerebrasCh := make(chan cerebrasTurnResult, 1)
+	geminiCh := make(chan geminiTurnResult, 1)
 	sparkCh := make(chan sparkTurnResult, 1)
 
 	startSpark := func() {
@@ -238,6 +239,14 @@ func (a *App) runAssistantTurnParallel(
 		}
 		go func() {
 			cerebrasCh <- a.runCerebrasTurn(ctx, prompt)
+		}()
+	}
+	startGemini := func() {
+		if a.geminiClient == nil || !a.geminiClient.IsAvailable() {
+			return
+		}
+		go func() {
+			geminiCh <- a.runGeminiTurn(ctx, prompt)
 		}()
 	}
 
@@ -262,12 +271,14 @@ func (a *App) runAssistantTurnParallel(
 	if precomputedLocal != nil {
 		localCh <- *precomputedLocal
 		startCerebras()
+		startGemini()
 		startSpark()
 	} else {
 		go func() {
 			localCh <- a.evaluateLocalTurn(context.Background(), sessionID, session, userText, cursorCtx, turn.captureMode)
 		}()
 		startCerebras()
+		startGemini()
 		startSpark()
 	}
 
@@ -280,8 +291,9 @@ func (a *App) runAssistantTurnParallel(
 	persistedAssistantText := ""
 	localReady := false
 	localEvaluation := localTurnEvaluation{}
-	cerebrasDone := false
 	cerebrasResult := cerebrasTurnResult{}
+	geminiDone := false
+	geminiResult := geminiTurnResult{}
 	provisionalEmitted := false
 	provisionalText := ""
 	commandPayloadsBroadcast := false
@@ -290,7 +302,7 @@ func (a *App) runAssistantTurnParallel(
 
 	localMetadata := newAssistantResponseMetadata(assistantProviderLocal, a.localAssistantModelLabel(), 0)
 	cerebrasMetadata := newAssistantResponseMetadata(assistantProviderCerebras, a.cerebrasModelLabel(), 0)
-
+	geminiMetadata := newAssistantResponseMetadata(assistantProviderGoogle, a.geminiModelLabel(), 0)
 	commitFinal := func(text string, metadata assistantResponseMetadata, source string, threadID string) {
 		a.emitTurnStage(sessionID, "turn_committed", turnID, source, text)
 		a.emitTurnStage(sessionID, "turn_source", turnID, source, "")
@@ -306,6 +318,46 @@ func (a *App) runAssistantTurnParallel(
 			turn.outputMode,
 			metadata,
 		)
+	}
+	geminiPending := func() bool {
+		return a.geminiClient != nil && a.geminiClient.IsAvailable() && !geminiDone
+	}
+	tryCommitGeminiClaim := func() bool {
+		if !localReady || localEvaluation.isCommand() || localEvaluation.isHighConfidenceLocalAnswer() || !geminiResult.canClaim() {
+			return false
+		}
+		a.emitTurnStage(sessionID, "turn_claimed", turnID, assistantProviderGoogle, geminiResult.text)
+		commitFinal(geminiResult.text, newAssistantResponseMetadata(geminiMetadata.Provider, geminiMetadata.ProviderModel, geminiResult.latency), assistantProviderGoogle, "")
+		return true
+	}
+	tryCommitCerebrasClaim := func() bool {
+		if !localReady || localEvaluation.isCommand() || !cerebrasResult.canClaim() {
+			return false
+		}
+		a.emitTurnStage(sessionID, "turn_claimed", turnID, assistantProviderCerebras, cerebrasResult.text)
+		commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+		return true
+	}
+	tryCommitSpark := func() bool {
+		if sparkResult.err != nil || strings.TrimSpace(sparkResult.text) == "" {
+			return false
+		}
+		commitFinal(sparkResult.text, newAssistantResponseMetadata(responseMeta.Provider, responseMeta.ProviderModel, sparkResult.latency), responseMeta.Provider, sparkResult.threadID)
+		return true
+	}
+	tryCommitCerebrasFallback := func() bool {
+		if !cerebrasResult.canFallback() {
+			return false
+		}
+		commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+		return true
+	}
+	tryCommitGeminiFallback := func() bool {
+		if !geminiResult.canFallback() {
+			return false
+		}
+		commitFinal(geminiResult.text, newAssistantResponseMetadata(geminiMetadata.Provider, geminiMetadata.ProviderModel, geminiResult.latency), assistantProviderGoogle, "")
+		return true
 	}
 
 	for {
@@ -353,17 +405,22 @@ func (a *App) runAssistantTurnParallel(
 					return true
 				}
 			} else if sparkDone {
-				if cerebrasDone && cerebrasResult.canClaim() {
-					a.emitTurnStage(sessionID, "turn_claimed", turnID, assistantProviderCerebras, cerebrasResult.text)
-					commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+				if tryCommitGeminiClaim() {
 					return true
 				}
-				if sparkResult.err == nil && strings.TrimSpace(sparkResult.text) != "" {
-					commitFinal(sparkResult.text, newAssistantResponseMetadata(responseMeta.Provider, responseMeta.ProviderModel, sparkResult.latency), responseMeta.Provider, sparkResult.threadID)
+				if geminiPending() {
+					continue
+				}
+				if tryCommitCerebrasClaim() {
 					return true
 				}
-				if cerebrasDone && cerebrasResult.canFallback() {
-					commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+				if tryCommitSpark() {
+					return true
+				}
+				if tryCommitCerebrasFallback() {
+					return true
+				}
+				if tryCommitGeminiFallback() {
 					return true
 				}
 				if fallback := evaluation.fallbackText(); fallback != "" {
@@ -372,15 +429,62 @@ func (a *App) runAssistantTurnParallel(
 				}
 			}
 		case result := <-cerebrasCh:
-			cerebrasDone = true
 			cerebrasResult = result
 			if !localReady || localEvaluation.isCommand() || localEvaluation.isHighConfidenceLocalAnswer() {
 				continue
 			}
-			if result.canClaim() {
-				a.emitTurnStage(sessionID, "turn_claimed", turnID, assistantProviderCerebras, result.text)
-				commitFinal(result.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, result.latency), assistantProviderCerebras, "")
+			if tryCommitGeminiClaim() {
 				return true
+			}
+			if result.canClaim() {
+				if geminiPending() {
+					continue
+				}
+				if tryCommitCerebrasClaim() {
+					return true
+				}
+			}
+			if sparkDone {
+				if tryCommitSpark() {
+					return true
+				}
+				if tryCommitCerebrasFallback() {
+					return true
+				}
+				if tryCommitGeminiFallback() {
+					return true
+				}
+				if fallback := localEvaluation.fallbackText(); fallback != "" {
+					commitFinal(fallback, localMetadata, assistantProviderLocal, "")
+					return true
+				}
+			}
+		case result := <-geminiCh:
+			geminiDone = true
+			geminiResult = result
+			if !localReady || localEvaluation.isCommand() || localEvaluation.isHighConfidenceLocalAnswer() {
+				continue
+			}
+			if tryCommitGeminiClaim() {
+				return true
+			}
+			if tryCommitCerebrasClaim() {
+				return true
+			}
+			if sparkDone {
+				if tryCommitSpark() {
+					return true
+				}
+				if tryCommitCerebrasFallback() {
+					return true
+				}
+				if tryCommitGeminiFallback() {
+					return true
+				}
+				if fallback := localEvaluation.fallbackText(); fallback != "" {
+					commitFinal(fallback, localMetadata, assistantProviderLocal, "")
+					return true
+				}
 			}
 		case result := <-sparkCh:
 			sparkDone = true
@@ -388,13 +492,16 @@ func (a *App) runAssistantTurnParallel(
 			if !localReady {
 				continue
 			}
-			if cerebrasDone && cerebrasResult.canClaim() && !localEvaluation.isCommand() {
-				a.emitTurnStage(sessionID, "turn_claimed", turnID, assistantProviderCerebras, cerebrasResult.text)
-				commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+			if tryCommitGeminiClaim() {
 				return true
 			}
-			if result.err == nil && strings.TrimSpace(result.text) != "" {
-				commitFinal(result.text, newAssistantResponseMetadata(responseMeta.Provider, responseMeta.ProviderModel, result.latency), responseMeta.Provider, result.threadID)
+			if geminiPending() && !localEvaluation.isCommand() {
+				continue
+			}
+			if tryCommitCerebrasClaim() {
+				return true
+			}
+			if tryCommitSpark() {
 				return true
 			}
 			if localReady {
@@ -402,8 +509,10 @@ func (a *App) runAssistantTurnParallel(
 					commitFinal(finalParallelCommandText(localEvaluation, provisionalText), localMetadata, assistantProviderLocal, "")
 					return true
 				}
-				if cerebrasDone && cerebrasResult.canFallback() {
-					commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+				if tryCommitCerebrasFallback() {
+					return true
+				}
+				if tryCommitGeminiFallback() {
 					return true
 				}
 				if fallback := localEvaluation.fallbackText(); fallback != "" {
@@ -443,8 +552,13 @@ func (a *App) runAssistantTurnParallel(
 					commitFinal(finalParallelCommandText(localEvaluation, provisionalText), localMetadata, assistantProviderLocal, "")
 					return true
 				}
-				if cerebrasDone && cerebrasResult.canFallback() {
-					commitFinal(cerebrasResult.text, newAssistantResponseMetadata(cerebrasMetadata.Provider, cerebrasMetadata.ProviderModel, cerebrasResult.latency), assistantProviderCerebras, "")
+				if tryCommitGeminiClaim() {
+					return true
+				}
+				if tryCommitCerebrasFallback() {
+					return true
+				}
+				if tryCommitGeminiFallback() {
 					return true
 				}
 				if fallback := localEvaluation.fallbackText(); fallback != "" {
