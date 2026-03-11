@@ -107,6 +107,19 @@ func TestWorkspaceCRUDAPI(t *testing.T) {
 	if rrMissing.Code != http.StatusNotFound {
 		t.Fatalf("deleted workspace status = %d, want 404: %s", rrMissing.Code, rrMissing.Body.String())
 	}
+	active, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace() after delete error: %v", err)
+	}
+	if active.ID == workspaceID {
+		t.Fatalf("active workspace id = %d, want deleted workspace to be replaced", active.ID)
+	}
+	if !active.IsDaily {
+		t.Fatalf("active workspace is_daily = %v, want true", active.IsDaily)
+	}
+	if _, err := app.store.GetChatSessionByWorkspaceID(active.ID); err != nil {
+		t.Fatalf("GetChatSessionByWorkspaceID(active) error: %v", err)
+	}
 }
 
 func TestWorkspaceListFiltersBySphere(t *testing.T) {
