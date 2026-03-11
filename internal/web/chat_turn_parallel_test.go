@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/krystophny/tabura/internal/cerebras"
+	"github.com/krystophny/tabura/internal/gemini"
 )
 
 type mockParallelAppServerState struct {
@@ -147,6 +148,75 @@ func setupMockCerebrasServer(t *testing.T, status int, delay time.Duration, cont
 			return
 		}
 		_, _ = w.Write([]byte("upstream error"))
+	}))
+	return server, &requests
+}
+
+func setupMockGeminiServer(t *testing.T, status int, delay time.Duration, grounded bool, text string) (*httptest.Server, *int) {
+	t.Helper()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(r.URL.Path), ":generateContent") {
+			t.Fatalf("path = %s, want generateContent path", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("x-goog-api-key")); got != "token-gemini" {
+			t.Fatalf("x-goog-api-key = %q, want token-gemini", got)
+		}
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		tools, ok := payload["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %#v, want google_search tool", payload["tools"])
+		}
+		time.Sleep(delay)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		if status != http.StatusOK {
+			_, _ = w.Write([]byte("upstream error"))
+			return
+		}
+		candidate := map[string]any{
+			"content": map[string]any{
+				"parts": []map[string]any{
+					{"text": text},
+				},
+			},
+		}
+		if grounded {
+			candidate["groundingMetadata"] = map[string]any{
+				"webSearchQueries": []string{"latest linux kernel changes"},
+				"groundingChunks": []map[string]any{
+					{
+						"web": map[string]any{
+							"uri":   "https://example.com/source-1",
+							"title": "Source One",
+						},
+					},
+				},
+				"groundingSupports": []map[string]any{
+					{
+						"segment": map[string]any{
+							"text":       text,
+							"startIndex": 0,
+							"endIndex":   len(text),
+						},
+						"groundingChunkIndices": []int{0},
+					},
+				},
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"candidates": []map[string]any{candidate},
+			"usageMetadata": map[string]any{
+				"totalTokenCount": 42,
+			},
+		})
 	}))
 	return server, &requests
 }
@@ -526,6 +596,160 @@ func TestRunAssistantTurnParallelCerebrasClaimsTurn(t *testing.T) {
 	}
 	if *requests != 1 {
 		t.Fatalf("cerebras requests = %d, want 1", *requests)
+	}
+}
+
+func TestRunAssistantTurnParallelGroundedGeminiClaimsTurn(t *testing.T) {
+	appServer, _ := setupMockParallelAppServer(t, 250*time.Millisecond, "Spark fallback.")
+	defer appServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(appServer.URL, "http")
+
+	llm := setupMockIntentLLMServer(t, http.StatusOK, `{"kind":"local_answer","text":"Possible short answer.","confidence":"medium"}`)
+	defer llm.Close()
+
+	cerebrasServer, cerebrasRequests := setupMockCerebrasServer(t, http.StatusOK, 20*time.Millisecond, `{"text":"Cerebras answer.","confidence":"high"}`)
+	defer cerebrasServer.Close()
+	geminiServer, geminiRequests := setupMockGeminiServer(t, http.StatusOK, 40*time.Millisecond, true, "Linux kernel 6.20 landed changes.")
+	defer geminiServer.Close()
+
+	app := newParallelTestApp(t, wsURL)
+	app.intentLLMURL = llm.URL
+	app.cerebrasClient = cerebras.NewClient(cerebrasServer.URL, "token-cerebras", cerebras.DefaultModel, cerebras.DefaultReasoningEffort)
+	app.cerebrasClient.HTTPClient = cerebrasServer.Client()
+	app.geminiClient = gemini.NewClient(geminiServer.URL, "token-gemini", gemini.DefaultModel)
+	app.geminiClient.HTTPClient = geminiServer.Client()
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensureDefaultProjectRecord: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+	if _, err := app.store.AddChatMessage(session.ID, "user", "what were the latest Linux kernel changes?", "what were the latest Linux kernel changes?", "text"); err != nil {
+		t.Fatalf("AddChatMessage(user): %v", err)
+	}
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
+
+	got := latestAssistantMessage(t, app, session.ID)
+	if !strings.Contains(got, "Linux kernel 6.20 landed changes.") {
+		t.Fatalf("assistant message = %q, want Gemini grounded reply", got)
+	}
+	if !strings.Contains(got, "[1](https://example.com/source-1)") {
+		t.Fatalf("assistant message = %q, want inline citation link", got)
+	}
+	messages, err := app.store.ListChatMessages(session.ID, 10)
+	if err != nil {
+		t.Fatalf("ListChatMessages: %v", err)
+	}
+	assistant := messages[len(messages)-1]
+	if assistant.Provider != assistantProviderGoogle {
+		t.Fatalf("provider = %q, want %q", assistant.Provider, assistantProviderGoogle)
+	}
+	if assistant.ProviderModel != gemini.DefaultModel {
+		t.Fatalf("provider_model = %q, want %q", assistant.ProviderModel, gemini.DefaultModel)
+	}
+	if *cerebrasRequests != 1 {
+		t.Fatalf("cerebras requests = %d, want 1", *cerebrasRequests)
+	}
+	if *geminiRequests != 1 {
+		t.Fatalf("gemini requests = %d, want 1", *geminiRequests)
+	}
+}
+
+func TestRunAssistantTurnParallelUngroundedGeminiDoesNotBeatCerebras(t *testing.T) {
+	appServer, _ := setupMockParallelAppServer(t, 250*time.Millisecond, "Spark fallback.")
+	defer appServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(appServer.URL, "http")
+
+	llm := setupMockIntentLLMServer(t, http.StatusOK, `{"kind":"local_answer","text":"Possible short answer.","confidence":"medium"}`)
+	defer llm.Close()
+
+	cerebrasServer, _ := setupMockCerebrasServer(t, http.StatusOK, 40*time.Millisecond, `{"text":"Cerebras wins the turn.","confidence":"high"}`)
+	defer cerebrasServer.Close()
+	geminiServer, _ := setupMockGeminiServer(t, http.StatusOK, 20*time.Millisecond, false, "Gemini answered without citations.")
+	defer geminiServer.Close()
+
+	app := newParallelTestApp(t, wsURL)
+	app.intentLLMURL = llm.URL
+	app.cerebrasClient = cerebras.NewClient(cerebrasServer.URL, "token-cerebras", cerebras.DefaultModel, cerebras.DefaultReasoningEffort)
+	app.cerebrasClient.HTTPClient = cerebrasServer.Client()
+	app.geminiClient = gemini.NewClient(geminiServer.URL, "token-gemini", gemini.DefaultModel)
+	app.geminiClient.HTTPClient = geminiServer.Client()
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensureDefaultProjectRecord: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+	if _, err := app.store.AddChatMessage(session.ID, "user", "explain the routing policy", "explain the routing policy", "text"); err != nil {
+		t.Fatalf("AddChatMessage(user): %v", err)
+	}
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
+
+	if got := latestAssistantMessage(t, app, session.ID); got != "Cerebras wins the turn." {
+		t.Fatalf("assistant message = %q, want Cerebras final reply", got)
+	}
+	messages, err := app.store.ListChatMessages(session.ID, 10)
+	if err != nil {
+		t.Fatalf("ListChatMessages: %v", err)
+	}
+	assistant := messages[len(messages)-1]
+	if assistant.Provider != assistantProviderCerebras {
+		t.Fatalf("provider = %q, want %q", assistant.Provider, assistantProviderCerebras)
+	}
+}
+
+func TestRunAssistantTurnParallelGeminiFailureFallsBackSilently(t *testing.T) {
+	appServer, _ := setupMockParallelAppServer(t, 25*time.Millisecond, "Spark handles the turn.")
+	defer appServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(appServer.URL, "http")
+
+	llm := setupMockIntentLLMServer(t, http.StatusOK, `{"kind":"local_answer","text":"Possible short answer.","confidence":"medium"}`)
+	defer llm.Close()
+
+	geminiServer, requests := setupMockGeminiServer(t, http.StatusBadGateway, 0, false, "")
+	defer geminiServer.Close()
+
+	app := newParallelTestApp(t, wsURL)
+	app.intentLLMURL = llm.URL
+	app.geminiClient = gemini.NewClient(geminiServer.URL, "token-gemini", gemini.DefaultModel)
+	app.geminiClient.HTTPClient = geminiServer.Client()
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensureDefaultProjectRecord: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+	if _, err := app.store.AddChatMessage(session.ID, "user", "latest news", "latest news", "text"); err != nil {
+		t.Fatalf("AddChatMessage(user): %v", err)
+	}
+
+	app.runAssistantTurn(session.ID, dequeuedTurn{outputMode: turnOutputModeSilent})
+
+	if got := latestAssistantMessage(t, app, session.ID); got != "Spark handles the turn." {
+		t.Fatalf("assistant message = %q, want Spark final reply", got)
+	}
+	if *requests != 1 {
+		t.Fatalf("gemini requests = %d, want 1", *requests)
+	}
+	messages, err := app.store.ListChatMessages(session.ID, 20)
+	if err != nil {
+		t.Fatalf("ListChatMessages: %v", err)
+	}
+	for _, message := range messages {
+		if strings.EqualFold(strings.TrimSpace(message.Role), "system") && strings.Contains(strings.ToLower(message.ContentPlain), "gemini") {
+			t.Fatalf("unexpected user-visible Gemini error: %q", message.ContentPlain)
+		}
 	}
 }
 
