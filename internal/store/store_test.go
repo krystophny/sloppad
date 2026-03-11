@@ -566,6 +566,33 @@ func TestGetOrCreateChatSessionPrefersLinkedWorkspaceOverLegacyProjectPath(t *te
 	}
 }
 
+func TestGetOrCreateChatSessionCreatesWorkspaceForLegacyProjectFallback(t *testing.T) {
+	s := newTestStore(t)
+	projectRoot := filepath.Join(t.TempDir(), "project-root")
+	project, err := s.CreateProject("Alpha", "alpha-key", projectRoot, "managed", "", "", false)
+	if err != nil {
+		t.Fatalf("CreateProject() error: %v", err)
+	}
+
+	session, err := s.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession() error: %v", err)
+	}
+	if session.WorkspaceID <= 0 {
+		t.Fatalf("workspace_id = %d, want positive id", session.WorkspaceID)
+	}
+	workspace, err := s.GetWorkspace(session.WorkspaceID)
+	if err != nil {
+		t.Fatalf("GetWorkspace() error: %v", err)
+	}
+	if workspace.DirPath != project.RootPath {
+		t.Fatalf("workspace dir_path = %q, want %q", workspace.DirPath, project.RootPath)
+	}
+	if workspace.ProjectID == nil || *workspace.ProjectID != project.ID {
+		t.Fatalf("workspace project_id = %v, want %q", workspace.ProjectID, project.ID)
+	}
+}
+
 func TestStoreSchemaAndHelperNormalizers(t *testing.T) {
 	s := newTestStore(t)
 
