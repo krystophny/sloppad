@@ -429,16 +429,8 @@ func resolveBugReportGitRemoteOwnerRepo(dir string) string {
 }
 
 func bugReportIssueTitle(bundle bugReportBundle) string {
-	for _, candidate := range []string{
-		firstSentence(bundle.Note),
-		firstSentence(bundle.VoiceTranscript),
-		bugReportCanvasArtifactTitle(bundle.CanvasState),
-	} {
-		clean := strings.TrimSpace(candidate)
-		if clean == "" {
-			continue
-		}
-		return truncateText("Bug report: "+clean, 96)
+	if summary := bugReportSummary(bundle); summary != "" {
+		return truncateText("Bug report: "+summary, 96)
 	}
 	return "Bug report: interaction failure"
 }
@@ -454,6 +446,111 @@ func bugReportCanvasArtifactTitle(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+func bugReportSummary(bundle bugReportBundle) string {
+	for _, candidate := range []string{
+		firstSentence(bundle.Note),
+		firstSentence(bundle.VoiceTranscript),
+		bugReportLogSummary(bundle.BrowserLogs),
+		bugReportRecentEventSummary(bundle.RecentEvents),
+		bugReportStructuredSummary(bundle),
+	} {
+		clean := strings.TrimSpace(candidate)
+		if clean == "" {
+			continue
+		}
+		return clean
+	}
+	return ""
+}
+
+func bugReportLogSummary(lines []string) string {
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		clean := normalizeBugReportEvidenceLine(lines[idx])
+		if clean == "" {
+			continue
+		}
+		clean = trimBugReportLogLevel(clean)
+		if clean == "" {
+			continue
+		}
+		return firstSentence(clean)
+	}
+	return ""
+}
+
+func bugReportRecentEventSummary(lines []string) string {
+	for idx := len(lines) - 1; idx >= 0; idx-- {
+		clean := strings.ToLower(normalizeBugReportEvidenceLine(lines[idx]))
+		if clean == "" {
+			continue
+		}
+		if strings.Contains(clean, "bug report") || strings.Contains(clean, "report bug") {
+			continue
+		}
+		return firstSentence(normalizeBugReportEvidenceLine(lines[idx]))
+	}
+	return ""
+}
+
+func bugReportStructuredSummary(bundle bugReportBundle) string {
+	artifact := bugReportCanvasArtifactTitle(bundle.CanvasState)
+	mode := strings.TrimSpace(bundle.ActiveMode)
+	workspace := strings.TrimSpace(bundle.ActiveWorkspace)
+	trigger := strings.TrimSpace(bundle.Trigger)
+	switch {
+	case mode != "" && artifact != "":
+		return fmt.Sprintf("%s interaction failed while viewing %s", mode, artifact)
+	case artifact != "":
+		return fmt.Sprintf("interaction failed while viewing %s", artifact)
+	case mode != "" && workspace != "":
+		return fmt.Sprintf("%s interaction failed in %s", mode, workspace)
+	case mode != "":
+		return fmt.Sprintf("%s interaction failed", mode)
+	case workspace != "":
+		return fmt.Sprintf("interaction failed in %s", workspace)
+	case trigger != "":
+		return fmt.Sprintf("interaction failed after %s", trigger)
+	default:
+		return ""
+	}
+}
+
+func normalizeBugReportEvidenceLine(raw string) string {
+	clean := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	if clean == "" {
+		return ""
+	}
+	if clean = trimBugReportTimestamp(clean); clean == "" {
+		return ""
+	}
+	return clean
+}
+
+func trimBugReportTimestamp(raw string) string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" {
+		return ""
+	}
+	firstSpace := strings.IndexByte(clean, ' ')
+	if firstSpace <= 0 {
+		return clean
+	}
+	if _, err := time.Parse(time.RFC3339Nano, clean[:firstSpace]); err == nil {
+		return strings.TrimSpace(clean[firstSpace+1:])
+	}
+	return clean
+}
+
+func trimBugReportLogLevel(raw string) string {
+	clean := strings.TrimSpace(raw)
+	for _, prefix := range []string{"error:", "warn:", "warning:", "log:", "info:", "debug:"} {
+		if strings.HasPrefix(strings.ToLower(clean), prefix) {
+			return strings.TrimSpace(clean[len(prefix):])
+		}
+	}
+	return clean
 }
 
 func normalizeBugReportGitHubOwnerRepo(raw string) string {
@@ -509,7 +606,7 @@ func truncateText(raw string, max int) string {
 
 func bugReportIssueBody(bundle bugReportBundle, bundlePath string) string {
 	var b strings.Builder
-	summary := firstNonEmpty(strings.TrimSpace(bundle.Note), strings.TrimSpace(bundle.VoiceTranscript))
+	summary := bugReportSummary(bundle)
 	if summary != "" {
 		b.WriteString("## Summary\n\n")
 		b.WriteString(summary)

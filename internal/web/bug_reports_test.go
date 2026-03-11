@@ -503,6 +503,41 @@ func TestHandleBugReportCreateSucceedsWhenIssueCreationFails(t *testing.T) {
 	}
 }
 
+func TestBugReportIssueTitleUsesBrowserLogFallback(t *testing.T) {
+	bundle := bugReportBundle{
+		BrowserLogs: []string{
+			"2026-03-11T11:07:21Z error: TypeError: Cannot read properties of undefined (reading 'click')",
+		},
+		ActiveMode:      "pen",
+		ActiveWorkspace: "2026/03/11",
+	}
+
+	title := bugReportIssueTitle(bundle)
+	if title != "Bug report: TypeError: Cannot read properties of undefined (reading 'click')" {
+		t.Fatalf("bugReportIssueTitle() = %q", title)
+	}
+	body := bugReportIssueBody(bundle, ".tabura/artifacts/bugs/20260311-110721-568aa357/bundle.json")
+	if !strings.Contains(body, "## Summary\n\nTypeError: Cannot read properties of undefined (reading 'click')") {
+		t.Fatalf("bugReportIssueBody() missing browser log summary:\n%s", body)
+	}
+}
+
+func TestBugReportIssueTitleUsesStructuredFallbackWithoutFreeText(t *testing.T) {
+	bundle := bugReportBundle{
+		ActiveMode:      "pen",
+		ActiveWorkspace: "2026/03/11",
+	}
+
+	title := bugReportIssueTitle(bundle)
+	if title != "Bug report: pen interaction failed in 2026/03/11" {
+		t.Fatalf("bugReportIssueTitle() = %q", title)
+	}
+	body := bugReportIssueBody(bundle, ".tabura/artifacts/bugs/20260311-110721-568aa357/bundle.json")
+	if !strings.Contains(body, "## Summary\n\npen interaction failed in 2026/03/11") {
+		t.Fatalf("bugReportIssueBody() missing structured summary:\n%s", body)
+	}
+}
+
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	commands := [][]string{
