@@ -1,6 +1,8 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -143,5 +145,50 @@ func TestActiveWorkspaceReturnsCurrentSelection(t *testing.T) {
 	}
 	if active.ID != alpha.ID {
 		t.Fatalf("ActiveWorkspace() second = %d, want %d", active.ID, alpha.ID)
+	}
+}
+
+func TestEnsureDailyWorkspaceIsIdempotentAndRenamePromotesIt(t *testing.T) {
+	s := newTestStore(t)
+
+	dirPath := filepath.Join(t.TempDir(), "daily", "2026", "03", "11")
+	first, err := s.EnsureDailyWorkspace("2026-03-11", dirPath)
+	if err != nil {
+		t.Fatalf("EnsureDailyWorkspace(first) error: %v", err)
+	}
+	if !first.IsDaily {
+		t.Fatal("first workspace is_daily = false, want true")
+	}
+	if first.DailyDate == nil || *first.DailyDate != "2026-03-11" {
+		t.Fatalf("first workspace daily_date = %v, want 2026-03-11", first.DailyDate)
+	}
+	if first.Name != "2026/03/11" {
+		t.Fatalf("first workspace name = %q, want 2026/03/11", first.Name)
+	}
+	if first.DirPath != dirPath {
+		t.Fatalf("first workspace dir_path = %q, want %q", first.DirPath, dirPath)
+	}
+
+	second, err := s.EnsureDailyWorkspace("2026-03-11", dirPath)
+	if err != nil {
+		t.Fatalf("EnsureDailyWorkspace(second) error: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("EnsureDailyWorkspace(second) id = %d, want %d", second.ID, first.ID)
+	}
+
+	updated, err := s.UpdateWorkspaceName(first.ID, "DEMO-2025-prep")
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceName() error: %v", err)
+	}
+	if updated.IsDaily {
+		t.Fatal("renamed workspace is_daily = true, want false")
+	}
+	if updated.DailyDate == nil || *updated.DailyDate != "2026-03-11" {
+		t.Fatalf("renamed workspace daily_date = %v, want 2026-03-11", updated.DailyDate)
+	}
+
+	if _, err := s.DailyWorkspaceForDate("2026-03-11"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("DailyWorkspaceForDate(after rename) error = %v, want sql.ErrNoRows", err)
 	}
 }

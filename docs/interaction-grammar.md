@@ -20,7 +20,7 @@ Project is not a product concept. Session and message are transport or storage d
 
 1. The canvas shows artifacts, always. Bare items (no artifact) show in the sidebar only.
 2. An item may have zero or more artifacts with roles (source, related, output). One artifact is designated primary and shown on canvas. Bare tasks (no artifact) show in sidebar only.
-3. A workspace is a directory. No virtual workspaces. Composition via filesystem tools. Ephemeral workspaces use real temp directories.
+3. A workspace is a directory. No virtual workspaces. Composition via filesystem tools. The default fallback is today's persistent Daily Workspace.
 4. Contexts are the only cross-cutting grouping mechanism. No ProjectID anywhere.
 5. Work and private are top-level contexts, not a separate "sphere" field. They follow the same rules as all other contexts.
 6. Intent classification is workspace-independent. Execution is workspace-aware.
@@ -104,14 +104,14 @@ How real entities map to the five nouns:
 
 Inbox is a global view accessible from any workspace sidebar. It shows all items in inbox state. The inbox is filterable by context: selecting a context narrows the view to items carrying that context (or any child context). Unfiltered inbox shows everything.
 
-### Ephemeral workspaces
+### Daily workspaces
 
-Starting without a workspace creates an ephemeral workspace backed by a real temp directory. The user gets full AI support from moment zero: dialogue, meeting, system commands. Items created go to inbox with contexts (no workspace assignment). Artifacts go to the ephemeral workspace's temp directory.
+Starting without an explicit workspace activates today's Daily Workspace. It is a persistent directory under `<data-dir>/daily/YYYY/MM/DD/`, and it is reused across restarts for the same day.
 
-- **Persist**: user names the workspace and provides a real path. Temp directory contents move to the new path. The workspace becomes permanent.
-- **Discard**: temp directory is cleaned up. Items and contexts survive in inbox.
+- **Day rollover**: the next interaction after midnight creates and activates a new Daily Workspace for the new date.
+- **Promote**: renaming the Daily Workspace turns it into a normal explicit workspace while retaining its recorded date.
 
-Landing page: last-used workspace, or ephemeral if none.
+Landing state: last explicitly active workspace, otherwise today's Daily Workspace.
 
 ### Intent architecture
 

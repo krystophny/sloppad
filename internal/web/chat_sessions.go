@@ -78,30 +78,30 @@ func (a *App) resolveChatSessionTarget(projectID, projectKey string, workspaceID
 	}
 
 	if workspace, err := a.store.ActiveWorkspace(); err == nil {
+		if workspace.IsDaily && workspaceDailyDate(workspace) != dailyWorkspaceDate(a.runtimeNow()) {
+			workspace, err = a.ensureTodayDailyWorkspace()
+			if err != nil {
+				return store.Workspace{}, nil, err
+			}
+		}
 		project, err := a.projectForWorkspace(workspace)
 		if err != nil {
 			return store.Workspace{}, nil, err
 		}
 		return workspace, project, nil
+	} else if !isNoRows(err) {
+		return store.Workspace{}, nil, err
 	}
 
-	activeProjectID, err := a.store.ActiveProjectID()
+	workspace, err := a.ensureTodayDailyWorkspace()
 	if err != nil {
 		return store.Workspace{}, nil, err
 	}
-	if strings.TrimSpace(activeProjectID) != "" {
-		project, err := a.store.GetProject(activeProjectID)
-		if err != nil {
-			return store.Workspace{}, nil, err
-		}
-		return loadProject(project)
-	}
-
-	project, err := a.ensureDefaultProjectRecord()
+	project, err := a.projectForWorkspace(workspace)
 	if err != nil {
 		return store.Workspace{}, nil, err
 	}
-	return loadProject(project)
+	return workspace, project, nil
 }
 
 func (a *App) chatSessionForProjectKey(projectKey string) (store.ChatSession, error) {

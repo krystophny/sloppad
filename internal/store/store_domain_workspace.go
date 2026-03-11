@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (s *Store) CreateWorkspace(name, dirPath string, sphere ...string) (Workspace, error) {
@@ -48,9 +49,32 @@ func (s *Store) CreateWorkspace(name, dirPath string, sphere ...string) (Workspa
 	return s.GetWorkspace(id)
 }
 
+func normalizeDailyWorkspaceDate(value string) string {
+	clean := strings.TrimSpace(value)
+	if clean == "" {
+		return ""
+	}
+	parsed, err := time.Parse("2006-01-02", clean)
+	if err != nil {
+		return ""
+	}
+	return parsed.Format("2006-01-02")
+}
+
+func dailyWorkspaceName(date string) string {
+	return strings.ReplaceAll(date, "-", "/")
+}
+
+func isUniqueConstraintError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "unique")
+}
+
 func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 	return scanWorkspace(s.db.QueryRow(
-		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
+		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, is_daily, daily_date, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
 		 FROM workspaces
 		 WHERE id = ?`,
 		id,
@@ -59,11 +83,72 @@ func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 
 func (s *Store) GetWorkspaceByPath(dirPath string) (Workspace, error) {
 	return scanWorkspace(s.db.QueryRow(
-		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
+		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, is_daily, daily_date, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
 		 FROM workspaces
 		 WHERE dir_path = ?`,
 		normalizeWorkspacePath(dirPath),
 	))
+}
+
+func (s *Store) DailyWorkspaceForDate(date string) (Workspace, error) {
+	cleanDate := normalizeDailyWorkspaceDate(date)
+	if cleanDate == "" {
+		return Workspace{}, errors.New("daily workspace date must be YYYY-MM-DD")
+	}
+	return scanWorkspace(s.db.QueryRow(
+		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, is_daily, daily_date, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
+		 FROM workspaces
+		 WHERE is_daily <> 0
+		   AND daily_date = ?`,
+		cleanDate,
+	))
+}
+
+func (s *Store) EnsureDailyWorkspace(date, dirPath string) (Workspace, error) {
+	cleanDate := normalizeDailyWorkspaceDate(date)
+	if cleanDate == "" {
+		return Workspace{}, errors.New("daily workspace date must be YYYY-MM-DD")
+	}
+	cleanPath := normalizeWorkspacePath(dirPath)
+	if cleanPath == "" {
+		return Workspace{}, errors.New("workspace path is required")
+	}
+	if workspace, err := s.DailyWorkspaceForDate(cleanDate); err == nil {
+		return workspace, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return Workspace{}, err
+	}
+	projectID, err := s.inferProjectIDForWorkspacePath(cleanPath)
+	if err != nil {
+		return Workspace{}, err
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO workspaces (name, dir_path, project_id, is_daily, daily_date)
+		 VALUES (?, ?, ?, 1, ?)`,
+		dailyWorkspaceName(cleanDate),
+		cleanPath,
+		normalizeOptionalProjectID(projectID),
+		cleanDate,
+	)
+	if err != nil {
+		if isUniqueConstraintError(err) {
+			if workspace, lookupErr := s.DailyWorkspaceForDate(cleanDate); lookupErr == nil {
+				return workspace, nil
+			}
+			if workspace, lookupErr := s.GetWorkspaceByPath(cleanPath); lookupErr == nil {
+				return workspace, nil
+			}
+		}
+		return Workspace{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return Workspace{}, err
+	}
+	if err := s.syncScopedContextLink("context_workspaces", "workspace_id", id, SpherePrivate); err != nil {
+		return Workspace{}, err
+	}
+	return s.GetWorkspace(id)
 }
 
 func (s *Store) ListWorkspaces() ([]Workspace, error) {
@@ -75,7 +160,7 @@ func (s *Store) ListWorkspacesForSphere(sphere string) ([]Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT id, name, dir_path, project_id, ` + scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id") + ` AS sphere, is_active, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
+	query := `SELECT id, name, dir_path, project_id, ` + scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id") + ` AS sphere, is_active, is_daily, daily_date, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
 		 FROM workspaces`
 	args := []any{}
 	if cleanSphere != "" {
@@ -116,7 +201,7 @@ func (s *Store) ListWorkspacesForProject(projectID string) ([]Workspace, error) 
 		return nil, errors.New("project id is required")
 	}
 	rows, err := s.db.Query(
-		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
+		`SELECT id, name, dir_path, project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "workspaces.id")+` AS sphere, is_active, is_daily, daily_date, mcp_url, canvas_session_id, chat_model, chat_model_reasoning_effort, created_at, updated_at
 		 FROM workspaces
 		 WHERE project_id = ?
 		 ORDER BY is_active DESC, lower(name) ASC, id ASC`,
@@ -250,7 +335,9 @@ func (s *Store) UpdateWorkspaceName(id int64, name string) (Workspace, error) {
 	if cleanName == "" {
 		return Workspace{}, errors.New("workspace name is required")
 	}
-	res, err := s.db.Exec(`UPDATE workspaces SET name = ?, updated_at = datetime('now') WHERE id = ?`, cleanName, id)
+	res, err := s.db.Exec(`UPDATE workspaces
+		SET name = ?, is_daily = 0, updated_at = datetime('now')
+		WHERE id = ?`, cleanName, id)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -275,7 +362,7 @@ func (s *Store) UpdateWorkspaceLocation(id int64, name, dirPath string) (Workspa
 	}
 	res, err := s.db.Exec(
 		`UPDATE workspaces
-		 SET name = ?, dir_path = ?, updated_at = datetime('now')
+		 SET name = ?, dir_path = ?, is_daily = 0, updated_at = datetime('now')
 		 WHERE id = ?`,
 		cleanName,
 		cleanPath,
@@ -530,7 +617,7 @@ func (s *Store) ListArtifactLinkWorkspaces(artifactID int64) ([]Workspace, error
 		return nil, err
 	}
 	rows, err := s.db.Query(
-		`SELECT w.id, w.name, w.dir_path, w.project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "w.id")+` AS sphere, w.is_active, w.mcp_url, w.canvas_session_id, w.chat_model, w.chat_model_reasoning_effort, w.created_at, w.updated_at
+		`SELECT w.id, w.name, w.dir_path, w.project_id, `+scopedContextSelect("context_workspaces", "workspace_id", "w.id")+` AS sphere, w.is_active, w.is_daily, w.daily_date, w.mcp_url, w.canvas_session_id, w.chat_model, w.chat_model_reasoning_effort, w.created_at, w.updated_at
 		 FROM workspace_artifact_links wal
 		 INNER JOIN workspaces w ON w.id = wal.workspace_id
 		 WHERE wal.artifact_id = ?

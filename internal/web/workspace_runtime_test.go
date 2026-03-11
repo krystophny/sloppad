@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/krystophny/tabura/internal/store"
 )
@@ -108,7 +110,7 @@ func TestProjectsListIncludesActiveAndSessions(t *testing.T) {
 	}
 }
 
-func TestProjectsListCreatesEphemeralWorkspaceWhenNoneExist(t *testing.T) {
+func TestProjectsListUsesDailyWorkspaceWhenNoneExist(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/projects", map[string]any{})
@@ -119,28 +121,129 @@ func TestProjectsListCreatesEphemeralWorkspaceWhenNoneExist(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	activeProject, err := app.store.GetProject(payload.ActiveProjectID)
-	if err != nil {
-		t.Fatalf("GetProject(active) error: %v", err)
-	}
-	if activeProject.Kind != "task" {
-		t.Fatalf("active project kind = %q, want task", activeProject.Kind)
-	}
-	if !strings.Contains(filepath.ToSlash(activeProject.RootPath), "/projects/temporary/task/") {
-		t.Fatalf("active project root = %q, want temporary task path", activeProject.RootPath)
+	if strings.TrimSpace(payload.ActiveProjectID) == "" {
+		t.Fatal("expected active project id")
 	}
 	workspace, err := app.store.ActiveWorkspace()
 	if err != nil {
 		t.Fatalf("ActiveWorkspace() error: %v", err)
 	}
-	if workspace.ProjectID == nil || *workspace.ProjectID != activeProject.ID {
-		t.Fatalf("workspace project_id = %v, want %q", workspace.ProjectID, activeProject.ID)
+	if !workspace.IsDaily {
+		t.Fatal("workspace is_daily = false, want true")
 	}
-	if workspace.DirPath != activeProject.RootPath {
-		t.Fatalf("workspace dir_path = %q, want %q", workspace.DirPath, activeProject.RootPath)
+	if workspace.DailyDate == nil {
+		t.Fatal("workspace daily_date = nil, want current date")
+	}
+	parts := strings.Split(*workspace.DailyDate, "-")
+	if len(parts) != 3 {
+		t.Fatalf("workspace daily_date = %q, want YYYY-MM-DD", *workspace.DailyDate)
+	}
+	wantPath := filepath.Join(app.dataDir, "daily", parts[0], parts[1], parts[2])
+	if workspace.DirPath != wantPath {
+		t.Fatalf("workspace dir_path = %q, want %q", workspace.DirPath, wantPath)
 	}
 	if _, err := app.store.GetChatSessionByWorkspaceID(workspace.ID); err != nil {
 		t.Fatalf("GetChatSessionByWorkspaceID() error: %v", err)
+	}
+}
+
+func TestResolveChatSessionTargetRollsOverDailyWorkspace(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	initial, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace(initial) error: %v", err)
+	}
+	if !initial.IsDaily {
+		t.Fatal("initial workspace is_daily = false, want true")
+	}
+	if initial.DailyDate == nil {
+		t.Fatal("initial workspace daily_date = nil, want current date")
+	}
+	initialDate, err := time.Parse("2006-01-02", *initial.DailyDate)
+	if err != nil {
+		t.Fatalf("Parse(initial daily_date) error: %v", err)
+	}
+	nextDate := initialDate.Add(24 * time.Hour)
+
+	app.calendarNow = func() time.Time {
+		return nextDate
+	}
+
+	workspace, project, err := app.resolveChatSessionTarget("", "", nil)
+	if err != nil {
+		t.Fatalf("resolveChatSessionTarget() error: %v", err)
+	}
+	if project != nil {
+		t.Fatalf("resolved project = %#v, want nil", project)
+	}
+	if !workspace.IsDaily {
+		t.Fatal("rollover workspace is_daily = false, want true")
+	}
+	wantDate := nextDate.Format("2006-01-02")
+	if workspace.DailyDate == nil || *workspace.DailyDate != wantDate {
+		t.Fatalf("rollover workspace daily_date = %v, want %s", workspace.DailyDate, wantDate)
+	}
+	wantPath := filepath.Join(app.dataDir, "daily", nextDate.Format("2006"), nextDate.Format("01"), nextDate.Format("02"))
+	if workspace.DirPath != wantPath {
+		t.Fatalf("rollover workspace dir_path = %q, want %q", workspace.DirPath, wantPath)
+	}
+	active, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace(after rollover) error: %v", err)
+	}
+	if active.ID != workspace.ID {
+		t.Fatalf("active workspace id = %d, want %d", active.ID, workspace.ID)
+	}
+	if prior, err := app.store.DailyWorkspaceForDate(initialDate.Format("2006-01-02")); err != nil {
+		t.Fatalf("DailyWorkspaceForDate(initial) error: %v", err)
+	} else if prior.ID != initial.ID {
+		t.Fatalf("prior daily workspace id = %d, want %d", prior.ID, initial.ID)
+	}
+}
+
+func TestNewAppReusesPersistedDailyWorkspace(t *testing.T) {
+	dataDir := t.TempDir()
+
+	app, err := New(dataDir, "", "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("New(first) error: %v", err)
+	}
+	first, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace(first) error: %v", err)
+	}
+	if err := app.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown(first) error: %v", err)
+	}
+
+	restarted, err := New(dataDir, "", "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("New(second) error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = restarted.Shutdown(context.Background())
+	})
+
+	second, err := restarted.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace(second) error: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("restarted active workspace id = %d, want %d", second.ID, first.ID)
+	}
+	workspaces, err := restarted.store.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces() error: %v", err)
+	}
+	dailyCount := 0
+	for _, workspace := range workspaces {
+		if workspace.IsDaily && workspace.DailyDate != nil && first.DailyDate != nil && *workspace.DailyDate == *first.DailyDate {
+			dailyCount++
+		}
+	}
+	if dailyCount != 1 {
+		t.Fatalf("daily workspace count for %v = %d, want 1", first.DailyDate, dailyCount)
 	}
 }
 

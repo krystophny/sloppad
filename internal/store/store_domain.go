@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   dir_path TEXT NOT NULL UNIQUE,
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   is_active INTEGER NOT NULL DEFAULT 0,
+  is_daily INTEGER NOT NULL DEFAULT 0,
+  daily_date TEXT,
   mcp_url TEXT NOT NULL DEFAULT '',
   canvas_session_id TEXT NOT NULL DEFAULT '',
   chat_model TEXT NOT NULL DEFAULT '',
@@ -204,6 +206,9 @@ CREATE TABLE IF NOT EXISTS context_time_entries (
 		return err
 	}
 	if err := s.migrateSphereToContextSupport(); err != nil {
+		return err
+	}
+	if err := s.migrateWorkspaceDailySupport(); err != nil {
 		return err
 	}
 	if err := s.migrateActorContactSupport(); err != nil {
@@ -545,8 +550,8 @@ func scanWorkspace(
 	},
 ) (Workspace, error) {
 	var out Workspace
-	var isActive int
-	var projectID sql.NullString
+	var isActive, isDaily int
+	var projectID, dailyDate sql.NullString
 	err := row.Scan(
 		&out.ID,
 		&out.Name,
@@ -554,6 +559,8 @@ func scanWorkspace(
 		&projectID,
 		&out.Sphere,
 		&isActive,
+		&isDaily,
+		&dailyDate,
 		&out.MCPURL,
 		&out.CanvasSessionID,
 		&out.ChatModel,
@@ -573,6 +580,8 @@ func scanWorkspace(
 	out.ChatModel = normalizeProjectChatModel(out.ChatModel)
 	out.ChatModelReasoningEffort = normalizeProjectChatModelReasoningEffort(out.ChatModelReasoningEffort)
 	out.IsActive = isActive != 0
+	out.IsDaily = isDaily != 0
+	out.DailyDate = nullStringPointer(dailyDate)
 	return out, nil
 }
 

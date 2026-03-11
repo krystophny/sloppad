@@ -113,6 +113,8 @@ type Workspace struct {
 	ProjectID                *string `json:"project_id,omitempty"`
 	Sphere                   string  `json:"sphere"`
 	IsActive                 bool    `json:"is_active"`
+	IsDaily                  bool    `json:"is_daily"`
+	DailyDate                *string `json:"daily_date,omitempty"`
 	MCPURL                   string  `json:"mcp_url,omitempty"`
 	CanvasSessionID          string  `json:"canvas_session_id,omitempty"`
 	ChatModel                string  `json:"chat_model,omitempty"`

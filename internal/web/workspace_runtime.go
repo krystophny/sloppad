@@ -177,6 +177,85 @@ func isUniqueConstraint(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "unique")
 }
 
+func (a *App) runtimeNow() time.Time {
+	if a.calendarNow != nil {
+		return a.calendarNow()
+	}
+	return time.Now()
+}
+
+func dailyWorkspaceDate(now time.Time) string {
+	return now.Format("2006-01-02")
+}
+
+func (a *App) dailyWorkspacePath(now time.Time) string {
+	return filepath.Join(a.dataDir, "daily", now.Format("2006"), now.Format("01"), now.Format("02"))
+}
+
+func workspaceDailyDate(workspace store.Workspace) string {
+	if workspace.DailyDate == nil {
+		return ""
+	}
+	return strings.TrimSpace(*workspace.DailyDate)
+}
+
+func (a *App) ensureTodayDailyWorkspace() (store.Workspace, error) {
+	now := a.runtimeNow()
+	dirPath := a.dailyWorkspacePath(now)
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		return store.Workspace{}, err
+	}
+	workspace, err := a.store.EnsureDailyWorkspace(dailyWorkspaceDate(now), dirPath)
+	if err != nil {
+		return store.Workspace{}, err
+	}
+	active, activeErr := a.store.ActiveWorkspace()
+	switch {
+	case activeErr == nil:
+		if active.ID != workspace.ID && active.IsDaily && workspaceDailyDate(active) != dailyWorkspaceDate(now) {
+			if err := a.setActiveWorkspaceTracked(workspace.ID, "workspace_switch"); err != nil {
+				return store.Workspace{}, err
+			}
+			workspace, err = a.store.GetWorkspace(workspace.ID)
+			if err != nil {
+				return store.Workspace{}, err
+			}
+		}
+	case isNoRows(activeErr):
+		if err := a.setActiveWorkspaceTracked(workspace.ID, "workspace_switch"); err != nil {
+			return store.Workspace{}, err
+		}
+		workspace, err = a.store.GetWorkspace(workspace.ID)
+		if err != nil {
+			return store.Workspace{}, err
+		}
+	default:
+		return store.Workspace{}, activeErr
+	}
+	if _, err := a.store.GetOrCreateChatSessionForWorkspace(workspace.ID); err != nil {
+		return store.Workspace{}, err
+	}
+	return workspace, nil
+}
+
+func (a *App) ensureStartupWorkspace() (store.Workspace, error) {
+	workspace, err := a.store.ActiveWorkspace()
+	switch {
+	case err == nil:
+		if workspace.IsDaily && workspaceDailyDate(workspace) != dailyWorkspaceDate(a.runtimeNow()) {
+			return a.ensureTodayDailyWorkspace()
+		}
+		if _, err := a.store.GetOrCreateChatSessionForWorkspace(workspace.ID); err != nil {
+			return store.Workspace{}, err
+		}
+		return workspace, nil
+	case !isNoRows(err):
+		return store.Workspace{}, err
+	default:
+		return a.ensureTodayDailyWorkspace()
+	}
+}
+
 func (a *App) ensureDefaultProjectRecord() (store.Project, error) {
 	localProjectKey := strings.TrimSpace(a.localProjectDir)
 	if localProjectKey != "" {

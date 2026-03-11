@@ -79,28 +79,6 @@ func (a *App) ensureWorkspaceForProject(project store.Project, activate bool) (s
 }
 
 func (a *App) ensureStartupProjectWithWorkspace() error {
-	workspaces, err := a.store.ListWorkspaces()
-	if err != nil {
-		return err
-	}
-	if len(workspaces) > 0 {
-		return nil
-	}
-	projects, err := a.store.ListProjects()
-	if err != nil {
-		return err
-	}
-	for _, project := range projects {
-		if !isTemporaryProject(project) {
-			continue
-		}
-		_, err := a.activateProject(project.ID)
-		return err
-	}
-	project, _, err := a.createProject(projectCreateRequest{Kind: "task"})
-	if err != nil {
-		return err
-	}
-	_, err = a.activateProject(project.ID)
+	_, err := a.ensureStartupWorkspace()
 	return err
 }

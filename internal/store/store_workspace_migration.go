@@ -41,3 +41,28 @@ func (s *Store) migrateWorkspaceConfigSupport() error {
 	}
 	return nil
 }
+
+func (s *Store) migrateWorkspaceDailySupport() error {
+	tableColumns, err := s.tableColumnSet("workspaces")
+	if err != nil {
+		return err
+	}
+	type columnDef struct {
+		name string
+		sql  string
+	}
+	defs := []columnDef{
+		{name: "is_daily", sql: `ALTER TABLE workspaces ADD COLUMN is_daily INTEGER NOT NULL DEFAULT 0`},
+		{name: "daily_date", sql: `ALTER TABLE workspaces ADD COLUMN daily_date TEXT`},
+	}
+	for _, def := range defs {
+		if tableColumns["workspaces"][def.name] {
+			continue
+		}
+		if _, err := s.db.Exec(def.sql); err != nil {
+			return err
+		}
+	}
+	_, err = s.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_daily_date ON workspaces(daily_date) WHERE daily_date IS NOT NULL AND is_daily <> 0`)
+	return err
+}
