@@ -302,7 +302,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	}
 	extensionHost, err := extensions.New(extensions.Options{
 		Dir:            resolvedExtensionsDir,
-		RuntimeVersion: "0.2.0",
+		RuntimeVersion: "0.2.1-dev",
 		Logf: func(format string, args ...interface{}) {
 			log.Printf("extensions: "+format, args...)
 		},
@@ -585,7 +585,7 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"boot_id":                     a.bootID,
 		"started_at":                  a.startedAt,
-		"version":                     "0.2.0",
+		"version":                     "0.2.1-dev",
 		"dev_mode":                    a.devRuntime,
 		"local_mcp_url":               a.localMCPURL,
 		"app_server_url":              a.appServerURL,
