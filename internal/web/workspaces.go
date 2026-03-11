@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 )
@@ -17,10 +16,6 @@ type workspaceUpdateRequest struct {
 	Name     *string `json:"name"`
 	Sphere   *string `json:"sphere"`
 	IsActive *bool   `json:"is_active"`
-}
-
-type workspaceProjectUpdateRequest struct {
-	ProjectID *string `json:"project_id"`
 }
 
 func (a *App) handleWorkspaceList(w http.ResponseWriter, r *http.Request) {
@@ -161,38 +156,4 @@ func (a *App) handleWorkspaceDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeNoContent(w)
-}
-
-func (a *App) handleWorkspaceProjectUpdate(w http.ResponseWriter, r *http.Request) {
-	if !a.requireAuth(w, r) {
-		return
-	}
-	workspaceID, err := parseURLInt64Param(r, "workspace_id")
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var req workspaceProjectUpdateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) != "" {
-		if err := a.ensureProjectExists(*req.ProjectID); err != nil {
-			if errors.Is(err, errItemProjectNotFound) {
-				writeAPIError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			writeAPIError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	workspace, err := a.store.SetWorkspaceProject(workspaceID, req.ProjectID)
-	if err != nil {
-		writeDomainStoreError(w, err)
-		return
-	}
-	writeAPIData(w, http.StatusOK, map[string]any{
-		"workspace": workspace,
-	})
 }
