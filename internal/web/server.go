@@ -109,6 +109,7 @@ type App struct {
 	companionTurns          *companionPendingTurnTracker
 	companionRuntime        *companionRuntimeTracker
 	chatCaptureModes        *chatCaptureModeTracker
+	commandFlights          *commandFlightTracker
 	chatCursorContexts      *chatCursorContextTracker
 	chatCanvasInk           *chatCanvasInkTracker
 	chatCanvasPositions     *chatCanvasPositionTracker
@@ -295,6 +296,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		companionTurns:          newCompanionPendingTurnTracker(),
 		companionRuntime:        newCompanionRuntimeTracker(),
 		chatCaptureModes:        newChatCaptureModeTracker(),
+		commandFlights:          newCommandFlightTracker(2 * time.Second),
 		chatCursorContexts:      newChatCursorContextTracker(),
 		chatCanvasInk:           newChatCanvasInkTracker(),
 		chatCanvasPositions:     newChatCanvasPositionTracker(),

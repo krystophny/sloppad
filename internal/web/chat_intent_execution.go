@@ -190,13 +190,23 @@ func suggestShellCommandRetry(command string, output string) (string, string, bo
 	return "", "", false
 }
 
-func (a *App) executeSystemAction(sessionID string, session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
+func (a *App) executeSystemAction(sessionID string, session store.ChatSession, action *SystemAction) (message string, payload map[string]interface{}, err error) {
 	if action == nil {
 		return "", nil, errors.New("system action is required")
 	}
 	action = translateCanonicalActionForExecution(action)
 	if action == nil {
 		return "", nil, errors.New("system action is required")
+	}
+	envelope := newCommandEnvelope(action)
+	if a != nil && a.commandFlights != nil {
+		status, cooldownRemaining, ok := a.commandFlights.TryAcquire(envelope)
+		if !ok {
+			return suppressedSystemActionMessage(envelope, status), suppressedSystemActionPayload(envelope, status, cooldownRemaining), nil
+		}
+		defer func() {
+			a.commandFlights.Release(envelope, err == nil)
+		}()
 	}
 	switch action.Action {
 	case "switch_project":
