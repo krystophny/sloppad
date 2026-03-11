@@ -14,10 +14,6 @@ type itemWorkspaceUpdateRequest struct {
 	WorkspaceID *int64 `json:"workspace_id"`
 }
 
-type itemProjectUpdateRequest struct {
-	ProjectID *string `json:"project_id"`
-}
-
 var (
 	errItemWorkspaceNotFound = errors.New("workspace not found")
 	errItemProjectNotFound   = errors.New("project not found")
@@ -95,44 +91,6 @@ func (a *App) handleItemWorkspaceUpdate(w http.ResponseWriter, r *http.Request) 
 	writeAPIData(w, http.StatusOK, map[string]any{
 		"item":    item,
 		"warning": warning,
-	})
-}
-
-func (a *App) handleItemProjectUpdate(w http.ResponseWriter, r *http.Request) {
-	if !a.requireAuth(w, r) {
-		return
-	}
-	itemID, err := parseItemIDParam(r)
-	if err != nil {
-		writeAPIError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var req itemProjectUpdateRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) != "" {
-		if err := a.ensureProjectExists(*req.ProjectID); err != nil {
-			if errors.Is(err, errItemProjectNotFound) {
-				writeAPIError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			writeAPIError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	}
-	if err := a.store.SetItemProject(itemID, req.ProjectID); err != nil {
-		writeItemStoreError(w, err)
-		return
-	}
-	item, err := a.store.GetItem(itemID)
-	if err != nil {
-		writeItemStoreError(w, err)
-		return
-	}
-	writeAPIData(w, http.StatusOK, map[string]any{
-		"item": item,
 	})
 }
 

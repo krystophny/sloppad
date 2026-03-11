@@ -31,18 +31,8 @@ func TestWorkspaceProjectAssignmentAndProjectScopeAPI(t *testing.T) {
 	}
 	workspaceID := int64(workspacePayload["id"].(float64))
 
-	rrAssign := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/workspaces/"+itoa(workspaceID)+"/project", map[string]any{
-		"project_id": project.ID,
-	})
-	if rrAssign.Code != http.StatusOK {
-		t.Fatalf("assign workspace project status = %d, want 200: %s", rrAssign.Code, rrAssign.Body.String())
-	}
-	assignedWorkspace, ok := decodeJSONDataResponse(t, rrAssign)["workspace"].(map[string]any)
-	if !ok {
-		t.Fatalf("assign payload = %#v", rrAssign.Body.String())
-	}
-	if got := strFromAny(assignedWorkspace["project_id"]); got != project.ID {
-		t.Fatalf("workspace project_id = %q, want %q", got, project.ID)
+	if _, err := app.store.SetWorkspaceProject(workspaceID, &project.ID); err != nil {
+		t.Fatalf("SetWorkspaceProject() error: %v", err)
 	}
 
 	item, err := app.store.CreateItem("Prepare agenda", store.ItemOptions{WorkspaceID: &workspaceID})
@@ -78,6 +68,27 @@ func TestWorkspaceProjectAssignmentAndProjectScopeAPI(t *testing.T) {
 	inboxItems, ok := decodeJSONDataResponse(t, rrInbox)["items"].([]any)
 	if !ok || len(inboxItems) != 1 {
 		t.Fatalf("project inbox payload = %#v", rrInbox.Body.String())
+	}
+}
+
+func TestLegacyWorkspaceProjectAssignmentRouteRemoved(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	project, _, err := app.createProject(projectCreateRequest{Name: "EUROfusion"})
+	if err != nil {
+		t.Fatalf("createProject() error: %v", err)
+	}
+
+	workspace, err := app.store.CreateWorkspace("Alpha", filepath.Join(t.TempDir(), "workspace-alpha"), store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+
+	rrAssign := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/workspaces/"+itoa(workspace.ID)+"/project", map[string]any{
+		"project_id": project.ID,
+	})
+	if rrAssign.Code != http.StatusNotFound {
+		t.Fatalf("legacy workspace project route status = %d, want 404: %s", rrAssign.Code, rrAssign.Body.String())
 	}
 }
 

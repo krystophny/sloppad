@@ -87,7 +87,6 @@ Domain model API:
 - `POST /api/workspaces`
 - `GET /api/workspaces/{workspace_id}`
 - `PUT /api/workspaces/{workspace_id}`
-- `PUT /api/workspaces/{workspace_id}/project`
 - `GET /api/workspaces/{workspace_id}/watch`
 - `POST /api/workspaces/{workspace_id}/watch`
 - `DELETE /api/workspaces/{workspace_id}/watch`
@@ -142,7 +141,6 @@ Domain model API:
 - `PUT /api/items/{item_id}/unassign`
 - `PUT /api/items/{item_id}/complete`
 - `PUT /api/items/{item_id}/workspace`
-- `PUT /api/items/{item_id}/project`
 - `POST /api/items/{item_id}/dispatch-review`
 - `POST /api/items/{item_id}/triage`
 - `GET /api/items/{item_id}/print`

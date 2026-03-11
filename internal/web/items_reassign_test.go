@@ -8,7 +8,7 @@ import (
 	"github.com/krystophny/tabura/internal/store"
 )
 
-func TestItemWorkspaceAndProjectReassignmentAPI(t *testing.T) {
+func TestItemWorkspaceReassignmentAPI(t *testing.T) {
 	app := newAuthedTestApp(t)
 
 	oldWorkspace, err := app.store.CreateWorkspace("Alpha", filepath.Join(t.TempDir(), "alpha"))
@@ -19,11 +19,6 @@ func TestItemWorkspaceAndProjectReassignmentAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspace(beta) error: %v", err)
 	}
-	project, err := app.store.CreateProject("Tabura", "tabura", filepath.Join(t.TempDir(), "project"), "managed", "", "", false)
-	if err != nil {
-		t.Fatalf("CreateProject() error: %v", err)
-	}
-
 	refPath := filepath.Join(oldWorkspace.DirPath, "README.md")
 	title := "README.md"
 	artifact, err := app.store.CreateArtifact(store.ArtifactKindMarkdown, &refPath, nil, &title, nil)
@@ -63,34 +58,6 @@ func TestItemWorkspaceAndProjectReassignmentAPI(t *testing.T) {
 		t.Fatalf("artifact ref_path = %v, want %q", updatedArtifact.RefPath, refPath)
 	}
 
-	rrProject := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/project", map[string]any{
-		"project_id": project.ID,
-	})
-	if rrProject.Code != http.StatusOK {
-		t.Fatalf("project reassignment status = %d, want 200: %s", rrProject.Code, rrProject.Body.String())
-	}
-	updatedItem, err = app.store.GetItem(item.ID)
-	if err != nil {
-		t.Fatalf("GetItem(reassigned project) error: %v", err)
-	}
-	if updatedItem.ProjectID == nil || *updatedItem.ProjectID != project.ID {
-		t.Fatalf("project_id = %v, want %q", updatedItem.ProjectID, project.ID)
-	}
-
-	rrClearProject := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/project", map[string]any{
-		"project_id": nil,
-	})
-	if rrClearProject.Code != http.StatusOK {
-		t.Fatalf("clear project status = %d, want 200: %s", rrClearProject.Code, rrClearProject.Body.String())
-	}
-	updatedItem, err = app.store.GetItem(item.ID)
-	if err != nil {
-		t.Fatalf("GetItem(cleared project) error: %v", err)
-	}
-	if updatedItem.ProjectID != nil {
-		t.Fatalf("cleared project_id = %v, want nil", updatedItem.ProjectID)
-	}
-
 	rrClearWorkspace := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/workspace", map[string]any{
 		"workspace_id": nil,
 	})
@@ -106,7 +73,22 @@ func TestItemWorkspaceAndProjectReassignmentAPI(t *testing.T) {
 	}
 }
 
-func TestItemWorkspaceAndProjectReassignmentAPIRejectsUnknownTargets(t *testing.T) {
+func TestLegacyItemProjectReassignmentRouteRemoved(t *testing.T) {
+	app := newAuthedTestApp(t)
+	item, err := app.store.CreateItem("Reassign me", store.ItemOptions{})
+	if err != nil {
+		t.Fatalf("CreateItem() error: %v", err)
+	}
+
+	rrProject := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/project", map[string]any{
+		"project_id": "missing-project",
+	})
+	if rrProject.Code != http.StatusNotFound {
+		t.Fatalf("legacy project route status = %d, want 404: %s", rrProject.Code, rrProject.Body.String())
+	}
+}
+
+func TestItemWorkspaceReassignmentAPIRejectsUnknownWorkspace(t *testing.T) {
 	app := newAuthedTestApp(t)
 	item, err := app.store.CreateItem("Reassign me", store.ItemOptions{})
 	if err != nil {
@@ -118,12 +100,5 @@ func TestItemWorkspaceAndProjectReassignmentAPIRejectsUnknownTargets(t *testing.
 	})
 	if rrWorkspace.Code != http.StatusBadRequest {
 		t.Fatalf("unknown workspace status = %d, want 400: %s", rrWorkspace.Code, rrWorkspace.Body.String())
-	}
-
-	rrProject := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/project", map[string]any{
-		"project_id": "missing-project",
-	})
-	if rrProject.Code != http.StatusBadRequest {
-		t.Fatalf("unknown project status = %d, want 400: %s", rrProject.Code, rrProject.Body.String())
 	}
 }
