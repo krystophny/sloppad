@@ -132,7 +132,7 @@ func (a *App) handleSourceSyncCount(account store.ExternalAccount, count int) {
 }
 
 func (a *App) startSourcePoller() {
-	if a == nil || a.shutdownCtx == nil || a.sourceSync == nil {
+	if a == nil || a.shutdownCtx == nil {
 		return
 	}
 	a.workerWG.Add(1)
@@ -143,22 +143,34 @@ func (a *App) startSourcePoller() {
 }
 
 func (a *App) runSourcePoller(ctx context.Context) {
-	if a == nil || a.sourceSync == nil {
+	if a == nil {
 		return
 	}
 	for {
-		result, err := a.sourceSync.RunOnce(ctx)
-		if err != nil {
+		delay := sourceSyncDefaultInterval
+		if a.sourceSync != nil {
+			result, err := a.sourceSync.RunOnce(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Printf("source poller: %v", err)
+				if err := sleepSourcePoller(ctx, sourceSyncDefaultInterval); err != nil {
+					return
+				}
+				continue
+			}
+			delay = nextSourceSyncDelay(result.NextDelay)
+		}
+		if changed, err := a.syncTrackedGitHubIssues(ctx, nil, nil); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("source poller: %v", err)
-			if err := sleepSourcePoller(ctx, sourceSyncDefaultInterval); err != nil {
-				return
-			}
-			continue
+			log.Printf("source poller github issues: %v", err)
+		} else if changed > 0 {
+			a.broadcastItemsIngested(changed, "github")
 		}
-		if err := sleepSourcePoller(ctx, nextSourceSyncDelay(result.NextDelay)); err != nil {
+		if err := sleepSourcePoller(ctx, delay); err != nil {
 			return
 		}
 	}
@@ -186,10 +198,23 @@ func sleepSourcePoller(ctx context.Context, delay time.Duration) error {
 }
 
 func (a *App) syncSourcesNow(ctx context.Context) (tabsync.RunResult, error) {
-	if a == nil || a.sourceSync == nil {
+	if a == nil {
 		return tabsync.RunResult{}, fmt.Errorf("no external source poller is configured")
 	}
-	return a.sourceSync.RunNow(ctx)
+	result := tabsync.RunResult{}
+	if a.sourceSync != nil {
+		var err error
+		result, err = a.sourceSync.RunNow(ctx)
+		if err != nil {
+			return tabsync.RunResult{}, err
+		}
+	}
+	if changed, err := a.syncTrackedGitHubIssues(ctx, nil, nil); err != nil {
+		return tabsync.RunResult{}, err
+	} else if changed > 0 {
+		a.broadcastItemsIngested(changed, "github")
+	}
+	return result, nil
 }
 
 func summarizeSourceSyncResult(result tabsync.RunResult) string {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 )
 
 const githubIssueListTimeout = 60 * time.Second
+
+var githubIssueSourceRefPattern = regexp.MustCompile(`^([^#]+)#(\d+)$`)
 
 type itemGitHubSyncRequest struct {
 	WorkspaceID int64 `json:"workspace_id"`
@@ -61,6 +64,37 @@ func githubIssueSourceRef(ownerRepo string, number int) string {
 	return fmt.Sprintf("%s#%d", strings.TrimSpace(ownerRepo), number)
 }
 
+func parseGitHubIssueSourceRef(raw string) (string, int, bool) {
+	match := githubIssueSourceRefPattern.FindStringSubmatch(strings.TrimSpace(raw))
+	if len(match) != 3 {
+		return "", 0, false
+	}
+	ownerRepo := strings.TrimSpace(match[1])
+	if ownerRepo == "" {
+		return "", 0, false
+	}
+	number := 0
+	if _, err := fmt.Sscanf(match[2], "%d", &number); err != nil || number <= 0 {
+		return "", 0, false
+	}
+	return ownerRepo, number, true
+}
+
+func parseLegacyBugReportIssueSourceRef(raw string) (int, bool) {
+	number := 0
+	if _, err := fmt.Sscanf(strings.TrimSpace(raw), "issue:%d", &number); err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+func trimmedStringPointer(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	return strings.TrimSpace(*raw)
+}
+
 func githubIssueItemState(raw string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "open":
@@ -101,21 +135,49 @@ func githubIssueArtifactMeta(ownerRepo string, issue ghIssueListItem) (*string, 
 	return &text, nil
 }
 
-func (a *App) listGitHubIssues(cwd string) ([]ghIssueListItem, error) {
+func githubIssueCommandDir(ownerRepo string, workspaceDirs []string) string {
+	if repoRoot := resolveCanonicalGitHubRepoRoot(ownerRepo); repoRoot != "" {
+		return repoRoot
+	}
+	for _, dir := range workspaceDirs {
+		if root := resolveGitRepoRoot(dir); root != "" {
+			return root
+		}
+	}
+	return "."
+}
+
+func validateGitHubIssue(issue ghIssueListItem) error {
+	if issue.Number <= 0 {
+		return errors.New("github issue number is required")
+	}
+	if strings.TrimSpace(issue.Title) == "" {
+		return fmt.Errorf("github issue #%d title is required", issue.Number)
+	}
+	return nil
+}
+
+func (a *App) listGitHubIssues(ctx context.Context, cwd, ownerRepo string) ([]ghIssueListItem, error) {
 	runner := a.ghCommandRunner
 	if runner == nil {
 		runner = runGitHubCLI
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), githubIssueListTimeout)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, githubIssueListTimeout)
 	defer cancel()
 
-	raw, err := runner(
-		ctx,
-		cwd,
+	args := withGitHubRepoArg([]string{
 		"issue", "list",
 		"--state", "all",
 		"--limit", "500",
 		"--json", "number,title,url,state,labels,assignees",
+	}, ownerRepo)
+	raw, err := runner(
+		ctx,
+		cwd,
+		args...,
 	)
 	if err != nil {
 		return nil, err
@@ -164,18 +226,216 @@ func (a *App) syncGitHubIssueArtifact(item store.Item, ownerRepo string, issue g
 	return err
 }
 
-func migrateLegacyBugReportIssue(a *App, workspaceID int64, ownerRepo string, issue ghIssueListItem) error {
-	legacy, err := a.store.GetItemBySource("bug_report", legacyBugReportIssueSourceRef(issue.Number))
+func (a *App) syncGitHubIssueState(sourceRef, currentState, remoteState string) (string, bool, error) {
+	desiredState, err := githubIssueItemState(remoteState)
+	if err != nil {
+		return "", false, err
+	}
+	if currentState == desiredState {
+		return desiredState, false, nil
+	}
+	switch desiredState {
+	case store.ItemStateDone:
+		if err := a.store.CompleteItemBySource("github", sourceRef); err != nil {
+			return "", false, err
+		}
+	case store.ItemStateInbox:
+		if err := a.store.SyncItemStateBySource("github", sourceRef, store.ItemStateInbox); err != nil {
+			return "", false, err
+		}
+	default:
+		return "", false, fmt.Errorf("unsupported item state %q", desiredState)
+	}
+	return desiredState, true, nil
+}
+
+func trackedGitHubIssueSource(item store.Item) (string, int, bool) {
+	switch strings.ToLower(trimmedStringPointer(item.Source)) {
+	case "github":
+		return parseGitHubIssueSourceRef(trimmedStringPointer(item.SourceRef))
+	case "bug_report":
+		number, ok := parseLegacyBugReportIssueSourceRef(trimmedStringPointer(item.SourceRef))
+		if !ok {
+			return "", 0, false
+		}
+		return taburaBugReportOwnerRepo, number, true
+	default:
+		return "", 0, false
+	}
+}
+
+func (a *App) syncTrackedGitHubIssueItem(item store.Item, ownerRepo string, issue ghIssueListItem) (bool, error) {
+	if err := validateGitHubIssue(issue); err != nil {
+		return false, err
+	}
+
+	sourceRef := githubIssueSourceRef(ownerRepo, issue.Number)
+	changed := false
+	if trimmedStringPointer(item.Source) != "github" || trimmedStringPointer(item.SourceRef) != sourceRef {
+		if err := a.store.UpdateItemSource(item.ID, "github", sourceRef); err != nil {
+			return false, err
+		}
+		item.Source = optionalTrimmedString("github")
+		item.SourceRef = optionalTrimmedString(sourceRef)
+		changed = true
+	}
+
+	originalTitle := strings.TrimSpace(item.Title)
+	originalState := item.State
+	hadArtifact := item.ArtifactID != nil
+
+	updated, err := a.store.UpsertItemFromSource("github", sourceRef, issue.Title, item.WorkspaceID)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(issue.Title) != originalTitle {
+		changed = true
+	}
+	if !hadArtifact {
+		changed = true
+	}
+	if err := a.syncGitHubIssueArtifact(updated, ownerRepo, issue); err != nil {
+		return false, err
+	}
+	nextState, stateChanged, err := a.syncGitHubIssueState(sourceRef, updated.State, issue.State)
+	if err != nil {
+		return false, err
+	}
+	if stateChanged || nextState != originalState {
+		changed = true
+	}
+	return changed, nil
+}
+
+func (a *App) findWorkspaceGitHubIssueItem(workspaceID int64, ownerRepo string, issueNumber int) (*store.Item, error) {
+	sourceRef := githubIssueSourceRef(ownerRepo, issueNumber)
+	item, err := a.store.GetItemBySource("github", sourceRef)
+	if err == nil {
+		return &item, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	legacy, err := a.store.GetItemBySource("bug_report", legacyBugReportIssueSourceRef(issueNumber))
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if legacy.WorkspaceID == nil || *legacy.WorkspaceID != workspaceID {
-		return nil
+		return nil, nil
 	}
-	return a.store.UpdateItemSource(legacy.ID, "github", githubIssueSourceRef(ownerRepo, issue.Number))
+	return &legacy, nil
+}
+
+func (a *App) syncWorkspaceGitHubIssue(workspaceID int64, ownerRepo string, issue ghIssueListItem) (bool, error) {
+	existing, err := a.findWorkspaceGitHubIssueItem(workspaceID, ownerRepo, issue.Number)
+	if err != nil {
+		return false, err
+	}
+	if existing != nil {
+		return a.syncTrackedGitHubIssueItem(*existing, ownerRepo, issue)
+	}
+	if err := validateGitHubIssue(issue); err != nil {
+		return false, err
+	}
+	sourceRef := githubIssueSourceRef(ownerRepo, issue.Number)
+	item, err := a.store.UpsertItemFromSource("github", sourceRef, issue.Title, &workspaceID)
+	if err != nil {
+		return false, err
+	}
+	if err := a.syncGitHubIssueArtifact(item, ownerRepo, issue); err != nil {
+		return false, err
+	}
+	if _, _, err := a.syncGitHubIssueState(sourceRef, item.State, issue.State); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *App) trackedGitHubIssueItems(workspaceID *int64) ([]store.Item, error) {
+	var all []store.Item
+	for _, source := range []string{"github", "bug_report"} {
+		items, err := a.store.ListItemsFiltered(store.ItemListFilter{Source: source})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, items...)
+	}
+	if workspaceID == nil {
+		return all, nil
+	}
+	filtered := make([]store.Item, 0, len(all))
+	for _, item := range all {
+		if item.WorkspaceID == nil || *item.WorkspaceID != *workspaceID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
+func (a *App) syncTrackedGitHubIssues(ctx context.Context, workspaceID *int64, skipRepos map[string]struct{}) (int, error) {
+	items, err := a.trackedGitHubIssueItems(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	type repoGroup struct {
+		itemsByNumber map[int]store.Item
+		workspaceDirs []string
+	}
+	repos := map[string]*repoGroup{}
+	for _, item := range items {
+		ownerRepo, number, ok := trackedGitHubIssueSource(item)
+		if !ok {
+			continue
+		}
+		if _, skip := skipRepos[ownerRepo]; skip {
+			continue
+		}
+		group := repos[ownerRepo]
+		if group == nil {
+			group = &repoGroup{itemsByNumber: map[int]store.Item{}}
+			repos[ownerRepo] = group
+		}
+		group.itemsByNumber[number] = item
+		if item.WorkspaceID == nil {
+			continue
+		}
+		workspace, err := a.store.GetWorkspace(*item.WorkspaceID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return 0, err
+		}
+		if dir := strings.TrimSpace(workspace.DirPath); dir != "" {
+			group.workspaceDirs = append(group.workspaceDirs, dir)
+		}
+	}
+
+	changed := 0
+	for ownerRepo, group := range repos {
+		issues, err := a.listGitHubIssues(ctx, githubIssueCommandDir(ownerRepo, group.workspaceDirs), ownerRepo)
+		if err != nil {
+			return 0, err
+		}
+		for _, issue := range issues {
+			item, ok := group.itemsByNumber[issue.Number]
+			if !ok {
+				continue
+			}
+			itemChanged, err := a.syncTrackedGitHubIssueItem(item, ownerRepo, issue)
+			if err != nil {
+				return 0, err
+			}
+			if itemChanged {
+				changed++
+			}
+		}
+	}
+	return changed, nil
 }
 
 func (a *App) syncGitHubIssues(workspaceID int64) (itemGitHubSyncResponse, error) {
@@ -191,7 +451,7 @@ func (a *App) syncGitHubIssues(workspaceID int64) (itemGitHubSyncResponse, error
 		return itemGitHubSyncResponse{}, errors.New("workspace has no GitHub origin remote")
 	}
 
-	issues, err := a.listGitHubIssues(workspace.DirPath)
+	issues, err := a.listGitHubIssues(context.Background(), workspace.DirPath, repo)
 	if err != nil {
 		return itemGitHubSyncResponse{}, err
 	}
@@ -203,44 +463,24 @@ func (a *App) syncGitHubIssues(workspaceID int64) (itemGitHubSyncResponse, error
 		Synced:      len(issues),
 	}
 	for _, issue := range issues {
-		if issue.Number <= 0 {
-			return itemGitHubSyncResponse{}, errors.New("github issue number is required")
-		}
-		if strings.TrimSpace(issue.Title) == "" {
-			return itemGitHubSyncResponse{}, fmt.Errorf("github issue #%d title is required", issue.Number)
-		}
-		if err := migrateLegacyBugReportIssue(a, workspace.ID, repo, issue); err != nil {
+		if err := validateGitHubIssue(issue); err != nil {
 			return itemGitHubSyncResponse{}, err
 		}
-
-		item, err := a.store.UpsertItemFromSource("github", githubIssueSourceRef(repo, issue.Number), issue.Title, &workspace.ID)
-		if err != nil {
+		if _, err := a.syncWorkspaceGitHubIssue(workspace.ID, repo, issue); err != nil {
 			return itemGitHubSyncResponse{}, err
 		}
-		if err := a.syncGitHubIssueArtifact(item, repo, issue); err != nil {
-			return itemGitHubSyncResponse{}, err
-		}
-
-		desiredState, err := githubIssueItemState(issue.State)
-		if err != nil {
-			return itemGitHubSyncResponse{}, err
-		}
-		switch desiredState {
-		case store.ItemStateDone:
+		switch strings.ToLower(strings.TrimSpace(issue.State)) {
+		case "closed":
 			result.Closed++
-			if item.State != store.ItemStateDone {
-				if err := a.store.CompleteItemBySource("github", githubIssueSourceRef(repo, issue.Number)); err != nil {
-					return itemGitHubSyncResponse{}, err
-				}
-			}
-		case store.ItemStateInbox:
+		case "open":
 			result.Open++
-			if item.State == store.ItemStateDone {
-				if err := a.store.SyncItemStateBySource("github", githubIssueSourceRef(repo, issue.Number), store.ItemStateInbox); err != nil {
-					return itemGitHubSyncResponse{}, err
-				}
-			}
+		default:
+			return itemGitHubSyncResponse{}, fmt.Errorf("unsupported github issue state %q", issue.State)
 		}
+	}
+
+	if _, err := a.syncTrackedGitHubIssues(context.Background(), &workspace.ID, map[string]struct{}{repo: {}}); err != nil {
+		return itemGitHubSyncResponse{}, err
 	}
 	return result, nil
 }

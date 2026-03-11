@@ -72,6 +72,56 @@ test.describe('bug report flow', () => {
     await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '3');
   });
 
+  test('closed bug report disappears from the open inbox after github ingest refresh', async ({ page }) => {
+    await waitReady(page);
+
+    await page.locator('#edge-left-tap').click();
+    await expect(page.locator('#pr-file-list')).toContainText('Review parser cleanup');
+
+    await page.locator('#bug-report-button').click();
+    await page.locator('#bug-report-note').fill('Harness github close refresh');
+    await page.locator('#bug-report-save').click();
+
+    await expect(page.locator('#pr-file-list')).toContainText('Bug report: Harness repro');
+    await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '3');
+
+    await page.evaluate(() => {
+      const data = (window as any).__itemSidebarData || {};
+      const inbox = Array.isArray(data.inbox)
+        ? data.inbox.filter((entry: any) => String(entry?.title || '') !== 'Bug report: Harness repro')
+        : [];
+      const done = Array.isArray(data.done) ? data.done.slice() : [];
+      done.unshift({
+        id: 103,
+        title: 'Bug report: Harness repro',
+        state: 'done',
+        sphere: 'private',
+        artifact_id: 0,
+        source: 'github',
+        source_ref: 'krystophny/tabura#77',
+        artifact_title: 'Bug report: Harness repro',
+        artifact_kind: 'github_issue',
+        actor_name: '',
+        created_at: '2026-03-08 15:04:05',
+        updated_at: '2026-03-11 09:00:00',
+      });
+      (window as any).__itemSidebarData = {
+        ...data,
+        inbox,
+        done,
+      };
+
+      const sessions = (window as any).__mockWsSessions || [];
+      const chatWs = sessions.find((entry: any) => String(entry?.url || '').includes('/chat/'));
+      if (chatWs && typeof chatWs.injectEvent === 'function') {
+        chatWs.injectEvent({ type: 'items_ingested', count: 1, source: 'github' });
+      }
+    });
+
+    await expect(page.locator('#pr-file-list')).not.toContainText('Bug report: Harness repro');
+    await expect(page.locator('#edge-left-tap')).toHaveAttribute('data-inbox-count', '2');
+  });
+
   test('keyboard shortcut opens the bug report sheet', async ({ page }) => {
     await waitReady(page);
 
