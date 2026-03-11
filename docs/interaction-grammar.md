@@ -121,6 +121,21 @@ Execution is workspace-aware. System commands operate at system level (switch wo
 
 There is no hub entity. System commands are available from any workspace.
 
+### Deterministic fast paths
+
+Deterministic fast paths run before semantic routing and must not invoke the local intent model.
+
+The registered fast-path families include:
+
+- source sync and external sync commands
+- calendar and briefing requests
+- cursor, titled-item, item, workspace, and project commands
+- GitHub issue and artifact-linking commands
+- runtime control commands such as `toggle_silent`, `toggle_live_dialogue`, `cancel_work`, `show_status`, and `switch_model`
+- direct UI loopback controls for `system_action` events and push-to-talk hold/release
+
+The backend registry in `internal/web/chat_intent_fast.go` is authoritative for these boundaries.
+
 ## Authoritative Live Model
 
 Tabura exposes exactly two live runtime modes:

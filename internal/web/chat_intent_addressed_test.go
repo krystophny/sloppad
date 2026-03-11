@@ -235,11 +235,11 @@ func TestRunAssistantTurnMeetingDirectAddressOverridesFalseAddressedClassificati
 	if err != nil {
 		t.Fatalf("project session: %v", err)
 	}
-	if _, err := app.store.AddChatMessage(session.ID, "user", "Tabura, be quiet", "Tabura, be quiet", "text"); err != nil {
+	if _, err := app.store.AddChatMessage(session.ID, "user", "Tabura, please go silent now", "Tabura, please go silent now", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Tabura, be quiet", nil, "")
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Tabura, please go silent now", nil, "")
 	if !handled {
 		t.Fatal("expected explicit direct address to be handled")
 	}
@@ -267,11 +267,11 @@ func TestRunAssistantTurnDialogueIgnoresAddressedFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("project session: %v", err)
 	}
-	if _, err := app.store.AddChatMessage(session.ID, "user", "be quiet", "be quiet", "text"); err != nil {
+	if _, err := app.store.AddChatMessage(session.ID, "user", "please go silent now", "please go silent now", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "be quiet", nil, "")
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "please go silent now", nil, "")
 	if !handled {
 		t.Fatal("expected dialogue mode to ignore addressed flag")
 	}

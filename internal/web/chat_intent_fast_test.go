@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -36,6 +37,9 @@ func TestTryDeterministicFastPathRegistry(t *testing.T) {
 		{name: "workspace", text: "list workspaces", wantMatch: "workspace", wantAction: "list_workspaces"},
 		{name: "workspace focus", text: "open the plasma workspace", wantMatch: "workspace", wantAction: "focus_workspace"},
 		{name: "project", text: "what project is this?", wantMatch: "project", wantAction: "show_workspace_project"},
+		{name: "runtime silent", text: "be quiet", wantMatch: "runtime_control", wantAction: "toggle_silent"},
+		{name: "runtime status", text: "status?", wantMatch: "runtime_control", wantAction: "show_status"},
+		{name: "runtime model", text: "switch model to gpt high", wantMatch: "runtime_control", wantAction: "switch_model"},
 	}
 
 	for _, tc := range tests {
@@ -73,6 +77,53 @@ func TestTryDeterministicFastPathNoMatch(t *testing.T) {
 	}
 }
 
+func TestDeterministicFastPathCatalogIncludesRuntimeAndUIControls(t *testing.T) {
+	catalog := deterministicFastPathCatalog()
+	find := func(name string) *deterministicFastPathSpec {
+		t.Helper()
+		for i := range catalog {
+			if catalog[i].Name == name {
+				return &catalog[i]
+			}
+		}
+		return nil
+	}
+
+	runtime := find("runtime_control")
+	if runtime == nil {
+		t.Fatal("expected runtime_control catalog entry")
+	}
+	if runtime.Route != "text" {
+		t.Fatalf("runtime route = %q, want text", runtime.Route)
+	}
+	for _, action := range []string{"toggle_silent", "toggle_live_dialogue", "cancel_work", "show_status", "switch_model"} {
+		if !containsExactString(runtime.Actions, action) {
+			t.Fatalf("runtime actions = %#v, missing %q", runtime.Actions, action)
+		}
+	}
+
+	ui := find("ui_runtime_controls")
+	if ui == nil {
+		t.Fatal("expected ui_runtime_controls catalog entry")
+	}
+	if ui.Route != "ui" {
+		t.Fatalf("ui route = %q, want ui", ui.Route)
+	}
+	if !containsExactString(ui.Triggers, "system_action:toggle_live_dialogue") {
+		t.Fatalf("ui triggers = %#v, missing live dialogue system action", ui.Triggers)
+	}
+
+	ptt := find("ui_push_to_talk")
+	if ptt == nil {
+		t.Fatal("expected ui_push_to_talk catalog entry")
+	}
+	for _, trigger := range []string{"ctrl_long_press", "ctrl_release"} {
+		if !containsExactString(ptt.Triggers, trigger) {
+			t.Fatalf("ptt triggers = %#v, missing %q", ptt.Triggers, trigger)
+		}
+	}
+}
+
 func TestClassifyAndExecuteSystemActionFastPathBypassesIntentLLM(t *testing.T) {
 	app := newAuthedTestApp(t)
 	project, err := app.ensureDefaultProjectRecord()
@@ -102,4 +153,136 @@ func TestClassifyAndExecuteSystemActionFastPathBypassesIntentLLM(t *testing.T) {
 	if got := message; got == "" || got == "I can only handle system actions in local-only mode." {
 		t.Fatalf("message = %q, want fast-path execution result", got)
 	}
+}
+
+func TestClassifyAndExecuteSystemActionRuntimeControlBypassesIntentLLM(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	var llmCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		llmCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	app.intentLLMURL = server.URL
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "be quiet")
+	if !handled {
+		t.Fatal("expected runtime control fast path to handle be quiet")
+	}
+	if llmCalls.Load() != 0 {
+		t.Fatalf("intent llm calls = %d, want 0", llmCalls.Load())
+	}
+	if message != "Toggled silent mode." {
+		t.Fatalf("message = %q, want %q", message, "Toggled silent mode.")
+	}
+	if len(payloads) != 1 || strFromAny(payloads[0]["type"]) != "toggle_silent" {
+		t.Fatalf("payloads = %#v, want toggle_silent payload", payloads)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionSwitchModelFastPathBypassesIntentLLM(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	var llmCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		llmCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	app.intentLLMURL = server.URL
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "switch model to gpt high")
+	if !handled {
+		t.Fatal("expected runtime control fast path to switch model")
+	}
+	if llmCalls.Load() != 0 {
+		t.Fatalf("intent llm calls = %d, want 0", llmCalls.Load())
+	}
+	if !strings.Contains(message, "Model for ") {
+		t.Fatalf("message = %q, want model switch confirmation", message)
+	}
+	if len(payloads) != 1 || strFromAny(payloads[0]["type"]) != "switch_model" {
+		t.Fatalf("payloads = %#v, want switch_model payload", payloads)
+	}
+	updatedProject, err := app.store.GetProjectByProjectKey(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("reload project: %v", err)
+	}
+	if updatedProject.ChatModel != "gpt" {
+		t.Fatalf("chat model = %q, want gpt", updatedProject.ChatModel)
+	}
+	if updatedProject.ChatModelReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", updatedProject.ChatModelReasoningEffort)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionStatusFastPathBypassesIntentLLM(t *testing.T) {
+	wsServer := setupMockAppServerStatusServer(t, "Agent healthy.")
+	defer wsServer.Close()
+	wsURL := "ws" + strings.TrimPrefix(wsServer.URL, "http")
+
+	app, err := New(t.TempDir(), "", "", wsURL, "", "", "", false)
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Shutdown(context.Background())
+	})
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.ProjectKey)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	var llmCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		llmCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	app.intentLLMURL = server.URL
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "status?")
+	if !handled {
+		t.Fatal("expected runtime control fast path to handle status")
+	}
+	if llmCalls.Load() != 0 {
+		t.Fatalf("intent llm calls = %d, want 0", llmCalls.Load())
+	}
+	if message != "Agent healthy." {
+		t.Fatalf("message = %q, want %q", message, "Agent healthy.")
+	}
+	if len(payloads) != 0 {
+		t.Fatalf("payloads = %#v, want none", payloads)
+	}
+}
+
+func containsExactString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

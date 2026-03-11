@@ -525,7 +525,7 @@ func TestClassifyAndExecuteSystemActionFallsThroughWhenLLMUnavailable(t *testing
 		t.Fatalf("chat session: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "be quiet")
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "please go silent now")
 	if handled {
 		t.Fatalf("expected request to remain unhandled, got message %q and %d payloads", message, len(payloads))
 	}

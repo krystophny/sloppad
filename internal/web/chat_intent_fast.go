@@ -21,14 +21,26 @@ type deterministicFastPathMatch struct {
 	FailureMessage func(userText string, enforced []*SystemAction, err error) string
 }
 
+type deterministicFastPathSpec struct {
+	Name     string
+	Route    string
+	Actions  []string
+	Triggers []string
+}
+
 type deterministicFastPathParser struct {
-	Name  string
+	Spec  deterministicFastPathSpec
 	Parse func(text string, ctx deterministicFastPathContext) *deterministicFastPathMatch
 }
 
 var deterministicFastPaths = []deterministicFastPathParser{
 	{
-		Name: "source_sync",
+		Spec: deterministicFastPathSpec{
+			Name:     "source_sync",
+			Route:    "text",
+			Actions:  []string{"sync_sources"},
+			Triggers: []string{"sync all sources"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineSourceSyncIntent(text)
 			if action == nil {
@@ -38,7 +50,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "calendar",
+		Spec: deterministicFastPathSpec{
+			Name:     "calendar",
+			Route:    "text",
+			Actions:  []string{"show_calendar"},
+			Triggers: []string{"show calendar"},
+		},
 		Parse: func(text string, ctx deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineCalendarIntent(text, ctx.Now)
 			if action == nil {
@@ -48,7 +65,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "briefing",
+		Spec: deterministicFastPathSpec{
+			Name:     "briefing",
+			Route:    "text",
+			Actions:  []string{"show_briefing"},
+			Triggers: []string{"show briefing"},
+		},
 		Parse: func(text string, ctx deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineBriefingIntent(text, ctx.Now)
 			if action == nil {
@@ -58,7 +80,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "todoist",
+		Spec: deterministicFastPathSpec{
+			Name:     "todoist",
+			Route:    "text",
+			Actions:  []string{"map_todoist_project", "sync_todoist", "create_todoist_task"},
+			Triggers: []string{"sync todoist"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineTodoistIntent(text)
 			if action == nil {
@@ -68,7 +95,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "evernote",
+		Spec: deterministicFastPathSpec{
+			Name:     "evernote",
+			Route:    "text",
+			Actions:  []string{"sync_evernote"},
+			Triggers: []string{"sync evernote"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineEvernoteIntent(text)
 			if action == nil {
@@ -78,7 +110,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "bear",
+		Spec: deterministicFastPathSpec{
+			Name:     "bear",
+			Route:    "text",
+			Actions:  []string{"sync_bear", "promote_bear_checklist"},
+			Triggers: []string{"sync bear"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineBearIntent(text)
 			if action == nil {
@@ -88,7 +125,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "zotero",
+		Spec: deterministicFastPathSpec{
+			Name:     "zotero",
+			Route:    "text",
+			Actions:  []string{"sync_zotero"},
+			Triggers: []string{"sync zotero"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineZoteroIntent(text)
 			if action == nil {
@@ -98,7 +140,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "cursor",
+		Spec: deterministicFastPathSpec{
+			Name:     "cursor",
+			Route:    "text",
+			Actions:  []string{"cursor_open_item", "cursor_triage_item", "cursor_open_path"},
+			Triggers: []string{"open this"},
+		},
 		Parse: func(text string, ctx deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineCursorIntent(text, ctx.Cursor)
 			if action == nil {
@@ -108,7 +155,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "titled_item",
+		Spec: deterministicFastPathSpec{
+			Name:     "titled_item",
+			Route:    "text",
+			Actions:  []string{"triage_item_by_title"},
+			Triggers: []string{`move the item "Budget" back to the inbox`},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			intent := parseInlineTitledItemIntent(text)
 			if intent == nil {
@@ -124,7 +176,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "item",
+		Spec: deterministicFastPathSpec{
+			Name:     "item",
+			Route:    "text",
+			Actions:  []string{canonicalActionTrackItem, "make_item", "delegate_item", "snooze_item", "split_items", "capture_idea", "refine_idea_note", "promote_idea", "apply_idea_promotion", "review_someday", "triage_someday", "promote_someday", "toggle_someday_review_nudge", "show_filtered_items", "print_item", "reassign_workspace", "reassign_project", "clear_workspace", "clear_project"},
+			Triggers: []string{"idea: better swipe triage"},
+		},
 		Parse: func(text string, ctx deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineItemIntentWithCaptureMode(text, ctx.Now, ctx.CaptureMode)
 			if action == nil {
@@ -134,7 +191,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "github_issue",
+		Spec: deterministicFastPathSpec{
+			Name:     "github_issue",
+			Route:    "text",
+			Actions:  []string{canonicalActionDispatchExecute, "create_github_issue", "create_github_issue_split"},
+			Triggers: []string{"create a GitHub issue from this"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			actions := parseInlineGitHubIssueActions(text)
 			if len(actions) == 0 {
@@ -144,7 +206,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "artifact_link",
+		Spec: deterministicFastPathSpec{
+			Name:     "artifact_link",
+			Route:    "text",
+			Actions:  []string{"link_workspace_artifact", "list_linked_artifacts"},
+			Triggers: []string{"show linked artifacts"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineArtifactLinkIntent(text)
 			if action == nil {
@@ -154,7 +221,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "batch",
+		Spec: deterministicFastPathSpec{
+			Name:     "batch",
+			Route:    "text",
+			Actions:  []string{"batch_work", "batch_configure", "review_policy", "batch_limit", "batch_status"},
+			Triggers: []string{"show me progress"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineBatchIntent(text)
 			if action == nil {
@@ -164,7 +236,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "workspace",
+		Spec: deterministicFastPathSpec{
+			Name:     "workspace",
+			Route:    "text",
+			Actions:  []string{"switch_workspace", "focus_workspace", "clear_focus", "list_workspace_items", "list_workspaces", "create_workspace", "create_workspace_from_git", "rename_workspace", "delete_workspace", "show_workspace_details", "workspace_watch_start", "workspace_watch_stop", "workspace_watch_status", "show_busy_state"},
+			Triggers: []string{"list workspaces"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineWorkspaceIntent(text)
 			if action == nil {
@@ -174,7 +251,12 @@ var deterministicFastPaths = []deterministicFastPathParser{
 		},
 	},
 	{
-		Name: "project",
+		Spec: deterministicFastPathSpec{
+			Name:     "project",
+			Route:    "text",
+			Actions:  []string{"assign_workspace_project", "show_workspace_project", "create_project", "list_project_workspaces", "sync_project"},
+			Triggers: []string{"what project is this?"},
+		},
 		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
 			action := parseInlineProjectIntent(text)
 			if action == nil {
@@ -183,6 +265,55 @@ var deterministicFastPaths = []deterministicFastPathParser{
 			return fastPathSingleAction("project", action, fixedFastPathFailure("I couldn't resolve the project request: "))
 		},
 	},
+	{
+		Spec: deterministicFastPathSpec{
+			Name:     "runtime_control",
+			Route:    "text",
+			Actions:  []string{"toggle_silent", "toggle_live_dialogue", "cancel_work", "show_status", "switch_model"},
+			Triggers: []string{"be quiet", "toggle live dialogue", "cancel work", "status?", "switch model to gpt high"},
+		},
+		Parse: func(text string, _ deterministicFastPathContext) *deterministicFastPathMatch {
+			action := parseInlineRuntimeControlIntent(text)
+			if action == nil {
+				return nil
+			}
+			return fastPathSingleAction("runtime_control", action, fixedFastPathFailure("I couldn't resolve the runtime control request: "))
+		},
+	},
+}
+
+var deterministicFastPathUIControls = []deterministicFastPathSpec{
+	{
+		Name:     "ui_runtime_controls",
+		Route:    "ui",
+		Actions:  []string{"toggle_silent", "toggle_live_dialogue", "switch_model"},
+		Triggers: []string{"system_action:toggle_silent", "system_action:toggle_live_dialogue", "system_action:switch_model"},
+	},
+	{
+		Name:     "ui_push_to_talk",
+		Route:    "ui",
+		Triggers: []string{"ctrl_long_press", "ctrl_release"},
+	},
+}
+
+func deterministicFastPathCatalog() []deterministicFastPathSpec {
+	specs := make([]deterministicFastPathSpec, 0, len(deterministicFastPaths)+len(deterministicFastPathUIControls))
+	for _, parser := range deterministicFastPaths {
+		if strings.TrimSpace(parser.Spec.Name) == "" {
+			continue
+		}
+		spec := parser.Spec
+		spec.Actions = append([]string(nil), spec.Actions...)
+		spec.Triggers = append([]string(nil), spec.Triggers...)
+		specs = append(specs, spec)
+	}
+	for _, spec := range deterministicFastPathUIControls {
+		copied := spec
+		copied.Actions = append([]string(nil), copied.Actions...)
+		copied.Triggers = append([]string(nil), copied.Triggers...)
+		specs = append(specs, copied)
+	}
+	return specs
 }
 
 func fastPathSingleAction(name string, action *SystemAction, failure func(string, []*SystemAction, error) string) *deterministicFastPathMatch {
@@ -239,7 +370,7 @@ func tryDeterministicFastPath(text string, ctx deterministicFastPathContext) *de
 		}
 		if match := parser.Parse(trimmed, ctx); match != nil {
 			if strings.TrimSpace(match.Name) == "" {
-				match.Name = parser.Name
+				match.Name = parser.Spec.Name
 			}
 			return match
 		}
