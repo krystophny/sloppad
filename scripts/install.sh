@@ -27,6 +27,7 @@ PIPER_SERVER_SCRIPT=""
 LLM_DIR=""
 LLM_MODEL_DIR=""
 LLM_SETUP_SCRIPT=""
+STT_SETUP_SCRIPT=""
 CODEX_PATH=""
 
 log() {
@@ -164,6 +165,7 @@ resolve_paths() {
     LLM_DIR="${DATA_ROOT}/llm"
     LLM_MODEL_DIR="${LLM_DIR}/models"
     LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-llm.sh"
+    STT_SETUP_SCRIPT="${SCRIPT_DIR}/setup-voxtype-stt.sh"
 }
 
 require_codex_app_server() {
@@ -339,6 +341,10 @@ BIN
             echo "#!/usr/bin/env bash" >"${tmpdir}/setup-local-llm.sh"
         fi
         chmod +x "${tmpdir}/setup-local-llm.sh"
+        if [ -d "deploy/launchd" ]; then
+            mkdir -p "${tmpdir}/deploy/launchd"
+            cp deploy/launchd/*.plist "${tmpdir}/deploy/launchd/"
+        fi
         printf '%s\n' "$tag"
         return
     fi
@@ -643,9 +649,27 @@ install_services_linux() {
     run_cmd systemctl --user enable --now "${units[@]}"
 }
 
+substitute_launchd_template() {
+    local src="$1" dst="$2"
+    sed \
+        -e "s|@@BIN_PATH@@|${BIN_PATH}|g" \
+        -e "s|@@CODEX_PATH@@|${CODEX_PATH}|g" \
+        -e "s|@@PROJECT_DIR@@|${PROJECT_DIR}|g" \
+        -e "s|@@WEB_DATA_DIR@@|${WEB_DATA_DIR}|g" \
+        -e "s|@@VENV_DIR@@|${VENV_DIR}|g" \
+        -e "s|@@SCRIPT_DIR@@|${SCRIPT_DIR}|g" \
+        -e "s|@@PIPER_MODEL_DIR@@|${MODEL_DIR}|g" \
+        -e "s|@@LLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
+        -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
+        -e "s|@@STT_SETUP_SCRIPT@@|${STT_SETUP_SCRIPT}|g" \
+        "$src" >"$dst"
+}
+
 write_launchd_plists() {
-    local agent_dir
+    local staging_dir="$1"
+    local agent_dir template_dir
     agent_dir="${HOME}/Library/LaunchAgents"
+    template_dir="${staging_dir}/deploy/launchd"
 
     if [ "$DRY_RUN" = "1" ]; then
         log "[dry-run] write launchd plists under ${agent_dir}"
@@ -654,79 +678,16 @@ write_launchd_plists() {
 
     run_cmd mkdir -p "$agent_dir"
 
-    cat >"${agent_dir}/io.tabura.codex-app-server.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>io.tabura.codex-app-server</string>
-  <key>ProgramArguments</key><array>
-    <string>${CODEX_PATH}</string><string>app-server</string><string>--listen</string><string>ws://127.0.0.1:8787</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/tabura-codex-app-server.log</string>
-  <key>StandardErrorPath</key><string>/tmp/tabura-codex-app-server.log</string>
-</dict></plist>
-PLIST
+    [ -d "$template_dir" ] || fail "launchd templates not found in ${template_dir}"
 
-    cat >"${agent_dir}/io.tabura.piper-tts.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>io.tabura.piper-tts</string>
-  <key>ProgramArguments</key><array>
-    <string>${VENV_DIR}/bin/uvicorn</string><string>piper_tts_server:app</string><string>--app-dir</string><string>${SCRIPT_DIR}</string><string>--host</string><string>127.0.0.1</string><string>--port</string><string>8424</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>PIPER_MODEL_DIR</key><string>${MODEL_DIR}</string>
-  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/tabura-piper-tts.log</string>
-  <key>StandardErrorPath</key><string>/tmp/tabura-piper-tts.log</string>
-</dict></plist>
-PLIST
+    substitute_launchd_template "${template_dir}/io.tabura.codex-app-server.plist" "${agent_dir}/io.tabura.codex-app-server.plist"
+    substitute_launchd_template "${template_dir}/io.tabura.piper-tts.plist" "${agent_dir}/io.tabura.piper-tts.plist"
 
     if [ -x "$LLM_SETUP_SCRIPT" ]; then
-        cat >"${agent_dir}/io.tabura.llm.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>io.tabura.llm</string>
-  <key>ProgramArguments</key><array>
-    <string>${LLM_SETUP_SCRIPT}</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>TABURA_LLM_MODEL_DIR</key><string>${LLM_MODEL_DIR}</string>
-  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/tabura-llm.log</string>
-  <key>StandardErrorPath</key><string>/tmp/tabura-llm.log</string>
-</dict></plist>
-PLIST
+        substitute_launchd_template "${template_dir}/io.tabura.llm.plist" "${agent_dir}/io.tabura.llm.plist"
     fi
 
-    cat >"${agent_dir}/io.tabura.web.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>io.tabura.web</string>
-  <key>ProgramArguments</key><array>
-    <string>${BIN_PATH}</string><string>server</string><string>--project-dir</string><string>${PROJECT_DIR}</string><string>--data-dir</string><string>${WEB_DATA_DIR}</string><string>--web-host</string><string>127.0.0.1</string><string>--web-port</string><string>8420</string><string>--mcp-host</string><string>127.0.0.1</string><string>--mcp-port</string><string>9420</string><string>--app-server-url</string><string>ws://127.0.0.1:8787</string><string>--tts-url</string><string>http://127.0.0.1:8424</string>
-  </array>
-  <key>EnvironmentVariables</key><dict>
-    <key>TABURA_INTENT_LLM_URL</key><string>http://127.0.0.1:8426</string>
-    <key>TABURA_INTENT_LLM_MODEL</key><string>local</string>
-    <key>TABURA_INTENT_LLM_PROFILE</key><string>qwen3.5-9b</string>
-    <key>TABURA_INTENT_LLM_PROFILE_OPTIONS</key><string>qwen3.5-9b,qwen3.5-4b</string>
-  </dict>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/tabura-web.log</string>
-  <key>StandardErrorPath</key><string>/tmp/tabura-web.log</string>
-</dict></plist>
-PLIST
+    substitute_launchd_template "${template_dir}/io.tabura.web.plist" "${agent_dir}/io.tabura.web.plist"
 }
 
 load_launchd_service() {
@@ -736,9 +697,10 @@ load_launchd_service() {
 }
 
 install_services_macos() {
+    local staging_dir="$1"
     local agent_dir
     agent_dir="${HOME}/Library/LaunchAgents"
-    write_launchd_plists
+    write_launchd_plists "$staging_dir"
     load_launchd_service "${agent_dir}/io.tabura.codex-app-server.plist"
     load_launchd_service "${agent_dir}/io.tabura.piper-tts.plist"
     if [ -f "${agent_dir}/io.tabura.intent.plist" ]; then
@@ -853,7 +815,7 @@ install_flow() {
     setup_local_llm "$tmpdir"
     install_voxtype_stt
     if [ "$TABURA_OS" = "darwin" ]; then
-        install_services_macos
+        install_services_macos "$tmpdir"
     else
         install_services_linux
     fi
