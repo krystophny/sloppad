@@ -205,6 +205,7 @@ export async function startLiveSession(mode, ws) {
   state.mode = nextMode;
   notifyStateChange();
   if (nextMode === LIVE_SESSION_MODE_DIALOGUE) {
+    void openDialogueListenWindow();
     return true;
   }
 
