@@ -88,7 +88,7 @@ fi
 if ! command -v voxtype >/dev/null 2>&1; then
   HAVE_VOXTYPE=0
   if [ "$PLATFORM" = "Darwin" ]; then
-    log "WARNING: voxtype not in PATH. Install: brew install voxtype"
+    log "WARNING: voxtype not in PATH. Build from source: scripts/build-voxtype-macos.sh"
   else
     fail "voxtype not in PATH. Install voxtype"
   fi

@@ -109,10 +109,22 @@ fi
 # --- Step 6: STT (voxtype) check ---
 
 if ! command -v voxtype >/dev/null 2>&1; then
-    warn "voxtype not found; STT will be unavailable"
     if [ "$PLATFORM" = "Darwin" ]; then
-        warn "  Install: brew install voxtype"
+        log "voxtype not found; attempting build from source for macOS"
+        if command -v cargo >/dev/null 2>&1 && command -v cmake >/dev/null 2>&1; then
+            if "$REPO_ROOT/scripts/build-voxtype-macos.sh" --yes; then
+                log "voxtype built and installed successfully"
+            else
+                warn "voxtype build failed; STT will be unavailable"
+                warn "  Retry: scripts/build-voxtype-macos.sh"
+            fi
+        else
+            warn "voxtype not found; STT will be unavailable"
+            warn "  To build from source: brew install cmake && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            warn "  Then run: scripts/build-voxtype-macos.sh"
+        fi
     else
+        warn "voxtype not found; STT will be unavailable"
         warn "  Install: paru -S voxtype-bin"
     fi
 fi

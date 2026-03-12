@@ -361,6 +361,10 @@ BIN
             echo "#!/usr/bin/env bash" >"${tmpdir}/setup-voxtype-stt.sh"
         fi
         chmod +x "${tmpdir}/setup-voxtype-stt.sh"
+        if [ -f "scripts/build-voxtype-macos.sh" ]; then
+            cp "scripts/build-voxtype-macos.sh" "${tmpdir}/build-voxtype-macos.sh"
+            chmod +x "${tmpdir}/build-voxtype-macos.sh"
+        fi
         if [ -d "deploy/launchd" ]; then
             mkdir -p "${tmpdir}/deploy/launchd"
             cp deploy/launchd/*.plist "${tmpdir}/deploy/launchd/"
@@ -390,6 +394,9 @@ BIN
     fi
     if [ -f "${tmpdir}/scripts/setup-voxtype-stt.sh" ]; then
         cp "${tmpdir}/scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
+    fi
+    if [ -f "${tmpdir}/scripts/build-voxtype-macos.sh" ]; then
+        cp "${tmpdir}/scripts/build-voxtype-macos.sh" "${tmpdir}/build-voxtype-macos.sh"
     fi
     printf '%s\n' "$tag"
 }
@@ -576,9 +583,33 @@ NOTICE
                 log "no AUR helper found (paru/yay); install voxtype manually"
             fi
         fi
-    elif [ "$TABURA_OS" = "darwin" ] && have_cmd brew; then
-        if confirm_default_yes "Install voxtype via Homebrew?"; then
-            run_cmd brew install voxtype
+    elif [ "$TABURA_OS" = "darwin" ]; then
+        if have_cmd brew && brew info voxtype >/dev/null 2>&1; then
+            if confirm_default_yes "Install voxtype via Homebrew?"; then
+                run_cmd brew install voxtype
+            fi
+        elif have_cmd cargo && have_cmd cmake; then
+            log "No Homebrew formula for voxtype; building from source"
+            if confirm_default_yes "Build voxtype from source (Rust + cmake)?"; then
+                local staging_build="${1:-}"
+                local build_script=""
+                if [ -n "$staging_build" ] && [ -f "${staging_build}/build-voxtype-macos.sh" ]; then
+                    build_script="${staging_build}/build-voxtype-macos.sh"
+                elif [ -f "scripts/build-voxtype-macos.sh" ]; then
+                    build_script="scripts/build-voxtype-macos.sh"
+                fi
+                if [ -n "$build_script" ]; then
+                    run_cmd bash "$build_script" --yes
+                else
+                    log "build script not available; build manually:"
+                    log "  git clone --branch feature/single-daemon-openai-stt-api https://github.com/peteonrails/voxtype.git"
+                    log "  see: https://github.com/krystophny/tabura#voxtype-stt"
+                fi
+            fi
+        else
+            log "voxtype not found; to build from source install Rust and cmake:"
+            log "  brew install cmake && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+            log "  then run: scripts/build-voxtype-macos.sh"
         fi
     else
         log "voxtype not found; install voxtype and ensure it is on PATH"
