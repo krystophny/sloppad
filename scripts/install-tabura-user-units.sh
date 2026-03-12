@@ -175,6 +175,31 @@ install_linux() {
   log "All services running"
 }
 
+# --- macOS: launchd helpers ---
+
+launchctl_available() {
+  local probe="/tmp/tabura-launchctl-probe.plist"
+  cat > "$probe" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.tabura.probe</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/true</string></array>
+</dict>
+</plist>
+PLIST
+  if launchctl load "$probe" >/dev/null 2>&1; then
+    launchctl unload "$probe" >/dev/null 2>&1 || true
+    rm -f "$probe"
+    return 0
+  fi
+  rm -f "$probe"
+  return 1
+}
+
 # --- macOS: launchd install ---
 
 install_macos() {
@@ -195,7 +220,6 @@ install_macos() {
   bin_path="$REPO_ROOT/tabura"
   codex_path="$(command -v codex)"
   web_data_dir="${data_root}/web-data"
-  # Use the same paths as setup-tabura-piper-tts.sh so models are found
   piper_model_dir="${HOME}/.local/share/tabura-piper-tts/models"
   piper_venv_dir="${HOME}/.local/share/tabura-piper-tts/venv"
 
@@ -213,7 +237,7 @@ install_macos() {
   # PTT requires Linux evdev — skip on macOS
   log "Skipping tabura-ptt: push-to-talk requires Linux (evdev)"
 
-  # Install and load agents
+  # Install plist files (always, even if launchctl is unavailable)
   local src dst
   for name in "${agents[@]}"; do
     src="$plist_src/io.tabura.${name}.plist"
@@ -235,19 +259,33 @@ install_macos() {
       -e "s|@@STT_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-voxtype-stt.sh|g" \
       -e "s|@@TABURA_INTENT_LLM_URL@@|${effective_llm_url}|g" \
       "$src" > "$dst"
+    log "Installed plist: $dst"
+  done
+
+  # Activate services
+  if launchctl_available; then
+    activate_launchd "${agents[@]}"
+  else
+    log "launchctl unavailable (SSH/tmux session); starting services directly"
+    activate_direct "${agents[@]}"
+  fi
+}
+
+activate_launchd() {
+  local plist_dst="$HOME/Library/LaunchAgents"
+  local dst
+  for name in "$@"; do
+    dst="$plist_dst/io.tabura.${name}.plist"
     launchctl unload "$dst" >/dev/null 2>&1 || true
     launchctl load -w "$dst"
     log "Loaded: io.tabura.${name}"
   done
 
-  # Verify agents are loaded
   sleep 3
   local failed=()
-  local label
-  for name in "${agents[@]}"; do
-    label="io.tabura.${name}"
-    if ! launchctl list "$label" >/dev/null 2>&1; then
-      failed+=("$label")
+  for name in "$@"; do
+    if ! launchctl list "io.tabura.${name}" >/dev/null 2>&1; then
+      failed+=("io.tabura.${name}")
     fi
   done
 
@@ -256,7 +294,70 @@ install_macos() {
     fail "Not all agents started"
   fi
 
-  log "All agents running"
+  log "All agents running (launchd)"
+}
+
+activate_direct() {
+  local pidfile="/tmp/tabura-pids.txt"
+  : > "$pidfile"
+
+  for name in "$@"; do
+    local logfile="/tmp/tabura-${name}.log"
+    case "$name" in
+      codex-app-server)
+        nohup "$codex_path" app-server --listen ws://127.0.0.1:8787 \
+          >"$logfile" 2>&1 &
+        ;;
+      piper-tts)
+        PIPER_MODEL_DIR="$piper_model_dir" \
+        nohup "$piper_venv_dir/bin/uvicorn" piper_tts_server:app \
+          --app-dir "$REPO_ROOT/scripts" --host 127.0.0.1 --port 8424 \
+          >"$logfile" 2>&1 &
+        ;;
+      web)
+        TABURA_INTENT_LLM_URL="$effective_llm_url" \
+        TABURA_INTENT_LLM_MODEL=local \
+        TABURA_INTENT_LLM_PROFILE=qwen3.5-9b \
+        TABURA_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b \
+        nohup "$bin_path" server \
+          --project-dir "$REPO_ROOT" --data-dir "$web_data_dir" \
+          --web-host 127.0.0.1 --web-port 8420 \
+          --mcp-host 127.0.0.1 --mcp-port 9420 \
+          --app-server-url ws://127.0.0.1:8787 \
+          --tts-url http://127.0.0.1:8424 \
+          >"$logfile" 2>&1 &
+        ;;
+      llm)
+        TABURA_LLM_MODEL_DIR="$LLM_MODEL_DIR" \
+        nohup "$REPO_ROOT/scripts/setup-local-llm.sh" \
+          >"$logfile" 2>&1 &
+        ;;
+      stt)
+        TABURA_STT_LANGUAGE=de,en TABURA_STT_MODEL=large-v3-turbo \
+        nohup "$REPO_ROOT/scripts/setup-voxtype-stt.sh" \
+          >"$logfile" 2>&1 &
+        ;;
+    esac
+    echo "$! io.tabura.${name}" >> "$pidfile"
+    log "Started: io.tabura.${name} (pid $!)"
+  done
+
+  sleep 3
+  local failed=()
+  local pid label
+  while read -r pid label; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      failed+=("$label")
+      log "FAILED: $label (pid $pid) — see /tmp/tabura-${label#io.tabura.}.log"
+    fi
+  done < "$pidfile"
+
+  if ((${#failed[@]} > 0)); then
+    fail "Not all services started"
+  fi
+
+  log "All services running (direct); PIDs in $pidfile"
+  log "Stop all: awk '{print \$1}' $pidfile | xargs kill"
 }
 
 # --- Main ---
