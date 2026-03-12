@@ -17,16 +17,6 @@ SERVER_SCRIPT="$(cd "$(dirname "$0")" && pwd)/piper_tts_server.py"
 
 HF_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main"
 
-declare -A MODELS=(
-    ["en_GB-alan-medium"]="en/en_GB/alan/medium"
-    ["de_DE-karlsson-low"]="de/de_DE/karlsson/low"
-)
-
-declare -A MODEL_LICENSE_NOTES=(
-    ["en_GB-alan-medium"]="Model card indicates MIT-compatible terms."
-    ["de_DE-karlsson-low"]="Per-model terms must be checked in model card."
-)
-
 confirm_default_yes() {
     local prompt="$1"
     if [ "${TABURA_ASSUME_YES:-0}" = "1" ]; then
@@ -40,6 +30,30 @@ confirm_default_yes() {
         "" | [Yy] | [Yy][Ee][Ss]) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+download_model() {
+    local model="$1" subpath="$2" note="$3"
+    local onnx="${MODEL_DIR}/${model}.onnx"
+    local json="${MODEL_DIR}/${model}.onnx.json"
+
+    if [ -f "$onnx" ] && [ -f "$json" ]; then
+        echo "Model already exists: $model"
+        return
+    fi
+
+    echo "Model license notice: ${model}"
+    echo "  ${note}"
+    echo "  Model card: ${HF_BASE}/${subpath}/MODEL_CARD"
+    if ! confirm_default_yes "Download ${model}?"; then
+        echo "Skipping model download: ${model}"
+        return
+    fi
+
+    echo "Downloading model: $model ..."
+    curl -fsSL -o "$onnx" "${HF_BASE}/${subpath}/${model}.onnx"
+    curl -fsSL -o "$json" "${HF_BASE}/${subpath}/${model}.onnx.json"
+    echo "  $(du -h "$onnx" | cut -f1) $onnx"
 }
 
 mkdir -p "$MODEL_DIR"
@@ -59,29 +73,10 @@ fi
 
 # --- Step 1: Download voice models ---
 
-for model in "${!MODELS[@]}"; do
-    subpath="${MODELS[$model]}"
-    onnx="${MODEL_DIR}/${model}.onnx"
-    json="${MODEL_DIR}/${model}.onnx.json"
-
-    if [ -f "$onnx" ] && [ -f "$json" ]; then
-        echo "Model already exists: $model"
-        continue
-    fi
-
-    echo "Model license notice: ${model}"
-    echo "  ${MODEL_LICENSE_NOTES[$model]}"
-    echo "  Model card: ${HF_BASE}/${subpath}/MODEL_CARD"
-    if ! confirm_default_yes "Download ${model}?"; then
-        echo "Skipping model download: ${model}"
-        continue
-    fi
-
-    echo "Downloading model: $model ..."
-    curl -fsSL -o "$onnx" "${HF_BASE}/${subpath}/${model}.onnx"
-    curl -fsSL -o "$json" "${HF_BASE}/${subpath}/${model}.onnx.json"
-    echo "  $(du -h "$onnx" | cut -f1) $onnx"
-done
+download_model "en_GB-alan-medium" "en/en_GB/alan/medium" \
+    "Model card indicates MIT-compatible terms."
+download_model "de_DE-karlsson-low" "de/de_DE/karlsson/low" \
+    "Per-model terms must be checked in model card."
 
 # --- Step 2: Python venv + dependencies ---
 
@@ -111,9 +106,17 @@ echo "  Server:      $SERVER_SCRIPT"
 echo ""
 echo "Next steps:"
 echo "  1. Run: scripts/install-tabura-user-units.sh"
-echo "  2. systemctl --user start tabura-piper-tts.service"
+if [ "$(uname -s)" = "Darwin" ]; then
+    echo "  2. launchctl load ~/Library/LaunchAgents/io.tabura.piper-tts.plist"
+else
+    echo "  2. systemctl --user start tabura-piper-tts.service"
+fi
 echo "  3. Test:"
 echo "     curl -X POST http://127.0.0.1:8424/v1/audio/speech \\"
 echo "       -H 'Content-Type: application/json' \\"
 echo "       -d '{\"input\":\"Hello world\",\"voice\":\"en\"}' > /tmp/test.wav"
-echo "     aplay /tmp/test.wav"
+if [ "$(uname -s)" = "Darwin" ]; then
+    echo "     afplay /tmp/test.wav"
+else
+    echo "     aplay /tmp/test.wav"
+fi

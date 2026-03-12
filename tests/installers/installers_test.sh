@@ -37,6 +37,14 @@ run_install_sh_dry_run() {
     make_fake_cmd "$fakebin" systemctl
     make_fake_cmd "$fakebin" launchctl
 
+    # Stub curl that always fails so detect_llama_server cannot find
+    # services running on the host and the test stays deterministic.
+    cat >"${fakebin}/curl" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+    chmod +x "${fakebin}/curl"
+
     # Need a real python3 >= 3.10 for the version check.
     # Prefer the system-wide python3 if adequate, otherwise try common paths.
     local real_python3=""
