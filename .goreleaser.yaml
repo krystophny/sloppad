@@ -33,6 +33,7 @@ archives:
       - README.md
       - scripts/piper_tts_server.py
       - scripts/setup-local-llm.sh
+      - deploy/launchd/*.plist
 
 checksum:
   name_template: checksums.txt
