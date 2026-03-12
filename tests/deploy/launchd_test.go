@@ -174,6 +174,41 @@ func TestLaunchdTemplateTokenSubstitution(t *testing.T) {
 	}
 }
 
+func TestUserUnitsScriptCoversAllLaunchdTokens(t *testing.T) {
+	dir := filepath.Join(repoRoot, "deploy", "launchd")
+	script, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "install-tabura-user-units.sh"))
+	if err != nil {
+		t.Fatalf("read user-units script: %v", err)
+	}
+	scriptContent := string(script)
+
+	tokenPattern := regexp.MustCompile(`@@[A-Z_]+@@`)
+	seen := map[string]bool{}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read launchd dir: %v", err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".plist") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, tok := range tokenPattern.FindAllString(string(data), -1) {
+			seen[tok] = true
+		}
+	}
+
+	for tok := range seen {
+		if !strings.Contains(scriptContent, tok) {
+			t.Errorf("launchd token %s not handled in install-tabura-user-units.sh", tok)
+		}
+	}
+}
+
 func TestSystemdAndLaunchdServiceParity(t *testing.T) {
 	launchdDir := filepath.Join(repoRoot, "deploy", "launchd")
 	systemdDir := filepath.Join(repoRoot, "deploy", "systemd", "user")
