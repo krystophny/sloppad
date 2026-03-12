@@ -4,22 +4,9 @@ set -euo pipefail
 VOXTYPE_REPO="${VOXTYPE_REPO:-https://github.com/peteonrails/voxtype.git}"
 VOXTYPE_BRANCH="${VOXTYPE_BRANCH:-feature/single-daemon-openai-stt-api}"
 INSTALL_DIR="${VOXTYPE_INSTALL_DIR:-${HOME}/.local/bin}"
-ASSUME_YES="${TABURA_ASSUME_YES:-0}"
 
 log()  { printf '[build-voxtype] %s\n' "$*"; }
 fail() { printf '[build-voxtype] ERROR: %s\n' "$*" >&2; exit 1; }
-
-confirm_default_yes() {
-    local prompt="$1"
-    if [ "$ASSUME_YES" = "1" ]; then return 0; fi
-    if [ ! -t 0 ]; then return 0; fi
-    local response
-    read -r -p "$prompt [Y/n] " response
-    case "$response" in
-        "" | [Yy] | [Yy][Ee][Ss]) return 0 ;;
-        *) return 1 ;;
-    esac
-}
 
 print_help() {
     cat <<USAGE
@@ -30,20 +17,17 @@ Voxtype provides local OpenAI-compatible speech-to-text.
 The pinned branch includes macOS support with Metal GPU acceleration.
 
 Options:
-  --yes       Non-interactive mode
   -h, --help  Show this help
 
 Environment:
   VOXTYPE_REPO         Git clone URL (default: peteonrails/voxtype)
   VOXTYPE_BRANCH       Branch to build (default: feature/single-daemon-openai-stt-api)
   VOXTYPE_INSTALL_DIR  Binary install directory (default: ~/.local/bin)
-  TABURA_ASSUME_YES=1  Same as --yes
 USAGE
 }
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --yes) ASSUME_YES=1; shift ;;
         -h|--help) print_help; exit 0 ;;
         *) fail "unknown argument: $1" ;;
     esac
@@ -112,11 +96,7 @@ fi
 
 # --- Download model ---
 
-if confirm_default_yes "Download voxtype model large-v3-turbo (~1.5 GB)?"; then
-    "$INSTALL_DIR/voxtype" setup --download --model large-v3-turbo --no-post-install || {
-        log "WARNING: model download failed; you can retry later with:"
-        log "  voxtype setup --download --model large-v3-turbo --no-post-install"
-    }
-fi
+log "Downloading voxtype model large-v3-turbo (~1.5 GB)"
+"$INSTALL_DIR/voxtype" setup --download --model large-v3-turbo --no-post-install
 
 log "Build complete. Verify with: voxtype --version"

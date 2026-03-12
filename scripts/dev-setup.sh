@@ -110,22 +110,13 @@ fi
 
 if ! command -v voxtype >/dev/null 2>&1; then
     if [ "$PLATFORM" = "Darwin" ]; then
-        log "voxtype not found; attempting build from source for macOS"
-        if command -v cargo >/dev/null 2>&1 && command -v cmake >/dev/null 2>&1; then
-            if "$REPO_ROOT/scripts/build-voxtype-macos.sh" --yes; then
-                log "voxtype built and installed successfully"
-            else
-                warn "voxtype build failed; STT will be unavailable"
-                warn "  Retry: scripts/build-voxtype-macos.sh"
-            fi
-        else
-            warn "voxtype not found; STT will be unavailable"
-            warn "  To build from source: brew install cmake && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-            warn "  Then run: scripts/build-voxtype-macos.sh"
-        fi
+        command -v cargo >/dev/null 2>&1 || fail "cargo not found; install Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        command -v cmake >/dev/null 2>&1 || fail "cmake not found; install: brew install cmake"
+        log "Building voxtype from source for macOS"
+        "$REPO_ROOT/scripts/build-voxtype-macos.sh" --yes
+        log "voxtype built and installed successfully"
     else
-        warn "voxtype not found; STT will be unavailable"
-        warn "  Install: paru -S voxtype-bin"
+        command -v voxtype >/dev/null 2>&1 || fail "voxtype not found; install: paru -S voxtype-bin"
     fi
 fi
 
