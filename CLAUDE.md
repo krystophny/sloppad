@@ -274,6 +274,22 @@ internal/
     static/              Embedded frontend assets
 ```
 
+## Frontend
+
+Source is TypeScript (`.ts`) in `internal/web/static/`. JavaScript (`.js`) and source maps (`.js.map`) are build output — never edit them directly.
+
+Build:
+
+```bash
+npm run build:frontend
+```
+
+Typecheck:
+
+```bash
+npm run typecheck:frontend
+```
+
 ## Naming and Placement
 
 - Package names: lowercase, single-word, domain-specific nouns.

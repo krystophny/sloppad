@@ -137,6 +137,8 @@ async function authGate() {
 
   if (!data.has_password) {
     loginPassword.style.display = 'none';
+    if (loginBtn) loginBtn.style.display = 'none';
+    loginError.textContent = 'No admin password configured. Contact your administrator.';
     loginView.style.display = '';
     mainView.style.display = 'none';
     return new Promise(() => {});

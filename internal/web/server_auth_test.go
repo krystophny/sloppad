@@ -103,6 +103,37 @@ func TestHandleLoginFormRedirectsAndSetsCookie(t *testing.T) {
 	}
 }
 
+func TestNoPasswordBlocksAccess(t *testing.T) {
+	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("new app: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Shutdown(context.Background()) })
+
+	req := httptest.NewRequest(http.MethodGet, "/api/setup", nil)
+	rr := httptest.NewRecorder()
+	app.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/setup status = %d, want 200", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `"has_password":false`) {
+		t.Fatalf("no-password app should report has_password=false, got: %s", body)
+	}
+	if !strings.Contains(body, `"authenticated":false`) {
+		t.Fatalf("no-password app must not auto-authenticate, got: %s", body)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	rr2 := httptest.NewRecorder()
+	app.Router().ServeHTTP(rr2, req2)
+
+	if rr2.Code != http.StatusUnauthorized {
+		t.Fatalf("no-password app should return 401, got %d", rr2.Code)
+	}
+}
+
 func TestServeIndexLoginFormIncludesPasswordFieldName(t *testing.T) {
 	app := newPasswordTestApp(t)
 
