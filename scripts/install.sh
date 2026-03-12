@@ -341,6 +341,12 @@ BIN
             echo "#!/usr/bin/env bash" >"${tmpdir}/setup-local-llm.sh"
         fi
         chmod +x "${tmpdir}/setup-local-llm.sh"
+        if [ -f "scripts/setup-voxtype-stt.sh" ]; then
+            cp "scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
+        else
+            echo "#!/usr/bin/env bash" >"${tmpdir}/setup-voxtype-stt.sh"
+        fi
+        chmod +x "${tmpdir}/setup-voxtype-stt.sh"
         if [ -d "deploy/launchd" ]; then
             mkdir -p "${tmpdir}/deploy/launchd"
             cp deploy/launchd/*.plist "${tmpdir}/deploy/launchd/"
@@ -367,6 +373,9 @@ BIN
     cp "${tmpdir}/scripts/piper_tts_server.py" "${tmpdir}/piper_tts_server.py"
     if [ -f "${tmpdir}/scripts/setup-local-llm.sh" ]; then
         cp "${tmpdir}/scripts/setup-local-llm.sh" "${tmpdir}/setup-local-llm.sh"
+    fi
+    if [ -f "${tmpdir}/scripts/setup-voxtype-stt.sh" ]; then
+        cp "${tmpdir}/scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
     fi
     printf '%s\n' "$tag"
 }
@@ -548,9 +557,16 @@ NOTICE
         if confirm_default_yes "Download voxtype model large-v3-turbo (~1.5 GB)?"; then
             run_cmd voxtype setup --download --model large-v3-turbo --no-post-install
         fi
-        return
+    else
+        log "voxtype was not installed; speech-to-text remains unavailable"
     fi
-    log "voxtype was not installed; speech-to-text remains unavailable"
+
+    local staging_stt="${1:-}"
+    if [ -n "$staging_stt" ] && [ -f "${staging_stt}/setup-voxtype-stt.sh" ]; then
+        run_cmd mkdir -p "$SCRIPT_DIR"
+        run_cmd cp "${staging_stt}/setup-voxtype-stt.sh" "$STT_SETUP_SCRIPT"
+        run_cmd chmod +x "$STT_SETUP_SCRIPT"
+    fi
 }
 
 write_systemd_units() {
@@ -687,6 +703,10 @@ write_launchd_plists() {
         substitute_launchd_template "${template_dir}/io.tabura.llm.plist" "${agent_dir}/io.tabura.llm.plist"
     fi
 
+    if [ -x "$STT_SETUP_SCRIPT" ]; then
+        substitute_launchd_template "${template_dir}/io.tabura.stt.plist" "${agent_dir}/io.tabura.stt.plist"
+    fi
+
     substitute_launchd_template "${template_dir}/io.tabura.web.plist" "${agent_dir}/io.tabura.web.plist"
 }
 
@@ -708,6 +728,9 @@ install_services_macos() {
     fi
     if [ -f "${agent_dir}/io.tabura.llm.plist" ]; then
         load_launchd_service "${agent_dir}/io.tabura.llm.plist"
+    fi
+    if [ -f "${agent_dir}/io.tabura.stt.plist" ]; then
+        load_launchd_service "${agent_dir}/io.tabura.stt.plist"
     fi
     load_launchd_service "${agent_dir}/io.tabura.web.plist"
 }
@@ -769,11 +792,12 @@ remove_linux_services() {
 remove_macos_services() {
     local agent_dir plist
     agent_dir="${HOME}/Library/LaunchAgents"
-    for plist in io.tabura.web io.tabura.llm io.tabura.piper-tts io.tabura.codex-app-server; do
+    for plist in io.tabura.web io.tabura.stt io.tabura.llm io.tabura.piper-tts io.tabura.codex-app-server; do
         run_cmd launchctl unload "${agent_dir}/${plist}.plist" >/dev/null 2>&1 || true
     done
     run_cmd rm -f \
         "${agent_dir}/io.tabura.web.plist" \
+        "${agent_dir}/io.tabura.stt.plist" \
         "${agent_dir}/io.tabura.piper-tts.plist" \
         "${agent_dir}/io.tabura.codex-app-server.plist" \
         "${agent_dir}/io.tabura.llm.plist"
@@ -813,7 +837,7 @@ install_flow() {
     bootstrap_project
     setup_piper_tts
     setup_local_llm "$tmpdir"
-    install_voxtype_stt
+    install_voxtype_stt "$tmpdir"
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos "$tmpdir"
     else
