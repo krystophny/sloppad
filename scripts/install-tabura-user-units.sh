@@ -76,12 +76,12 @@ fi
 
 if [ -n "$REUSE_LLM_URL" ]; then
   HAVE_LLAMA=0
-elif ! command -v llama-server >/dev/null 2>&1; then
+elif ! command -v llama-server >/dev/null 2>&1 && [ ! -x "${HOME}/.local/llama.cpp/llama-server" ]; then
   HAVE_LLAMA=0
   if [ "$PLATFORM" = "Darwin" ]; then
-    log "WARNING: llama-server not in PATH. Install: brew install llama.cpp"
+    log "WARNING: llama-server not found. Install: brew install llama.cpp"
   else
-    fail "llama-server not in PATH. Build llama.cpp and install to ~/.local/bin"
+    fail "llama-server not found. Build llama.cpp and install to ~/.local/bin"
   fi
 fi
 
@@ -96,19 +96,6 @@ fi
 
 if [ "$PLATFORM" = "Darwin" ]; then
   command -v go >/dev/null 2>&1 || fail "go not in PATH. Install: brew install go"
-fi
-
-# --- Bootstrap service dependencies ---
-
-if [ "$HAVE_LLAMA" = "1" ] && [ -z "$REUSE_LLM_URL" ]; then
-  log "Ensuring LLM model is downloaded"
-  MODEL_FILE="Qwen3.5-9B-Q4_K_M.gguf"
-  MODEL_URL="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
-  mkdir -p "$LLM_MODEL_DIR"
-  if [ ! -s "${LLM_MODEL_DIR}/${MODEL_FILE}" ]; then
-    curl -fL --retry 3 --retry-delay 2 -o "${LLM_MODEL_DIR}/${MODEL_FILE}.tmp" "$MODEL_URL"
-    mv "${LLM_MODEL_DIR}/${MODEL_FILE}.tmp" "${LLM_MODEL_DIR}/${MODEL_FILE}"
-  fi
 fi
 
 # --- Linux: systemd install ---

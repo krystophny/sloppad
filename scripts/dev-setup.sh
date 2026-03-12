@@ -96,14 +96,16 @@ if [ -z "${TABURA_INTENT_LLM_URL:-}" ]; then
     done
 fi
 
-if [ -z "${TABURA_INTENT_LLM_URL:-}" ] && ! command -v llama-server >/dev/null 2>&1; then
-    warn "llama-server not found; intent LLM will be disabled"
-    if [ "$PLATFORM" = "Darwin" ]; then
-        warn "  Install: brew install llama.cpp"
-    else
-        warn "  Build llama.cpp and place llama-server in ~/.local/bin"
+if [ -z "${TABURA_INTENT_LLM_URL:-}" ]; then
+    if ! command -v llama-server >/dev/null 2>&1 && [ ! -x "${HOME}/.local/llama.cpp/llama-server" ]; then
+        warn "llama-server not found; intent LLM will be disabled"
+        if [ "$PLATFORM" = "Darwin" ]; then
+            warn "  Install: brew install llama.cpp"
+        else
+            warn "  Build llama.cpp and place llama-server in ~/.local/bin"
+        fi
+        export TABURA_INTENT_LLM_URL="off"
     fi
-    export TABURA_INTENT_LLM_URL="off"
 fi
 
 # --- Step 6: STT (voxtype) check ---
