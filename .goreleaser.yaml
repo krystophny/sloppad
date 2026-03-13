@@ -32,7 +32,8 @@ archives:
       - LICENSE
       - README.md
       - scripts/piper_tts_server.py
-      - scripts/setup-local-vllm.sh
+      - scripts/lib/llama.sh
+      - scripts/setup-local-llm.sh
       - deploy/launchd/*.plist
 
 checksum:

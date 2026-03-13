@@ -24,7 +24,7 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// LLM — vLLM (port 8426)
+// LLM — llama.cpp (port 8426)
 // ---------------------------------------------------------------------------
 
 func TestLLMHealth(t *testing.T) {
@@ -64,8 +64,8 @@ Return {"action":"<action>"}.`
 	}
 	content := extractLLMContent(t, resp)
 	content = stripCodeFence(content)
-	// Small local models may still return loose JSON here; verify that the
-	// response contains an allowed action keyword even if formatting drifts.
+	// The 0.6B model may produce slightly malformed JSON. Verify it at least
+	// contains an action keyword from the allowed list.
 	if !strings.Contains(content, "action") {
 		t.Fatalf("LLM response does not contain 'action': %q", content)
 	}
@@ -327,7 +327,7 @@ func postJSON(url string, body interface{}, timeout time.Duration) (map[string]i
 
 func postLLMCompletion(messages []map[string]string, maxTokens int) (map[string]interface{}, error) {
 	body := map[string]interface{}{
-		"model":       "tabura-qwen-9b",
+		"model":       "qwen3-0.6b-q4_k_m",
 		"temperature": 0,
 		"max_tokens":  maxTokens,
 		"chat_template_kwargs": map[string]interface{}{

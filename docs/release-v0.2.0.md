@@ -17,7 +17,7 @@
 ### Runtime and Provider Routing
 
 - The public runtime remains a single `tabura server` process with loopback-only MCP served alongside the web UI.
-- Local intent routing remains available through the optional local LLM sidecar, while Spark stays the default app-server model and optional Cerebras and Gemini providers extend execution for broader tasks.
+- Local intent routing remains available through `tabura-llm.service`, while Spark stays the default app-server model and optional Cerebras and Gemini providers extend execution for broader tasks.
 - Runtime-facing version surfaces are aligned across the CLI binary, web runtime, MCP server, and app-server client/session handshakes.
 
 ### Documentation and Release Surfaces

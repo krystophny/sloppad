@@ -84,8 +84,11 @@ func TestGoReleaserArchiveOmitsRemovedIntentClassifierFiles(t *testing.T) {
 			t.Fatalf("goreleaser still packages removed classifier artifact %q", forbidden)
 		}
 	}
-	if !strings.Contains(content, "scripts/setup-local-vllm.sh") {
-		t.Fatalf("goreleaser no longer packages the local vLLM runtime setup script:\n%s", content)
+	if !strings.Contains(content, "scripts/setup-local-llm.sh") {
+		t.Fatalf("goreleaser no longer packages the local runtime setup script:\n%s", content)
+	}
+	if !strings.Contains(content, "scripts/lib/llama.sh") {
+		t.Fatalf("goreleaser no longer packages the llama runtime helper:\n%s", content)
 	}
 }
 

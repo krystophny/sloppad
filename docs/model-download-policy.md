@@ -17,7 +17,7 @@ Examples:
 - ONNX Runtime Web (MIT)
 - openWakeWord models (Apache-2.0)
 - DistilBERT model artifacts (Apache-2.0)
-- Browser-side UI assets (per-package permissive terms)
+- llama.cpp binaries (MIT)
 
 ### Tier 2: Notice + Opt-Out
 
@@ -30,7 +30,7 @@ Examples:
 - Piper voice models (per-model terms documented in model cards)
 - ffmpeg (GPL/LGPL, package dependent)
 - voxtype (MIT external STT sidecar)
-- Qwen3.5 9B AWQ model weights (Apache-2.0 model download)
+- Qwen3 0.6B GGUF (Apache-2.0 model download)
 
 ## Current Downloaded Components
 
@@ -40,7 +40,6 @@ Examples:
 | Piper voice models | Hugging Face (`rhasspy/piper-voices`) | Per-model | Tier 2 |
 | ffmpeg | System package manager | GPL/LGPL | Tier 2 |
 | voxtype | AUR/Homebrew/source build (`peteonrails/voxtype` branch `feature/single-daemon-openai-stt-api` for source installs) | MIT | Tier 2 |
-| Qwen3.5 9B AWQ weights | Hugging Face (`QuantTrio/Qwen3.5-9B-AWQ`) | Apache-2.0 | Tier 2 |
 
 ## Planned Model Downloads
 
@@ -49,7 +48,7 @@ Examples:
 | ONNX Runtime Web | npm/web artifact source | MIT | Tier 1 |
 | openWakeWord models | project/model registry | Apache-2.0 | Tier 1 |
 | DistilBERT intent model | model registry | Apache-2.0 | Tier 1 |
-| Qwen3.5 9B AWQ weights | Hugging Face | Apache-2.0 | Tier 2 |
+| Qwen3 0.6B GGUF | Hugging Face | Apache-2.0 | Tier 2 |
 
 ## Operator Rules
 

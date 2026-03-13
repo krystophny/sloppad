@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.tabura.llm</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@LLM_SETUP_SCRIPT@@</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TABURA_LLM_MODEL_DIR</key>
+    <string>@@LLM_MODEL_DIR@@</string>
+    <key>LLAMA_SERVER_BIN</key>
+    <string>@@LLAMA_SERVER_BIN@@</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/tabura-llm.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/tabura-llm.log</string>
+</dict>
+</plist>

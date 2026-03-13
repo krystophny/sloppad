@@ -9,7 +9,7 @@ Current runtime baseline:
 - `tabura-codex-app-server.service`
 - `tabura-piper-tts.service`
 - `tabura-stt.service`
-- `tabura-vllm.service`
+- `tabura-llm.service`
 
 ## Product and Behavior Specs
 

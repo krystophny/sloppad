@@ -12,15 +12,6 @@ assert_contains() {
     fi
 }
 
-assert_not_contains() {
-    local file="$1"
-    local pattern="$2"
-    if grep -Fq "$pattern" "$file"; then
-        echo "assertion failed: did not expect '$pattern' in $file" >&2
-        exit 1
-    fi
-}
-
 make_fake_cmd() {
     local dir="$1"
     local name="$2"
@@ -29,6 +20,48 @@ make_fake_cmd() {
 echo "fake-${name} \$*" >&2
 SH
     chmod +x "${dir}/${name}"
+}
+
+run_llama_helper_checks() {
+    local tmpdir fakebin explicit_bin
+    tmpdir="$(mktemp -d -t tabura-llama-helper-test-XXXXXX)"
+    trap "rm -rf '$tmpdir'" RETURN
+
+    fakebin="${tmpdir}/fakebin"
+    explicit_bin="${tmpdir}/explicit-llama-server"
+    mkdir -p "$fakebin"
+
+    cat >"${fakebin}/llama-server" <<'SH'
+#!/usr/bin/env bash
+echo "error while loading shared libraries: libmtmd.so.0: cannot open shared object file" >&2
+exit 127
+SH
+    chmod +x "${fakebin}/llama-server"
+
+    cat >"${explicit_bin}" <<'SH'
+#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+  echo "llama-server test version"
+  exit 0
+fi
+exit 0
+SH
+    chmod +x "${explicit_bin}"
+
+    local resolved
+    resolved="$(
+        PATH="${fakebin}:/usr/bin:/bin" \
+        HOME="${tmpdir}/home" \
+        LLAMA_SERVER_BIN="${explicit_bin}" \
+        bash -c '
+            source "'"${ROOT_DIR}"'/scripts/lib/llama.sh"
+            tabura_find_llama_server
+        '
+    )"
+    if [ "${resolved}" != "${explicit_bin}" ]; then
+        echo "assertion failed: expected explicit LLAMA_SERVER_BIN to win, got ${resolved}" >&2
+        exit 1
+    fi
 }
 
 run_install_sh_dry_run() {
@@ -45,14 +78,17 @@ run_install_sh_dry_run() {
     make_fake_cmd "$fakebin" ffmpeg
     make_fake_cmd "$fakebin" systemctl
     make_fake_cmd "$fakebin" launchctl
-    make_fake_cmd "$fakebin" uv
 
+    # Stub curl that always fails so detect_llama_server cannot find
+    # services running on the host and the test stays deterministic.
     cat >"${fakebin}/curl" <<'SH'
 #!/usr/bin/env bash
 exit 1
 SH
     chmod +x "${fakebin}/curl"
 
+    # Need a real python3 >= 3.10 for the version check.
+    # Prefer the system-wide python3 if adequate, otherwise try common paths.
     local real_python3=""
     for candidate in /usr/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3; do
         if [ -x "$candidate" ] && "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
@@ -79,7 +115,7 @@ SH
     esac
     assert_contains "$out_file" "Service mode:  ${expected_os}"
     assert_contains "$out_file" "Piper TTS"
-    assert_contains "$out_file" "Local vLLM"
+    assert_contains "$out_file" "Local LLM"
     assert_contains "$out_file" "skipping voxtype STT setup"
 
     PATH="${fakebin}:/usr/bin:/bin" \
@@ -98,11 +134,14 @@ run_install_ps1_static_checks() {
     assert_contains "$ps1" "Speech-to-text requires voxtype (Linux/macOS only)"
     assert_contains "$ps1" "schtasks /Create"
     assert_contains "$ps1" "piper-tts"
+    assert_contains "$ps1" "tabura-llm"
+    assert_contains "$ps1" "Setup-LocalLlm"
     assert_contains "$ps1" "Print-WindowsSTTNotice"
 }
 
 main() {
     run_install_sh_dry_run
+    run_llama_helper_checks
     run_install_ps1_static_checks
     "${ROOT_DIR}/tests/installers/distribution_artifacts_test.sh"
     echo "installer tests passed"
