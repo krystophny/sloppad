@@ -3,6 +3,11 @@ import * as context from './app-context.js';
 import {
   clearDialogueDiagnostics,
   pushDialogueDiagnosticEvent,
+  recordDialogueSTTEmpty,
+  recordDialogueSTTResult,
+  recordDialogueSTTStart,
+  recordDialogueTranscriptSegment,
+  recordDialogueVoiceError,
 } from './app-dialogue-diagnostics.js';
 import { DialogueTurnController } from './dialogue-turn-policy.js';
 import {
@@ -219,7 +224,7 @@ export function isLikelyIOS() {
     || (ua.includes('macintosh') && navigator.maxTouchPoints > 1);
 }
 
-export function firstNonEmptyChunkMimeType(chunks) {
+function firstNonEmptyChunkMimeType(chunks) {
   if (!Array.isArray(chunks)) return '';
   for (const chunk of chunks) {
     const mt = String(chunk?.type || '').trim();
@@ -229,7 +234,7 @@ export function firstNonEmptyChunkMimeType(chunks) {
 }
 
 
-export function canUseMicrophoneCapture() {
+function canUseMicrophoneCapture() {
   return Boolean(window.MediaRecorder)
     && Boolean(navigator.mediaDevices)
     && typeof navigator.mediaDevices.getUserMedia === 'function';
@@ -246,7 +251,7 @@ let _micStreamPromise = null;
 let _cachedMicStreamCleanup = null;
 let _micRefreshRequested = false;
 
-export function detachCachedMicStreamObservers() {
+function detachCachedMicStreamObservers() {
   if (typeof _cachedMicStreamCleanup === 'function') {
     try {
       _cachedMicStreamCleanup();
@@ -259,7 +264,7 @@ export function requestMicRefresh() {
   _micRefreshRequested = true;
 }
 
-export function streamHasLiveAudioTrack(stream) {
+function streamHasLiveAudioTrack(stream) {
   if (!stream || typeof stream.getAudioTracks !== 'function') return false;
   if (typeof stream.active === 'boolean' && !stream.active) return false;
   const tracks = stream.getAudioTracks();
@@ -273,7 +278,7 @@ export function streamHasLiveAudioTrack(stream) {
   });
 }
 
-export function invalidateCachedMicStream({ stopTracks = false } = {}) {
+function invalidateCachedMicStream({ stopTracks = false } = {}) {
   const stream = _cachedMicStream;
   detachCachedMicStreamObservers();
   _cachedMicStream = null;
@@ -287,7 +292,7 @@ export function invalidateCachedMicStream({ stopTracks = false } = {}) {
   } catch (_) {}
 }
 
-export function observeCachedMicStream(stream) {
+function observeCachedMicStream(stream) {
   if (!stream || typeof stream.getAudioTracks !== 'function') return;
   const tracks = stream.getAudioTracks();
   const disposers = [];
@@ -393,12 +398,12 @@ let _sttParts = [];
 let _sttActive = false;
 let _sttAbortController = null;
 
-export function recordHarnessSTTAction(action, payload = {}) {
+function recordHarnessSTTAction(action, payload = {}) {
   if (!Array.isArray(window.__harnessLog)) return;
   window.__harnessLog.push({ type: 'stt', action, ...payload });
 }
 
-export function recordHarnessPrintAction(action, payload = {}) {
+function recordHarnessPrintAction(action, payload = {}) {
   if (!Array.isArray(window.__harnessLog)) return;
   window.__harnessLog.push({ type: 'print', action, ...payload });
 }
@@ -551,7 +556,7 @@ export function stopChatVoiceMedia(capture) {
   }
 }
 
-export function handleVADNoSpeechTimeout(capture) {
+function handleVADNoSpeechTimeout(capture) {
   stopVADMonitor(capture);
   state.indicatorSuppressedByCanvasUpdate = false;
   showStatus('no speech detected');
@@ -658,7 +663,7 @@ export async function startSileroVADMonitor(capture) {
   }
 }
 
-export function stopVADMonitor(capture) {
+function stopVADMonitor(capture) {
   if (!capture || !capture.vadState) return;
   const vs = capture.vadState;
   capture.vadState = null;
@@ -815,7 +820,7 @@ export async function beginVoiceCapture(x, y, anchor, options: Record<string, an
   }
 }
 
-export function voiceCaptureEmptyReasonMessage(reason) {
+function voiceCaptureEmptyReasonMessage(reason) {
   const normalized = String(reason || '').trim().toLowerCase();
   if (normalized === 'recording_too_short') {
     return 'recording too short; hold to talk for a bit longer';
@@ -878,6 +883,7 @@ export async function stopVoiceCaptureAndSend() {
         mimeType = isLikelyIOS() ? 'audio/mp4' : 'audio/webm';
       }
     }
+    recordDialogueSTTStart(triggerSource, mimeType, Boolean(sttBlob && capture._vadAudioDurationMs));
     sttStart(mimeType);
     if (sttBlob) {
       await sttSendBlob(sttBlob);
@@ -886,6 +892,7 @@ export async function stopVoiceCaptureAndSend() {
     remoteStopped = true;
     const transcript = String(result?.text || '').trim();
     if (!transcript) {
+      recordDialogueSTTEmpty(triggerSource, result?.reason);
       if (isDialogueLiveSession() && triggerSource !== VOICE_TRIGGER_SOURCE_MANUAL) {
         state.voiceAwaitingTurn = false;
         reopenDialogueListen = true;
@@ -897,15 +904,18 @@ export async function stopVoiceCaptureAndSend() {
       0,
       Number(capture._vadAudioDurationMs || 0) || (Date.now() - Number(capture.startedAtMs || Date.now())),
     );
+    recordDialogueSTTResult(triggerSource, transcript.length, segmentDurationMs, Boolean(capture.interruptedAssistant));
     if (isDialogueAutoCapture) {
       state.voiceAwaitingTurn = false;
       setVoiceLifecycle(VOICE_LIFECYCLE.IDLE, 'dialogue-turn-segment');
       updateAssistantActivityIndicator();
       if (isTurnIntelligenceConnected()) {
         if (sendTurnTranscriptSegment(transcript, segmentDurationMs, Boolean(capture.interruptedAssistant))) {
+          recordDialogueTranscriptSegment(transcript.length, segmentDurationMs, Boolean(capture.interruptedAssistant), 'turn_intelligence');
           return;
         }
       }
+      recordDialogueTranscriptSegment(transcript.length, segmentDurationMs, Boolean(capture.interruptedAssistant), 'local_policy');
       dialogueTurnController.consume({
         text: transcript,
         durationMs: segmentDurationMs,
@@ -930,6 +940,7 @@ export async function stopVoiceCaptureAndSend() {
     setVoiceLifecycle(VOICE_LIFECYCLE.IDLE, 'voice-capture-stop-failed');
     updateAssistantActivityIndicator();
     const message = String(err?.message || err || 'voice capture failed');
+    recordDialogueVoiceError(triggerSource, message);
     const pos = getLastInputPosition();
     const x = Number.isFinite(pos?.x) ? Number(pos.x) : null;
     const y = Number.isFinite(pos?.y) ? Number(pos.y) : null;

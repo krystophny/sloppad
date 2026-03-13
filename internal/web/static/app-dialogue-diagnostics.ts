@@ -41,6 +41,53 @@ export function pushDialogueDiagnosticEvent(kind, payload: Record<string, any> =
   state.dialogueDiagnostics.recentEvents = events;
 }
 
+export function recordDialogueVoiceDiagnostic(kind, payload: Record<string, any> = {}) {
+  if (!state.liveSessionActive || String(state.liveSessionMode || '').trim().toLowerCase() !== 'dialogue') {
+    return;
+  }
+  pushDialogueDiagnosticEvent(kind, payload);
+}
+
+export function recordDialogueSTTStart(triggerSource, mimeType, usedVADBlob) {
+  recordDialogueVoiceDiagnostic('stt_start', {
+    trigger_source: String(triggerSource || '').trim(),
+    mime_type: String(mimeType || '').trim(),
+    used_vad_blob: Boolean(usedVADBlob),
+  });
+}
+
+export function recordDialogueSTTEmpty(triggerSource, reason) {
+  recordDialogueVoiceDiagnostic('stt_empty', {
+    trigger_source: String(triggerSource || '').trim(),
+    reason: String(reason || '').trim(),
+  });
+}
+
+export function recordDialogueSTTResult(triggerSource, chars, durationMs, interruptedAssistant) {
+  recordDialogueVoiceDiagnostic('stt_result', {
+    trigger_source: String(triggerSource || '').trim(),
+    chars: Math.max(0, Number(chars) || 0),
+    duration_ms: Math.max(0, Number(durationMs) || 0),
+    interrupted_assistant: Boolean(interruptedAssistant),
+  });
+}
+
+export function recordDialogueTranscriptSegment(chars, durationMs, interruptedAssistant, via) {
+  recordDialogueVoiceDiagnostic('turn_transcript_segment_sent', {
+    chars: Math.max(0, Number(chars) || 0),
+    duration_ms: Math.max(0, Number(durationMs) || 0),
+    interrupted_assistant: Boolean(interruptedAssistant),
+    via: String(via || '').trim(),
+  });
+}
+
+export function recordDialogueVoiceError(triggerSource, message) {
+  recordDialogueVoiceDiagnostic('voice_capture_error', {
+    trigger_source: String(triggerSource || '').trim(),
+    message: String(message || '').trim(),
+  });
+}
+
 export function getDialogueDiagnostics() {
   return cloneDialogueDiagnostics();
 }

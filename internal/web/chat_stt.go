@@ -18,7 +18,7 @@ type sttMessage struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-func handleSTTStart(conn *chatWSConn, mimeType string) {
+func handleSTTStart(conn *chatWSConn, sessionID string, mimeType string) {
 	conn.sttMu.Lock()
 	defer conn.sttMu.Unlock()
 
@@ -31,6 +31,7 @@ func handleSTTStart(conn *chatWSConn, mimeType string) {
 	conn.sttActive = true
 	conn.sttMimeType = mimeType
 	conn.sttBuf = make([]byte, 0, 4096)
+	log.Printf("stt session started: session=%s mime_type=%q", strings.TrimSpace(sessionID), mimeType)
 
 	_ = conn.writeJSON(sttMessage{Type: "stt_started"})
 }
@@ -53,7 +54,7 @@ func handleSTTBinaryChunk(conn *chatWSConn, data []byte) {
 }
 
 // Privacy: buffer is set to nil after transcription or on error. See docs/meeting-notes-privacy.md.
-func handleSTTStop(a *App, conn *chatWSConn) {
+func handleSTTStop(a *App, conn *chatWSConn, sessionID string) {
 	conn.sttMu.Lock()
 	if !conn.sttActive {
 		conn.sttMu.Unlock()
@@ -68,11 +69,13 @@ func handleSTTStop(a *App, conn *chatWSConn) {
 	conn.sttMu.Unlock()
 
 	if len(buf) < 1024 {
+		log.Printf("stt session empty: session=%s reason=recording_too_short bytes=%d", strings.TrimSpace(sessionID), len(buf))
 		_ = conn.writeJSON(sttMessage{Type: "stt_empty", Reason: "recording_too_short"})
 		return
 	}
 
 	if a.sttURL == "" {
+		log.Printf("stt session error: session=%s reason=sidecar_unconfigured", strings.TrimSpace(sessionID))
 		_ = conn.writeJSON(sttMessage{Type: "stt_error", Error: "STT sidecar is not configured"})
 		return
 	}
@@ -80,6 +83,7 @@ func handleSTTStop(a *App, conn *chatWSConn) {
 	replacements := a.loadSTTReplacements()
 	normalizedMimeType, normalizedData, normalizeErr := stt.NormalizeForWhisper(mimeType, buf)
 	if normalizeErr != nil {
+		log.Printf("stt session error: session=%s reason=normalize_failed err=%v", strings.TrimSpace(sessionID), normalizeErr)
 		_ = conn.writeJSON(sttMessage{Type: "stt_error", Error: fmt.Sprintf("audio normalization failed: %v", normalizeErr)})
 		return
 	}
@@ -87,32 +91,37 @@ func handleSTTStop(a *App, conn *chatWSConn) {
 	text, err := stt.TranscribeWithOptions(a.sttURL, normalizedMimeType, normalizedData, replacements, options)
 	if err != nil {
 		if errors.Is(err, stt.ErrLikelyNoise) {
+			log.Printf("stt session empty: session=%s reason=likely_noise bytes=%d", strings.TrimSpace(sessionID), len(normalizedData))
 			_ = conn.writeJSON(sttMessage{Type: "stt_empty", Reason: "likely_noise"})
 			return
 		}
 		if stt.IsRetryableNoSpeechError(err) {
+			log.Printf("stt session empty: session=%s reason=no_speech_detected bytes=%d", strings.TrimSpace(sessionID), len(normalizedData))
 			_ = conn.writeJSON(sttMessage{Type: "stt_empty", Reason: "no_speech_detected"})
 			return
 		}
-		log.Printf("stt transcribe error: %v", err)
+		log.Printf("stt transcribe error: session=%s err=%v", strings.TrimSpace(sessionID), err)
 		_ = conn.writeJSON(sttMessage{Type: "stt_error", Error: fmt.Sprintf("transcription failed: %v", err)})
 		return
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
+		log.Printf("stt session empty: session=%s reason=empty_transcript", strings.TrimSpace(sessionID))
 		_ = conn.writeJSON(sttMessage{Type: "stt_empty", Reason: "empty_transcript"})
 		return
 	}
+	log.Printf("stt session result: session=%s chars=%d mime_type=%q", strings.TrimSpace(sessionID), len([]rune(text)), normalizedMimeType)
 	_ = conn.writeJSON(sttMessage{Type: "stt_result", Text: text})
 }
 
 // Privacy: buffer is discarded immediately on cancel. See docs/meeting-notes-privacy.md.
-func handleSTTCancel(conn *chatWSConn) {
+func handleSTTCancel(conn *chatWSConn, sessionID string) {
 	conn.sttMu.Lock()
 	conn.sttActive = false
 	conn.sttBuf = nil
 	conn.sttMimeType = ""
 	conn.sttMu.Unlock()
+	log.Printf("stt session cancelled: session=%s", strings.TrimSpace(sessionID))
 
 	_ = conn.writeJSON(sttMessage{Type: "stt_cancelled"})
 }
@@ -142,11 +151,11 @@ func handleChatWSTextMessage(a *App, conn *chatWSConn, sessionID string, data []
 	}
 	switch msg.Type {
 	case "stt_start":
-		handleSTTStart(conn, msg.MimeType)
+		handleSTTStart(conn, sessionID, msg.MimeType)
 	case "stt_stop":
-		handleSTTStop(a, conn)
+		handleSTTStop(a, conn, sessionID)
 	case "stt_cancel":
-		handleSTTCancel(conn)
+		handleSTTCancel(conn, sessionID)
 	case "tts_speak":
 		trimmedText := strings.TrimSpace(msg.Text)
 		seq := conn.reserveTTSSeq()

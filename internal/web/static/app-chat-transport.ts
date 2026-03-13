@@ -790,10 +790,10 @@ export function handleChatEvent(payload) {
       }
     }
     state.canvasActionThisTurn = false;
-    // If live dialogue is active but no TTS was queued (e.g. TTS error,
-    // empty md, or all text already spoken during streaming), kick the listen
-    // cycle so the hands-free loop does not stall.
-    if (isDialogueLiveSession() && !hasTTSPlayer() && shouldSpeakTurn && canSpeakTTS()) {
+    // If live dialogue is active but no TTS was queued (for example silent
+    // mode, a TTS error, empty md, or all text already spoken during
+    // streaming), kick the listen cycle so the hands-free loop does not stall.
+    if (isDialogueLiveSession() && !hasTTSPlayer() && shouldSpeakTurn) {
       onLiveSessionTTSPlaybackComplete();
     }
     return;
@@ -899,7 +899,7 @@ export function handleChatEvent(payload) {
     void refreshAssistantActivity();
     updateOverlay(`**Error:** ${errText}`);
     window.setTimeout(() => hideOverlay(), 2000);
-    if (isDialogueLiveSession() && canSpeakTTS()) {
+    if (isDialogueLiveSession()) {
       onLiveSessionTTSPlaybackComplete();
     }
   }

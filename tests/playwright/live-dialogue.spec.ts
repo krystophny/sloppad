@@ -431,37 +431,26 @@ test('PTT during dialogue listen cancels listen and starts push-to-talk', async 
   }, { timeout: 3_000 }).toBe(true);
 });
 
-test('silent mode with dialogue enabled does not open follow-up listen', async ({ page }) => {
+test('silent mode keeps dialogue listening active without speaking', async ({ page }) => {
   await setDialogueListenWindowMs(page, 1_200);
+  await setSilentMode(page, true);
   await setDialogueMode(page, true);
-  await page.evaluate(() => {
-    const app = (window as any)._taburaApp;
-    const state = app?.getState?.();
-    if (!state) {
-      throw new Error('app state unavailable');
-    }
-    state.ttsSilent = true;
-    document.body.classList.add('silent-mode');
-  });
-  // The activation listen window may still be active; wait for it to
-  // time out (1200ms) before checking the follow-up behavior.
   await expect.poll(async () => page.evaluate(() => {
-    const indicator = document.getElementById('indicator');
-    return !indicator?.classList.contains('is-listening');
+    const app = (window as any)._taburaApp;
+    const s = app?.getState?.();
+    return Boolean(s?.liveSessionDialogueListenActive) && String(s?.voiceLifecycle || '') === 'listening';
   }), { timeout: 4_000 }).toBe(true);
   await clearLog(page);
 
   await triggerVoiceAssistantTTS(page, 'conv-silent-1');
-  await page.waitForTimeout(500);
+  await expect.poll(async () => page.evaluate(() => {
+    const app = (window as any)._taburaApp;
+    const s = app?.getState?.();
+    return Boolean(s?.liveSessionDialogueListenActive) && String(s?.voiceLifecycle || '') === 'listening';
+  }), { timeout: 4_000 }).toBe(true);
 
   const log = await getLog(page);
   expect(log.some((entry) => entry.type === 'tts')).toBe(false);
-
-  const isListening = await page.evaluate(() => {
-    const indicator = document.getElementById('indicator');
-    return Boolean(indicator?.classList.contains('is-listening'));
-  });
-  expect(isListening).toBe(false);
 });
 
 test('dialogue barge-in interrupts TTS and starts recording', async ({ page }) => {

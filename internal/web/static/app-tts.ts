@@ -420,7 +420,7 @@ export function canStartHotwordMonitor() {
   const mode = syncVoiceLifecycle('can-start-hotword');
   if (!state.hotwordEnabled) return false;
   if (!state.liveSessionActive) return false;
-  if (!canSpeakTTS()) return false;
+  if (!state.ttsEnabled) return false;
   if (mode === VOICE_LIFECYCLE.RECORDING || mode === VOICE_LIFECYCLE.STOPPING_RECORDING) return false;
   if (mode === VOICE_LIFECYCLE.TTS_PLAYING) return false;
   if (state.chatVoiceCapture) return false;

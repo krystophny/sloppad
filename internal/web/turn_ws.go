@@ -81,6 +81,18 @@ func newTurnWSConn(ws *websocket.Conn, sessionID string, profile string, evalLog
 	return conn
 }
 
+func shortTurnLogText(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	runes := []rune(trimmed)
+	if len(runes) <= 96 {
+		return trimmed
+	}
+	return string(runes[:96]) + "..."
+}
+
 func (c *turnWSConn) writeJSON(v any) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
@@ -166,8 +178,19 @@ func handleTurnWSTextMessage(conn *turnWSConn, data []byte) {
 	}
 	switch strings.TrimSpace(msg.Type) {
 	case "turn_reset":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled {
+			log.Printf("turn reset session=%s", conn.sessionID)
+		}
 		conn.controller.Reset()
 	case "turn_config":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled {
+			log.Printf(
+				"turn config session=%s profile=%q eval_logging_enabled=%t",
+				conn.sessionID,
+				strings.TrimSpace(msg.Profile),
+				msg.EvalLoggingEnabled == nil || *msg.EvalLoggingEnabled,
+			)
+		}
 		if strings.TrimSpace(msg.Profile) != "" {
 			conn.controller.SetProfile(turn.Profile(msg.Profile))
 		}
@@ -175,14 +198,34 @@ func handleTurnWSTextMessage(conn *turnWSConn, data []byte) {
 			conn.controller.SetEvalLogging(*msg.EvalLoggingEnabled)
 		}
 	case "turn_listen_state":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled && msg.Active != nil {
+			log.Printf("turn listen_state session=%s active=%t", conn.sessionID, *msg.Active)
+		}
 		if msg.Active != nil && !*msg.Active {
 			conn.controller.Reset()
 		}
 	case "turn_speech_start":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled {
+			log.Printf(
+				"turn speech_start session=%s interrupted_assistant=%t",
+				conn.sessionID,
+				msg.InterruptedAssistant,
+			)
+		}
 		conn.controller.HandleSpeechStart(msg.InterruptedAssistant)
 	case "turn_speech_prob":
 		conn.controller.HandleSpeechProbability(msg.SpeechProb, msg.InterruptedAssistant)
 	case "turn_transcript_segment":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled {
+			log.Printf(
+				"turn transcript_segment session=%s chars=%d duration_ms=%d interrupted_assistant=%t text=%q",
+				conn.sessionID,
+				len([]rune(strings.TrimSpace(msg.Text))),
+				msg.DurationMS,
+				msg.InterruptedAssistant,
+				shortTurnLogText(msg.Text),
+			)
+		}
 		conn.controller.ConsumeSegment(turn.Segment{
 			Text:                 msg.Text,
 			DurationMS:           msg.DurationMS,

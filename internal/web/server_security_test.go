@@ -220,13 +220,13 @@ func TestPrivacySTTBufferCleanupOnCancel(t *testing.T) {
 	conn, cleanup := newTestWSConn(t)
 	defer cleanup()
 
-	handleSTTStart(conn, "audio/webm")
+	handleSTTStart(conn, "test-session", "audio/webm")
 
 	// Simulate binary chunks
 	handleSTTBinaryChunk(conn, make([]byte, 512))
 
 	// Cancel to clean up buffer (stop requires a live sttURL sidecar)
-	handleSTTCancel(conn)
+	handleSTTCancel(conn, "test-session")
 
 	conn.sttMu.Lock()
 	defer conn.sttMu.Unlock()
@@ -246,7 +246,7 @@ func TestPrivacySTTBufferCleanupOnOverflow(t *testing.T) {
 	conn, cleanup := newTestWSConn(t)
 	defer cleanup()
 
-	handleSTTStart(conn, "audio/webm")
+	handleSTTStart(conn, "test-session", "audio/webm")
 
 	// Send a chunk that exceeds MaxAudioBytes
 	handleSTTBinaryChunk(conn, make([]byte, stt.MaxAudioBytes+1))
