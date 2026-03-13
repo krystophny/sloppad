@@ -33,12 +33,26 @@ const syncInkLayerSize = (...args) => refs.syncInkLayerSize(...args);
 let bootstrapStarted = false;
 let bootstrapErrorShown = false;
 
+function isUnauthorizedBootstrapError(message) {
+  const text = String(message || '').trim().toLowerCase();
+  return text.includes('http 401') || text.includes('unauthorized');
+}
+
 function showBootstrapError(message) {
   const text = String(message || 'Unknown error');
   if (bootstrapErrorShown) return;
   bootstrapErrorShown = true;
   const loginErr = document.getElementById('login-error');
   if (loginErr) loginErr.textContent = `Initialization failed: ${text}`;
+  const loginView = document.getElementById('view-login');
+  if (loginView) loginView.style.display = '';
+  const mainView = document.getElementById('view-main');
+  if (mainView) mainView.style.display = 'none';
+}
+
+function showReauthRequired(message = 'Session expired. Log in again.') {
+  const loginErr = document.getElementById('login-error');
+  if (loginErr) loginErr.textContent = String(message || 'Session expired. Log in again.');
   const loginView = document.getElementById('view-login');
   if (loginView) loginView.style.display = '';
   const mainView = document.getElementById('view-main');
@@ -100,7 +114,10 @@ async function init() {
     renderInkControls();
     state.ttsEnabled = Boolean(runtime?.tts_enabled);
     applyRuntimeReasoningEffortOptions(runtime?.available_reasoning_efforts);
-  } catch (_) {
+  } catch (err) {
+    if (isUnauthorizedBootstrapError(err?.message || err)) {
+      throw err;
+    }
     state.ttsEnabled = false;
     setYoloModeLocal(readYoloModePreference(), { persist: false, render: false });
   }
@@ -190,6 +207,10 @@ export function bootstrapApp() {
       return init();
     })
     .catch((err) => {
+      if (isUnauthorizedBootstrapError(err?.message || err)) {
+        showReauthRequired();
+        return;
+      }
       showBootstrapError(String(err?.message || err));
     });
 }
