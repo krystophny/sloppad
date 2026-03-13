@@ -61,7 +61,7 @@ func TestNoKnownGPLSidecarDependenciesAreLinkedIntoGoBinary(t *testing.T) {
 		t.Fatalf("go list deps failed: %v\n%s", err, string(out))
 	}
 
-	forbidden := []string{"piper", "ffmpeg", "whisper", "openwakeword", "llama.cpp"}
+	forbidden := []string{"piper", "ffmpeg", "whisper", "openwakeword"}
 	for _, line := range strings.Split(string(out), "\n") {
 		module := strings.TrimSpace(line)
 		if module == "" {

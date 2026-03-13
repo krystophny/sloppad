@@ -27,9 +27,9 @@ var expectedPlists = []struct {
 		tokens: []string{"@@VENV_DIR@@", "@@SCRIPT_DIR@@", "@@PIPER_MODEL_DIR@@"},
 	},
 	{
-		file:   "io.tabura.llm.plist",
-		label:  "io.tabura.llm",
-		tokens: []string{"@@LLM_SETUP_SCRIPT@@", "@@LLM_MODEL_DIR@@", "@@LLAMA_SERVER_BIN@@"},
+		file:   "io.tabura.vllm.plist",
+		label:  "io.tabura.vllm",
+		tokens: []string{"@@VLLM_SETUP_SCRIPT@@", "@@VLLM_ROOT@@"},
 	},
 	{
 		file:   "io.tabura.stt.plist",
@@ -146,12 +146,12 @@ func TestLaunchdTemplateTokenSubstitution(t *testing.T) {
 		"@@CODEX_PATH@@":       "/usr/local/bin/codex",
 		"@@PROJECT_DIR@@":      "/tmp/project",
 		"@@WEB_DATA_DIR@@":     "/tmp/web-data",
+		"@@TABURA_WEB_HOST@@":  "127.0.0.1",
 		"@@VENV_DIR@@":         "/tmp/venv",
 		"@@SCRIPT_DIR@@":       "/tmp/scripts",
 		"@@PIPER_MODEL_DIR@@":  "/tmp/models",
-		"@@LLM_SETUP_SCRIPT@@":      "/tmp/setup-llm.sh",
-		"@@LLM_MODEL_DIR@@":         "/tmp/llm-models",
-		"@@LLAMA_SERVER_BIN@@":      "/tmp/llama-server",
+		"@@VLLM_SETUP_SCRIPT@@":     "/tmp/setup-vllm.sh",
+		"@@VLLM_ROOT@@":             "/tmp/tabura-vllm",
 		"@@STT_SETUP_SCRIPT@@":      "/tmp/setup-stt.sh",
 		"@@TABURA_INTENT_LLM_URL@@": "http://127.0.0.1:8426",
 	}
@@ -218,7 +218,7 @@ func TestSystemdAndLaunchdServiceParity(t *testing.T) {
 	launchdServices := map[string]bool{
 		"codex-app-server": false,
 		"piper-tts":        false,
-		"llm":              false,
+		"vllm":             false,
 		"stt":              false,
 		"web":              false,
 	}

@@ -25,10 +25,6 @@ $PiperVenv = Join-Path $PiperRoot "venv"
 $ModelDir = Join-Path $PiperRoot "models"
 $ScriptDir = Join-Path $DataRoot "scripts"
 $PiperScriptPath = Join-Path $ScriptDir "piper_tts_server.py"
-$LlmDir = Join-Path $DataRoot "llm"
-$LlmModelDir = Join-Path $LlmDir "models"
-$LlmSetupScript = Join-Path $ScriptDir "setup-local-llm.sh"
-$SkipLlm = $env:TABURA_INSTALL_SKIP_LLM -eq "1"
 $WebHost = if ($env:TABURA_WEB_HOST) { $env:TABURA_WEB_HOST } else { "127.0.0.1" }
 
 function Write-Log {
@@ -147,7 +143,7 @@ function Get-Asset {
 
 function Ensure-InstallDirectories {
     Invoke-Step -Display "Create install directories" -Action {
-        New-Item -ItemType Directory -Force -Path $InstallRoot, $DataRoot, $ProjectDir, $WebDataDir, $PiperRoot, $ModelDir, $ScriptDir, $LlmDir, $LlmModelDir | Out-Null
+        New-Item -ItemType Directory -Force -Path $InstallRoot, $DataRoot, $ProjectDir, $WebDataDir, $PiperRoot, $ModelDir, $ScriptDir | Out-Null
     }
 }
 
@@ -257,64 +253,15 @@ function Setup-Piper {
     }
 }
 
-function Setup-LocalLlm {
-    if ($SkipLlm) {
-        Write-Log "skipping local LLM due to TABURA_INSTALL_SKIP_LLM=1"
-        return
-    }
-    Write-Host "=== Local LLM (Qwen3 0.6B via llama.cpp, optional) ==="
-    Write-Host "A local coordinator language model for Hub routing and replies."
-    Write-Host "Runs as a local HTTP service on port 8426."
-    Write-Host "Requires llama.cpp (llama-server binary)."
-
-    if (-not (Confirm-DefaultYes "Install local LLM service?")) {
-        Write-Log "skipping local LLM setup"
-        return
-    }
-
-    $llamaCmd = Get-Command llama-server -ErrorAction SilentlyContinue
-    if (-not $llamaCmd) {
-        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-        if ($wingetCmd -and (Confirm-DefaultYes "Install llama.cpp via winget?")) {
-            if ($DryRun.IsPresent) {
-                Invoke-Step -Display "winget install ggml-org.llama-cpp" -Action {}
-            } else {
-                winget install --id ggml-org.llama-cpp --accept-source-agreements --accept-package-agreements
-            }
-        } else {
-            Write-Log "llama-server not found; install llama.cpp and ensure llama-server is on PATH"
-        }
-    }
-
-    $modelFile = "Qwen3-0.6B-Q4_K_M.gguf"
-    $modelPath = Join-Path $LlmModelDir $modelFile
-    if (Test-Path $modelPath) {
-        Write-Log "LLM model already present: $modelFile"
-    } elseif (Confirm-DefaultYes "Download Qwen3 0.6B model (~462 MB)?") {
-        if ($DryRun.IsPresent) {
-            Invoke-Step -Display "Download $modelFile" -Action {}
-        } else {
-            $modelUrl = "https://huggingface.co/lmstudio-community/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf?download=true"
-            Invoke-WebRequest -Uri $modelUrl -OutFile $modelPath
-        }
-    }
-}
-
 function Write-TaskFiles {
     param([string]$CodexPath)
 
-    $webCmd = 'set "TABURA_INTENT_LLM_URL=http://127.0.0.1:8426" && set "TABURA_INTENT_LLM_MODEL=local" && set "TABURA_INTENT_LLM_PROFILE=qwen3.5-9b" && set "TABURA_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b" && "' + $BinaryPath + '" server --project-dir "' + $ProjectDir + '" --data-dir "' + $WebDataDir + '" --web-host ' + $WebHost + ' --web-port 8420 --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424'
+    $webCmd = 'set "TABURA_INTENT_LLM_URL=off" && "' + $BinaryPath + '" server --project-dir "' + $ProjectDir + '" --data-dir "' + $WebDataDir + '" --web-host ' + $WebHost + ' --web-port 8420 --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424'
     $piperCmd = 'set "PIPER_MODEL_DIR=' + $ModelDir + '" && "' + (Join-Path $PiperVenv 'Scripts\python.exe') + '" -m uvicorn piper_tts_server:app --app-dir "' + $ScriptDir + '" --host 127.0.0.1 --port 8424'
     $codexCmd = '"' + $CodexPath + '" app-server --listen ws://127.0.0.1:8787'
 
-    $llamaPath = (Get-Command llama-server -ErrorAction SilentlyContinue)
-    $llmCmd = ""
-    if ($llamaPath) {
-        $llmCmd = '"' + $llamaPath.Source + '" -m "' + (Join-Path $LlmModelDir "Qwen3-0.6B-Q4_K_M.gguf") + '" --host 127.0.0.1 --port 8426 -c 2048 --threads 4 -ngl 99'
-    }
-
     if ($DryRun.IsPresent) {
-        Write-Log "[dry-run] Register scheduled tasks tabura-web, tabura-piper-tts, tabura-codex-app-server, tabura-llm"
+        Write-Log "[dry-run] Register scheduled tasks tabura-web, tabura-piper-tts, tabura-codex-app-server"
         return
     }
 
@@ -322,11 +269,6 @@ function Write-TaskFiles {
     schtasks /Create /SC ONLOGON /TN "tabura-piper-tts" /TR ("cmd /c " + $piperCmd) /F | Out-Null
     schtasks /Run /TN "tabura-codex-app-server" | Out-Null
     schtasks /Run /TN "tabura-piper-tts" | Out-Null
-
-    if ($llmCmd) {
-        schtasks /Create /SC ONLOGON /TN "tabura-llm" /TR $llmCmd /F | Out-Null
-        schtasks /Run /TN "tabura-llm" | Out-Null
-    }
 
     schtasks /Create /SC ONLOGON /TN "tabura-web" /TR $webCmd /F | Out-Null
     schtasks /Run /TN "tabura-web" | Out-Null
@@ -371,7 +313,6 @@ function Remove-Task {
 
 function Uninstall-Tabura {
     Remove-Task "tabura-web"
-    Remove-Task "tabura-llm"
     Remove-Task "tabura-piper-tts"
     Remove-Task "tabura-codex-app-server"
 
@@ -400,7 +341,6 @@ function Install-Tabura {
     $tag = Install-Binary -Release $release
     Ensure-UserPath
     Setup-Piper
-    Setup-LocalLlm
     Print-WindowsSTTNotice
     Write-TaskFiles -CodexPath $codexPath
     Open-Browser

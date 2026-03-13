@@ -3,38 +3,6 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_ROOT}/lib/llama.sh" ]; then
-    # shellcheck source=scripts/lib/llama.sh
-    source "${SCRIPT_ROOT}/lib/llama.sh"
-else
-    TABURA_LLAMA_LAST_ERROR=""
-    tabura_llama_prepend_library_dirs() { :; }
-    tabura_find_llama_server() {
-        local candidate
-        TABURA_LLAMA_LAST_ERROR=""
-        if [ -n "${LLAMA_SERVER_BIN:-}" ]; then
-            if [ -x "$LLAMA_SERVER_BIN" ]; then
-                printf '%s' "$LLAMA_SERVER_BIN"
-                return 0
-            fi
-            if candidate="$(command -v "$LLAMA_SERVER_BIN" 2>/dev/null)"; then
-                printf '%s' "$candidate"
-                return 0
-            fi
-        fi
-        if candidate="$(command -v llama-server 2>/dev/null)"; then
-            printf '%s' "$candidate"
-            return 0
-        fi
-        candidate="${HOME}/.local/llama.cpp/llama-server"
-        if [ -x "$candidate" ]; then
-            printf '%s' "$candidate"
-            return 0
-        fi
-        TABURA_LLAMA_LAST_ERROR="llama-server not found"
-        return 1
-    }
-fi
 REPO_OWNER="${TABURA_REPO_OWNER:-krystophny}"
 REPO_NAME="${TABURA_REPO_NAME:-tabura}"
 RELEASE_API_BASE="${TABURA_RELEASE_API_BASE:-https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases}"
@@ -57,13 +25,11 @@ MODEL_DIR=""
 VENV_DIR=""
 SCRIPT_DIR=""
 PIPER_SERVER_SCRIPT=""
-LLM_DIR=""
-LLM_MODEL_DIR=""
 LLM_SETUP_SCRIPT=""
+VLLM_ROOT=""
 STT_SETUP_SCRIPT=""
 CODEX_PATH=""
 REUSE_LLM_URL=""
-LLAMA_SERVER_BIN_RESOLVED=""
 
 log() {
     printf '[tabura-install] %s\n' "$*"
@@ -106,7 +72,7 @@ have_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
-detect_llama_server() {
+detect_local_llm() {
     local port url
     for port in 8080 8081 8426; do
         url="http://127.0.0.1:${port}"
@@ -134,7 +100,7 @@ Environment overrides:
   TABURA_INSTALL_SKIP_BROWSER=1
   TABURA_INSTALL_SKIP_STT=1
   TABURA_INSTALL_SKIP_LLM=1
-  TABURA_INTENT_LLM_URL=<url>   Reuse an existing llama-server (skip download/service)
+  TABURA_INTENT_LLM_URL=<url>   Reuse an existing local LLM (skip bundled vLLM service)
   TABURA_REPO_OWNER / TABURA_REPO_NAME / TABURA_RELEASE_API_BASE
 USAGE
 }
@@ -210,9 +176,8 @@ resolve_paths() {
     VENV_DIR="${PIPER_DIR}/venv"
     SCRIPT_DIR="${DATA_ROOT}/scripts"
     PIPER_SERVER_SCRIPT="${SCRIPT_DIR}/piper_tts_server.py"
-    LLM_DIR="${DATA_ROOT}/llm"
-    LLM_MODEL_DIR="${LLM_DIR}/models"
-    LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-llm.sh"
+    LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-vllm.sh"
+    VLLM_ROOT="${DATA_ROOT}/vllm"
     STT_SETUP_SCRIPT="${SCRIPT_DIR}/setup-voxtype-stt.sh"
 }
 
@@ -383,16 +348,12 @@ BIN
         else
             echo "# dry-run piper server" >"${tmpdir}/piper_tts_server.py"
         fi
-        if [ -f "scripts/setup-local-llm.sh" ]; then
-            cp "scripts/setup-local-llm.sh" "${tmpdir}/setup-local-llm.sh"
+        if [ -f "scripts/setup-local-vllm.sh" ]; then
+            cp "scripts/setup-local-vllm.sh" "${tmpdir}/setup-local-vllm.sh"
         else
-            echo "#!/usr/bin/env bash" >"${tmpdir}/setup-local-llm.sh"
+            echo "#!/usr/bin/env bash" >"${tmpdir}/setup-local-vllm.sh"
         fi
-        chmod +x "${tmpdir}/setup-local-llm.sh"
-        if [ -f "scripts/lib/llama.sh" ]; then
-            mkdir -p "${tmpdir}/scripts/lib"
-            cp "scripts/lib/llama.sh" "${tmpdir}/scripts/lib/llama.sh"
-        fi
+        chmod +x "${tmpdir}/setup-local-vllm.sh"
         if [ -f "scripts/setup-voxtype-stt.sh" ]; then
             cp "scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
         else
@@ -427,8 +388,8 @@ BIN
     [ -x "${tmpdir}/tabura" ] || fail "tabura binary missing in archive"
     [ -f "${tmpdir}/scripts/piper_tts_server.py" ] || fail "scripts/piper_tts_server.py missing in archive"
     cp "${tmpdir}/scripts/piper_tts_server.py" "${tmpdir}/piper_tts_server.py"
-    if [ -f "${tmpdir}/scripts/setup-local-llm.sh" ]; then
-        cp "${tmpdir}/scripts/setup-local-llm.sh" "${tmpdir}/setup-local-llm.sh"
+    if [ -f "${tmpdir}/scripts/setup-local-vllm.sh" ]; then
+        cp "${tmpdir}/scripts/setup-local-vllm.sh" "${tmpdir}/setup-local-vllm.sh"
     fi
     if [ -f "${tmpdir}/scripts/setup-voxtype-stt.sh" ]; then
         cp "${tmpdir}/scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
@@ -445,9 +406,9 @@ install_binary_payload() {
     run_cmd cp "${staging_dir}/tabura" "$BIN_PATH"
     run_cmd chmod +x "$BIN_PATH"
     run_cmd cp "${staging_dir}/piper_tts_server.py" "$PIPER_SERVER_SCRIPT"
-    if [ -f "${staging_dir}/scripts/lib/llama.sh" ]; then
-        run_cmd mkdir -p "${SCRIPT_DIR}/lib"
-        run_cmd cp "${staging_dir}/scripts/lib/llama.sh" "${SCRIPT_DIR}/lib/llama.sh"
+    if [ -f "${staging_dir}/setup-local-vllm.sh" ]; then
+        run_cmd cp "${staging_dir}/setup-local-vllm.sh" "${LLM_SETUP_SCRIPT}"
+        run_cmd chmod +x "${LLM_SETUP_SCRIPT}"
     fi
     if ! printf ':%s:' "$PATH" | grep -Fq ":${BIN_DIR}:"; then
         log "${BIN_DIR} is not in PATH; add it in your shell profile"
@@ -523,51 +484,22 @@ setup_piper_tts() {
     download_model "de_DE-karlsson-low" "de/de_DE/karlsson/low" "Per-model terms are documented in the model card."
 }
 
-ensure_llama_server() {
-    if LLAMA_SERVER_BIN_RESOLVED="$(tabura_find_llama_server)"; then
-        return 0
-    fi
-    if [ "$TABURA_OS" = "darwin" ]; then
-        if ! have_cmd brew; then
-            if [ -n "${TABURA_LLAMA_LAST_ERROR:-}" ] && [ "${TABURA_LLAMA_LAST_ERROR}" != "llama-server not found" ]; then
-                log "llama-server not usable: ${TABURA_LLAMA_LAST_ERROR}"
-            else
-                log "llama-server not found; install llama.cpp via Homebrew: brew install llama.cpp"
-            fi
-            return 1
-        fi
-        if confirm_default_yes "Install llama.cpp via Homebrew?"; then
-            run_cmd brew install llama.cpp
-            if LLAMA_SERVER_BIN_RESOLVED="$(tabura_find_llama_server)"; then
-                return 0
-            fi
-        fi
-    else
-        if [ -n "${TABURA_LLAMA_LAST_ERROR:-}" ]; then
-            log "llama-server not usable: ${TABURA_LLAMA_LAST_ERROR}"
-        else
-            log "llama-server not found; install llama.cpp and ensure llama-server is on PATH"
-        fi
-    fi
-    return 1
-}
-
-setup_local_llm() {
+setup_local_vllm() {
     if [ "$SKIP_LLM" = "1" ]; then
-        log "skipping local LLM due to TABURA_INSTALL_SKIP_LLM=1"
+        log "skipping local vLLM due to TABURA_INSTALL_SKIP_LLM=1"
         return
     fi
 
     if [ -n "${TABURA_INTENT_LLM_URL:-}" ]; then
         REUSE_LLM_URL="$TABURA_INTENT_LLM_URL"
-        log "TABURA_INTENT_LLM_URL set to ${REUSE_LLM_URL}; skipping LLM setup"
+        log "TABURA_INTENT_LLM_URL set to ${REUSE_LLM_URL}; skipping local vLLM setup"
         return
     fi
 
     local existing_url
-    if existing_url="$(detect_llama_server)"; then
-        log "existing llama-server detected at ${existing_url}"
-        if confirm_default_yes "Reuse existing llama-server at ${existing_url}?"; then
+    if existing_url="$(detect_local_llm)"; then
+        log "existing local LLM detected at ${existing_url}"
+        if confirm_default_yes "Reuse existing local LLM at ${existing_url}?"; then
             REUSE_LLM_URL="$existing_url"
             log "TABURA_INTENT_LLM_URL will point to ${REUSE_LLM_URL}"
             return
@@ -575,40 +507,23 @@ setup_local_llm() {
     fi
 
     cat <<NOTICE
-=== Local LLM (Qwen3 0.6B via llama.cpp, optional) ===
-A local coordinator language model for Hub routing and replies.
-Runs as a local HTTP service on port 8426.
-Requires llama.cpp (llama-server binary).
+=== Local vLLM (Qwen3.5 9B AWQ, optional) ===
+Tabura can run a bundled local vLLM service on port 8426.
+Default model: QuantTrio/Qwen3.5-9B-AWQ
+Requirement: uv (installs vLLM into an isolated virtualenv)
 NOTICE
-    if ! confirm_default_yes "Install local LLM service?"; then
-        log "skipping local LLM setup"
+    if ! confirm_default_yes "Install local vLLM service?"; then
+        log "skipping local vLLM setup"
         return
     fi
 
-    if ! ensure_llama_server; then
-        log "skipping local LLM setup"
-        return
-    fi
-    run_cmd mkdir -p "$LLM_MODEL_DIR" "$SCRIPT_DIR"
+    have_cmd uv || fail "uv is required for the bundled vLLM service"
+    run_cmd mkdir -p "$SCRIPT_DIR" "$VLLM_ROOT"
 
     local staging_llm="${1:-}"
-    if [ -n "$staging_llm" ] && [ -f "${staging_llm}/setup-local-llm.sh" ]; then
-        run_cmd cp "${staging_llm}/setup-local-llm.sh" "$LLM_SETUP_SCRIPT"
+    if [ -n "$staging_llm" ] && [ -f "${staging_llm}/setup-local-vllm.sh" ]; then
+        run_cmd cp "${staging_llm}/setup-local-vllm.sh" "$LLM_SETUP_SCRIPT"
         run_cmd chmod +x "$LLM_SETUP_SCRIPT"
-    fi
-
-    local model_file="Qwen3-0.6B-Q4_K_M.gguf"
-    local model_url="https://huggingface.co/lmstudio-community/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf?download=true"
-    local model_path="${LLM_MODEL_DIR}/${model_file}"
-    if [ -f "$model_path" ]; then
-        log "LLM model already present: ${model_file}"
-    elif confirm_default_yes "Download Qwen3 0.6B model (~462 MB)?"; then
-        if [ "$DRY_RUN" = "1" ]; then
-            run_cmd curl -fL -o "$model_path" "$model_url"
-        else
-            curl -fL --retry 3 --retry-delay 2 -o "${model_path}.tmp" "$model_url"
-            mv "${model_path}.tmp" "$model_path"
-        fi
     fi
 }
 
@@ -730,22 +645,45 @@ RestartSec=2
 WantedBy=default.target
 UNIT
 
-    if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
-        cat >"${systemd_dir}/tabura-llm.service" <<UNIT
+    if [ -x "$STT_SETUP_SCRIPT" ]; then
+        cat >"${systemd_dir}/tabura-stt.service" <<UNIT
 [Unit]
-Description=Tabura Local Coordinator LLM (Qwen3 0.6B)
+Description=Tabura STT (voxtype)
 After=network.target
 
 [Service]
 Type=simple
-Environment=TABURA_LLM_MODEL_DIR=${LLM_MODEL_DIR}
-Environment=TABURA_LLM_MODEL_FILE=Qwen3-0.6B-Q4_K_M.gguf
-Environment=TABURA_LLM_MODEL_URL=https://huggingface.co/lmstudio-community/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf?download=true
-Environment=LLAMA_SERVER_BIN=${LLAMA_SERVER_BIN_RESOLVED}
-ExecStart=${LLM_SETUP_SCRIPT}
+Environment=TABURA_STT_LANGUAGE=de,en
+Environment=TABURA_STT_MODEL=large-v3-turbo
+ExecStart=${STT_SETUP_SCRIPT}
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
+UNIT
+    fi
+
+    if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
+        cat >"${systemd_dir}/tabura-vllm.service" <<UNIT
+[Unit]
+Description=Tabura Local vLLM Runtime
+After=network.target
+
+[Service]
+Type=simple
+Environment=TABURA_VLLM_ROOT=${VLLM_ROOT}
+Environment=TABURA_VLLM_HOST=127.0.0.1
+Environment=TABURA_VLLM_PORT=8426
+Environment=TABURA_VLLM_MODEL=QuantTrio/Qwen3.5-9B-AWQ
+Environment=TABURA_VLLM_SERVED_MODEL_NAME=tabura-qwen-9b
+Environment=TABURA_VLLM_MAX_MODEL_LEN=4096
+Environment=TABURA_VLLM_GPU_MEMORY_UTILIZATION=0.75
+ExecStart=${LLM_SETUP_SCRIPT}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=default.target
@@ -782,8 +720,11 @@ install_services_linux() {
     write_systemd_units
     run_cmd systemctl --user daemon-reload
     units=(tabura-codex-app-server.service tabura-piper-tts.service tabura-web.service)
-    if [ -f "${HOME}/.config/systemd/user/tabura-llm.service" ]; then
-        units+=(tabura-llm.service)
+    if [ -f "${HOME}/.config/systemd/user/tabura-stt.service" ]; then
+        units+=(tabura-stt.service)
+    fi
+    if [ -f "${HOME}/.config/systemd/user/tabura-vllm.service" ]; then
+        units+=(tabura-vllm.service)
     fi
     run_cmd systemctl --user enable --now "${units[@]}"
 }
@@ -801,9 +742,8 @@ substitute_launchd_template() {
         -e "s|@@VENV_DIR@@|${VENV_DIR}|g" \
         -e "s|@@SCRIPT_DIR@@|${SCRIPT_DIR}|g" \
         -e "s|@@PIPER_MODEL_DIR@@|${MODEL_DIR}|g" \
-        -e "s|@@LLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
-        -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
-        -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
+        -e "s|@@VLLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
+        -e "s|@@VLLM_ROOT@@|${VLLM_ROOT}|g" \
         -e "s|@@STT_SETUP_SCRIPT@@|${STT_SETUP_SCRIPT}|g" \
         -e "s|@@TABURA_INTENT_LLM_URL@@|${effective_llm_url}|g" \
         "$src" >"$dst"
@@ -828,7 +768,7 @@ write_launchd_plists() {
     substitute_launchd_template "${template_dir}/io.tabura.piper-tts.plist" "${agent_dir}/io.tabura.piper-tts.plist"
 
     if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
-        substitute_launchd_template "${template_dir}/io.tabura.llm.plist" "${agent_dir}/io.tabura.llm.plist"
+        substitute_launchd_template "${template_dir}/io.tabura.vllm.plist" "${agent_dir}/io.tabura.vllm.plist"
     fi
 
     if [ -x "$STT_SETUP_SCRIPT" ]; then
@@ -851,11 +791,8 @@ install_services_macos() {
     write_launchd_plists "$staging_dir"
     load_launchd_service "${agent_dir}/io.tabura.codex-app-server.plist"
     load_launchd_service "${agent_dir}/io.tabura.piper-tts.plist"
-    if [ -f "${agent_dir}/io.tabura.intent.plist" ]; then
-        load_launchd_service "${agent_dir}/io.tabura.intent.plist"
-    fi
-    if [ -f "${agent_dir}/io.tabura.llm.plist" ]; then
-        load_launchd_service "${agent_dir}/io.tabura.llm.plist"
+    if [ -f "${agent_dir}/io.tabura.vllm.plist" ]; then
+        load_launchd_service "${agent_dir}/io.tabura.vllm.plist"
     fi
     if [ -f "${agent_dir}/io.tabura.stt.plist" ]; then
         load_launchd_service "${agent_dir}/io.tabura.stt.plist"
@@ -902,7 +839,7 @@ Install complete
   Intent LLM:   ${effective_llm_url}
 SUMMARY
     if [ -n "$REUSE_LLM_URL" ]; then
-        log "using existing llama-server at ${REUSE_LLM_URL} (no tabura-llm service created)"
+        log "using existing local LLM at ${REUSE_LLM_URL} (no bundled vLLM service created)"
     fi
 }
 
@@ -912,20 +849,22 @@ remove_linux_services() {
     if have_cmd systemctl; then
         run_cmd systemctl --user disable --now \
             tabura-web.service tabura-piper-tts.service tabura-codex-app-server.service \
-            tabura-llm.service >/dev/null 2>&1 || true
+            tabura-stt.service \
+            tabura-vllm.service >/dev/null 2>&1 || true
         run_cmd systemctl --user daemon-reload >/dev/null 2>&1 || true
     fi
     run_cmd rm -f \
         "${systemd_dir}/tabura-web.service" \
         "${systemd_dir}/tabura-piper-tts.service" \
         "${systemd_dir}/tabura-codex-app-server.service" \
-        "${systemd_dir}/tabura-llm.service"
+        "${systemd_dir}/tabura-stt.service" \
+        "${systemd_dir}/tabura-vllm.service"
 }
 
 remove_macos_services() {
     local agent_dir plist
     agent_dir="${HOME}/Library/LaunchAgents"
-    for plist in io.tabura.web io.tabura.stt io.tabura.llm io.tabura.piper-tts io.tabura.codex-app-server; do
+    for plist in io.tabura.web io.tabura.stt io.tabura.vllm io.tabura.piper-tts io.tabura.codex-app-server; do
         run_cmd launchctl unload "${agent_dir}/${plist}.plist" >/dev/null 2>&1 || true
     done
     run_cmd rm -f \
@@ -933,7 +872,7 @@ remove_macos_services() {
         "${agent_dir}/io.tabura.stt.plist" \
         "${agent_dir}/io.tabura.piper-tts.plist" \
         "${agent_dir}/io.tabura.codex-app-server.plist" \
-        "${agent_dir}/io.tabura.llm.plist"
+        "${agent_dir}/io.tabura.vllm.plist"
 }
 
 uninstall_flow() {
@@ -969,7 +908,7 @@ install_flow() {
     install_binary_payload "$tmpdir"
     bootstrap_project
     setup_piper_tts
-    setup_local_llm "$tmpdir"
+    setup_local_vllm "$tmpdir"
     install_voxtype_stt "$tmpdir"
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos "$tmpdir"
