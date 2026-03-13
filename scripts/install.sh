@@ -25,14 +25,11 @@ MODEL_DIR=""
 VENV_DIR=""
 SCRIPT_DIR=""
 PIPER_SERVER_SCRIPT=""
-LMSTUDIO_SETUP_SCRIPT=""
-LMSTUDIO_CLI_SCRIPT=""
-LMSTUDIO_SESSION_SCRIPT=""
+LLM_SETUP_SCRIPT=""
+VLLM_ROOT=""
 STT_SETUP_SCRIPT=""
 CODEX_PATH=""
 REUSE_LLM_URL=""
-AUTOSTART_DIR=""
-AUTOSTART_FILE=""
 
 log() {
     printf '[tabura-install] %s\n' "$*"
@@ -77,7 +74,7 @@ have_cmd() {
 
 detect_local_llm() {
     local port url
-    for port in 1234 8080 8081 8426; do
+    for port in 8080 8081 8426; do
         url="http://127.0.0.1:${port}"
         if curl -fsS --max-time 2 "${url}/health" >/dev/null 2>&1; then
             printf '%s' "$url"
@@ -85,17 +82,6 @@ detect_local_llm() {
         fi
     done
     return 1
-}
-
-should_manage_local_lmstudio() {
-    if [ -n "${TABURA_INTENT_LLM_URL:-}" ] && [ "${TABURA_INTENT_LLM_URL}" != "off" ]; then
-        return 1
-    fi
-    case "${REUSE_LLM_URL}" in
-        "" | "http://127.0.0.1:1234" | "http://localhost:1234") ;;
-        *) return 1 ;;
-    esac
-    [ -x "${HOME}/.lmstudio/bin/lms" ] || command -v lm-studio >/dev/null 2>&1
 }
 
 print_help() {
@@ -114,7 +100,7 @@ Environment overrides:
   TABURA_INSTALL_SKIP_BROWSER=1
   TABURA_INSTALL_SKIP_STT=1
   TABURA_INSTALL_SKIP_LLM=1
-  TABURA_INTENT_LLM_URL=<url>   Reuse an existing local LLM (skip LM Studio setup)
+  TABURA_INTENT_LLM_URL=<url>   Reuse an existing local LLM (skip bundled vLLM service)
   TABURA_REPO_OWNER / TABURA_REPO_NAME / TABURA_RELEASE_API_BASE
 USAGE
 }
@@ -190,12 +176,9 @@ resolve_paths() {
     VENV_DIR="${PIPER_DIR}/venv"
     SCRIPT_DIR="${DATA_ROOT}/scripts"
     PIPER_SERVER_SCRIPT="${SCRIPT_DIR}/piper_tts_server.py"
-    LMSTUDIO_SETUP_SCRIPT="${SCRIPT_DIR}/setup-tabura-lmstudio.sh"
-    LMSTUDIO_CLI_SCRIPT="${SCRIPT_DIR}/lmstudio-cli.sh"
-    LMSTUDIO_SESSION_SCRIPT="${SCRIPT_DIR}/lmstudio-session.sh"
+    LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-vllm.sh"
+    VLLM_ROOT="${DATA_ROOT}/vllm"
     STT_SETUP_SCRIPT="${SCRIPT_DIR}/setup-voxtype-stt.sh"
-    AUTOSTART_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/autostart"
-    AUTOSTART_FILE="${AUTOSTART_DIR}/tabura-lmstudio.desktop"
 }
 
 require_codex_app_server() {
@@ -365,12 +348,12 @@ BIN
         else
             echo "# dry-run piper server" >"${tmpdir}/piper_tts_server.py"
         fi
-        for name in setup-tabura-lmstudio.sh setup-codex-qwen-profile.sh lmstudio-cli.sh lmstudio-session.sh; do
-            if [ -f "scripts/${name}" ]; then
-                cp "scripts/${name}" "${tmpdir}/${name}"
-                chmod +x "${tmpdir}/${name}"
-            fi
-        done
+        if [ -f "scripts/setup-local-vllm.sh" ]; then
+            cp "scripts/setup-local-vllm.sh" "${tmpdir}/setup-local-vllm.sh"
+        else
+            echo "#!/usr/bin/env bash" >"${tmpdir}/setup-local-vllm.sh"
+        fi
+        chmod +x "${tmpdir}/setup-local-vllm.sh"
         if [ -f "scripts/setup-voxtype-stt.sh" ]; then
             cp "scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
         else
@@ -384,10 +367,6 @@ BIN
         if [ -d "deploy/launchd" ]; then
             mkdir -p "${tmpdir}/deploy/launchd"
             cp deploy/launchd/*.plist "${tmpdir}/deploy/launchd/"
-        fi
-        if [ -d "deploy/autostart" ]; then
-            mkdir -p "${tmpdir}/deploy/autostart"
-            cp deploy/autostart/*.desktop "${tmpdir}/deploy/autostart/"
         fi
         printf '%s\n' "$tag"
         return
@@ -409,11 +388,9 @@ BIN
     [ -x "${tmpdir}/tabura" ] || fail "tabura binary missing in archive"
     [ -f "${tmpdir}/scripts/piper_tts_server.py" ] || fail "scripts/piper_tts_server.py missing in archive"
     cp "${tmpdir}/scripts/piper_tts_server.py" "${tmpdir}/piper_tts_server.py"
-    for name in setup-tabura-lmstudio.sh setup-codex-qwen-profile.sh lmstudio-cli.sh lmstudio-session.sh; do
-        if [ -f "${tmpdir}/scripts/${name}" ]; then
-            cp "${tmpdir}/scripts/${name}" "${tmpdir}/${name}"
-        fi
-    done
+    if [ -f "${tmpdir}/scripts/setup-local-vllm.sh" ]; then
+        cp "${tmpdir}/scripts/setup-local-vllm.sh" "${tmpdir}/setup-local-vllm.sh"
+    fi
     if [ -f "${tmpdir}/scripts/setup-voxtype-stt.sh" ]; then
         cp "${tmpdir}/scripts/setup-voxtype-stt.sh" "${tmpdir}/setup-voxtype-stt.sh"
     fi
@@ -429,12 +406,10 @@ install_binary_payload() {
     run_cmd cp "${staging_dir}/tabura" "$BIN_PATH"
     run_cmd chmod +x "$BIN_PATH"
     run_cmd cp "${staging_dir}/piper_tts_server.py" "$PIPER_SERVER_SCRIPT"
-    for name in setup-tabura-lmstudio.sh setup-codex-qwen-profile.sh lmstudio-cli.sh lmstudio-session.sh; do
-        if [ -f "${staging_dir}/${name}" ]; then
-            run_cmd cp "${staging_dir}/${name}" "${SCRIPT_DIR}/${name}"
-            run_cmd chmod +x "${SCRIPT_DIR}/${name}"
-        fi
-    done
+    if [ -f "${staging_dir}/setup-local-vllm.sh" ]; then
+        run_cmd cp "${staging_dir}/setup-local-vllm.sh" "${LLM_SETUP_SCRIPT}"
+        run_cmd chmod +x "${LLM_SETUP_SCRIPT}"
+    fi
     if ! printf ':%s:' "$PATH" | grep -Fq ":${BIN_DIR}:"; then
         log "${BIN_DIR} is not in PATH; add it in your shell profile"
     fi
@@ -509,15 +484,15 @@ setup_piper_tts() {
     download_model "de_DE-karlsson-low" "de/de_DE/karlsson/low" "Per-model terms are documented in the model card."
 }
 
-setup_local_lmstudio() {
+setup_local_vllm() {
     if [ "$SKIP_LLM" = "1" ]; then
-        log "skipping local LM Studio due to TABURA_INSTALL_SKIP_LLM=1"
+        log "skipping local vLLM due to TABURA_INSTALL_SKIP_LLM=1"
         return
     fi
 
     if [ -n "${TABURA_INTENT_LLM_URL:-}" ]; then
         REUSE_LLM_URL="$TABURA_INTENT_LLM_URL"
-        log "TABURA_INTENT_LLM_URL set to ${REUSE_LLM_URL}; skipping local LM Studio setup"
+        log "TABURA_INTENT_LLM_URL set to ${REUSE_LLM_URL}; skipping local vLLM setup"
         return
     fi
 
@@ -532,26 +507,23 @@ setup_local_lmstudio() {
     fi
 
     cat <<NOTICE
-=== LM Studio local runtime (Qwen3.5 9B GGUF, optional) ===
-Tabura can reuse LM Studio's desktop app and local server on port 1234.
-Default model: qwen/qwen3.5-9b GGUF Q4_K_M
-Requirement: LM Studio desktop app plus the Enable Thinking toggle turned off in the model config.
+=== Local vLLM (Qwen3.5 9B AWQ, optional) ===
+Tabura can run a bundled local vLLM service on port 8426.
+Default model: QuantTrio/Qwen3.5-9B-AWQ
+Requirement: uv (installs vLLM into an isolated virtualenv)
 NOTICE
-    if ! confirm_default_yes "Install or configure LM Studio local runtime?"; then
-        log "skipping local LM Studio setup"
+    if ! confirm_default_yes "Install local vLLM service?"; then
+        log "skipping local vLLM setup"
         return
     fi
 
+    have_cmd uv || fail "uv is required for the bundled vLLM service"
+    run_cmd mkdir -p "$SCRIPT_DIR" "$VLLM_ROOT"
+
     local staging_llm="${1:-}"
-    run_cmd mkdir -p "$SCRIPT_DIR"
-    for name in setup-tabura-lmstudio.sh lmstudio-cli.sh lmstudio-session.sh; do
-        if [ -n "$staging_llm" ] && [ -f "${staging_llm}/${name}" ]; then
-            run_cmd cp "${staging_llm}/${name}" "${SCRIPT_DIR}/${name}"
-            run_cmd chmod +x "${SCRIPT_DIR}/${name}"
-        fi
-    done
-    if [ "$DRY_RUN" = "0" ]; then
-        "${LMSTUDIO_SETUP_SCRIPT}"
+    if [ -n "$staging_llm" ] && [ -f "${staging_llm}/setup-local-vllm.sh" ]; then
+        run_cmd cp "${staging_llm}/setup-local-vllm.sh" "$LLM_SETUP_SCRIPT"
+        run_cmd chmod +x "$LLM_SETUP_SCRIPT"
     fi
 }
 
@@ -693,7 +665,32 @@ WantedBy=default.target
 UNIT
     fi
 
-    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:1234}"
+    if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
+        cat >"${systemd_dir}/tabura-vllm.service" <<UNIT
+[Unit]
+Description=Tabura Local vLLM Runtime
+After=network.target
+
+[Service]
+Type=simple
+Environment=TABURA_VLLM_ROOT=${VLLM_ROOT}
+Environment=TABURA_VLLM_HOST=127.0.0.1
+Environment=TABURA_VLLM_PORT=8426
+Environment=TABURA_VLLM_MODEL=QuantTrio/Qwen3.5-9B-AWQ
+Environment=TABURA_VLLM_SERVED_MODEL_NAME=tabura-qwen-9b
+Environment=TABURA_VLLM_MAX_MODEL_LEN=4096
+Environment=TABURA_VLLM_GPU_MEMORY_UTILIZATION=0.75
+ExecStart=${LLM_SETUP_SCRIPT}
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
+UNIT
+    fi
+
+    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8426}"
     local web_host="${TABURA_WEB_HOST:-127.0.0.1}"
 
     cat >"${systemd_dir}/tabura-web.service" <<UNIT
@@ -705,7 +702,7 @@ Wants=tabura-codex-app-server.service tabura-piper-tts.service
 [Service]
 Type=simple
 Environment=TABURA_INTENT_LLM_URL=${effective_llm_url}
-Environment=TABURA_INTENT_LLM_MODEL=qwen/qwen3.5-9b
+Environment=TABURA_INTENT_LLM_MODEL=local
 Environment=TABURA_INTENT_LLM_PROFILE=qwen3.5-9b
 Environment=TABURA_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b
 ExecStart=${BIN_PATH} server --project-dir ${PROJECT_DIR} --data-dir ${WEB_DATA_DIR} --web-host ${web_host} --web-port 8420 --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
@@ -726,29 +723,15 @@ install_services_linux() {
     if [ -f "${HOME}/.config/systemd/user/tabura-stt.service" ]; then
         units+=(tabura-stt.service)
     fi
-    run_cmd systemctl --user enable --now "${units[@]}"
-    if should_manage_local_lmstudio; then
-        if [ "$DRY_RUN" = "1" ]; then
-            log "[dry-run] install LM Studio autostart at ${AUTOSTART_FILE}"
-            return
-        fi
-        run_cmd mkdir -p "${AUTOSTART_DIR}"
-        cat >"${AUTOSTART_FILE}" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Version=1.0
-Name=Tabura LM Studio
-Comment=Start LM Studio, its local API server, and preload the Tabura model
-Exec=${LMSTUDIO_SESSION_SCRIPT}
-Terminal=false
-X-GNOME-Autostart-enabled=true
-DESKTOP
+    if [ -f "${HOME}/.config/systemd/user/tabura-vllm.service" ]; then
+        units+=(tabura-vllm.service)
     fi
+    run_cmd systemctl --user enable --now "${units[@]}"
 }
 
 substitute_launchd_template() {
     local src="$1" dst="$2"
-    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:1234}"
+    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8426}"
     local web_host="${TABURA_WEB_HOST:-127.0.0.1}"
     sed \
         -e "s|@@BIN_PATH@@|${BIN_PATH}|g" \
@@ -759,7 +742,8 @@ substitute_launchd_template() {
         -e "s|@@VENV_DIR@@|${VENV_DIR}|g" \
         -e "s|@@SCRIPT_DIR@@|${SCRIPT_DIR}|g" \
         -e "s|@@PIPER_MODEL_DIR@@|${MODEL_DIR}|g" \
-        -e "s|@@LMSTUDIO_SESSION_SCRIPT@@|${LMSTUDIO_SESSION_SCRIPT}|g" \
+        -e "s|@@VLLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
+        -e "s|@@VLLM_ROOT@@|${VLLM_ROOT}|g" \
         -e "s|@@STT_SETUP_SCRIPT@@|${STT_SETUP_SCRIPT}|g" \
         -e "s|@@TABURA_INTENT_LLM_URL@@|${effective_llm_url}|g" \
         "$src" >"$dst"
@@ -783,8 +767,8 @@ write_launchd_plists() {
     substitute_launchd_template "${template_dir}/io.tabura.codex-app-server.plist" "${agent_dir}/io.tabura.codex-app-server.plist"
     substitute_launchd_template "${template_dir}/io.tabura.piper-tts.plist" "${agent_dir}/io.tabura.piper-tts.plist"
 
-    if [ -x "$LMSTUDIO_SESSION_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ] && [ "${TABURA_INTENT_LLM_URL:-}" != "off" ]; then
-        substitute_launchd_template "${template_dir}/io.tabura.lmstudio.plist" "${agent_dir}/io.tabura.lmstudio.plist"
+    if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
+        substitute_launchd_template "${template_dir}/io.tabura.vllm.plist" "${agent_dir}/io.tabura.vllm.plist"
     fi
 
     if [ -x "$STT_SETUP_SCRIPT" ]; then
@@ -807,8 +791,8 @@ install_services_macos() {
     write_launchd_plists "$staging_dir"
     load_launchd_service "${agent_dir}/io.tabura.codex-app-server.plist"
     load_launchd_service "${agent_dir}/io.tabura.piper-tts.plist"
-    if [ -f "${agent_dir}/io.tabura.lmstudio.plist" ]; then
-        load_launchd_service "${agent_dir}/io.tabura.lmstudio.plist"
+    if [ -f "${agent_dir}/io.tabura.vllm.plist" ]; then
+        load_launchd_service "${agent_dir}/io.tabura.vllm.plist"
     fi
     if [ -f "${agent_dir}/io.tabura.stt.plist" ]; then
         load_launchd_service "${agent_dir}/io.tabura.stt.plist"
@@ -840,7 +824,7 @@ open_browser() {
 
 print_summary() {
     local version="$1"
-    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:1234}"
+    local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8426}"
     cat <<SUMMARY
 
 Install complete
@@ -852,10 +836,10 @@ Install complete
   Piper venv:    ${VENV_DIR}
   Service mode:  ${TABURA_OS}
   Web URL:       http://127.0.0.1:8420
-  Intent LLM:    ${effective_llm_url}
+  Intent LLM:   ${effective_llm_url}
 SUMMARY
     if [ -n "$REUSE_LLM_URL" ]; then
-        log "using existing local LLM at ${REUSE_LLM_URL} (no LM Studio setup created)"
+        log "using existing local LLM at ${REUSE_LLM_URL} (no bundled vLLM service created)"
     fi
 }
 
@@ -866,21 +850,21 @@ remove_linux_services() {
         run_cmd systemctl --user disable --now \
             tabura-web.service tabura-piper-tts.service tabura-codex-app-server.service \
             tabura-stt.service \
-            >/dev/null 2>&1 || true
+            tabura-vllm.service >/dev/null 2>&1 || true
         run_cmd systemctl --user daemon-reload >/dev/null 2>&1 || true
     fi
-    run_cmd rm -f "${AUTOSTART_FILE}"
     run_cmd rm -f \
         "${systemd_dir}/tabura-web.service" \
         "${systemd_dir}/tabura-piper-tts.service" \
         "${systemd_dir}/tabura-codex-app-server.service" \
-        "${systemd_dir}/tabura-stt.service"
+        "${systemd_dir}/tabura-stt.service" \
+        "${systemd_dir}/tabura-vllm.service"
 }
 
 remove_macos_services() {
     local agent_dir plist
     agent_dir="${HOME}/Library/LaunchAgents"
-    for plist in io.tabura.web io.tabura.stt io.tabura.lmstudio io.tabura.piper-tts io.tabura.codex-app-server; do
+    for plist in io.tabura.web io.tabura.stt io.tabura.vllm io.tabura.piper-tts io.tabura.codex-app-server; do
         run_cmd launchctl unload "${agent_dir}/${plist}.plist" >/dev/null 2>&1 || true
     done
     run_cmd rm -f \
@@ -888,7 +872,7 @@ remove_macos_services() {
         "${agent_dir}/io.tabura.stt.plist" \
         "${agent_dir}/io.tabura.piper-tts.plist" \
         "${agent_dir}/io.tabura.codex-app-server.plist" \
-        "${agent_dir}/io.tabura.lmstudio.plist"
+        "${agent_dir}/io.tabura.vllm.plist"
 }
 
 uninstall_flow() {
@@ -924,7 +908,7 @@ install_flow() {
     install_binary_payload "$tmpdir"
     bootstrap_project
     setup_piper_tts
-    setup_local_lmstudio "$tmpdir"
+    setup_local_vllm "$tmpdir"
     install_voxtype_stt "$tmpdir"
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos "$tmpdir"
