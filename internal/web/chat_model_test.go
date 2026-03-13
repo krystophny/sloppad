@@ -7,16 +7,16 @@ import (
 	"github.com/krystophny/tabura/internal/store"
 )
 
-func TestEffectiveProjectChatModelFallsBackToConfiguredAppServerModel(t *testing.T) {
+func TestEffectiveProjectChatModelFallsBackToSpark(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.appServerModel = modelprofile.ModelCodex
 
 	project := store.Project{}
-	if got := app.effectiveProjectChatModelAlias(project); got != modelprofile.AliasCodex {
-		t.Fatalf("effectiveProjectChatModelAlias() = %q, want %q", got, modelprofile.AliasCodex)
+	if got := app.effectiveProjectChatModelAlias(project); got != modelprofile.AliasSpark {
+		t.Fatalf("effectiveProjectChatModelAlias() = %q, want %q", got, modelprofile.AliasSpark)
 	}
-	if got := app.effectiveProjectChatModelReasoningEffort(project); got != modelprofile.ReasoningHigh {
-		t.Fatalf("effectiveProjectChatModelReasoningEffort() = %q, want %q", got, modelprofile.ReasoningHigh)
+	if got := app.effectiveProjectChatModelReasoningEffort(project); got != modelprofile.ReasoningLow {
+		t.Fatalf("effectiveProjectChatModelReasoningEffort() = %q, want %q", got, modelprofile.ReasoningLow)
 	}
 }
 
@@ -59,13 +59,13 @@ func TestAppServerModelProfileForProjectKeyFallsBackWhenProjectMissing(t *testin
 	app.appServerModel = modelprofile.ModelCodex
 
 	profile := app.appServerModelProfileForProjectKey("missing-project")
-	if profile.Alias != modelprofile.AliasCodex {
-		t.Fatalf("profile.Alias = %q, want %q", profile.Alias, modelprofile.AliasCodex)
+	if profile.Alias != modelprofile.AliasSpark {
+		t.Fatalf("profile.Alias = %q, want %q", profile.Alias, modelprofile.AliasSpark)
 	}
-	if profile.Model != modelprofile.ModelCodex {
-		t.Fatalf("profile.Model = %q, want %q", profile.Model, modelprofile.ModelCodex)
+	if profile.Model != modelprofile.ModelSpark {
+		t.Fatalf("profile.Model = %q, want %q", profile.Model, modelprofile.ModelSpark)
 	}
-	if got := profile.TurnParams["effort"]; got != modelprofile.ReasoningHigh {
-		t.Fatalf("profile.TurnParams[effort] = %#v, want %q", got, modelprofile.ReasoningHigh)
+	if got := profile.TurnParams["effort"]; got != modelprofile.ReasoningLow {
+		t.Fatalf("profile.TurnParams[effort] = %#v, want %q", got, modelprofile.ReasoningLow)
 	}
 }

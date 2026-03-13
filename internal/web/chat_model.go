@@ -18,9 +18,6 @@ func (a *App) effectiveProjectChatModelAlias(project store.Project) string {
 	if alias := modelprofile.ResolveAlias(project.ChatModel, ""); alias != "" {
 		return alias
 	}
-	if alias := modelprofile.ResolveAlias(a.appServerModel, ""); alias != "" {
-		return alias
-	}
 	return modelprofile.AliasSpark
 }
 
@@ -60,17 +57,8 @@ func (a *App) appServerModelProfileForProjectKey(projectKey string) appServerMod
 			return a.appServerModelProfileForProject(project)
 		}
 	}
-	alias := modelprofile.AliasForModel(a.appServerModel)
-	if alias == "" {
-		alias = modelprofile.AliasSpark
-	}
+	alias := modelprofile.AliasSpark
 	legacyModel := modelprofile.ModelForAlias(alias)
-	if legacyModel == "" {
-		legacyModel = strings.TrimSpace(a.appServerModel)
-	}
-	if legacyModel == "" {
-		legacyModel = modelprofile.ModelForAlias(modelprofile.AliasSpark)
-	}
 	legacyReasoning := modelprofile.MainThreadReasoningParamsForEffort(alias, modelprofile.MainThreadReasoningEffort(alias))
 	return appServerModelProfile{
 		Alias:        alias,

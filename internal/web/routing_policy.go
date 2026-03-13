@@ -135,31 +135,28 @@ func classifyRoutingRoute(text string) routingRoute {
 		Domain:     domain,
 		Complexity: complexity,
 		BlockShell: currentInfo,
-		Reason:     "general query keeps configured project model",
+		Reason:     "default dialogue uses spark profile",
 	}
 
 	switch {
+	case complex:
+		route.Model = modelprofile.AliasGPT
+		route.Effort = modelprofile.ReasoningHigh
+		route.Reason = "complex query delegated to gpt high"
 	case currentInfo:
-		route.Model = modelprofile.AliasCodex
-		route.Effort = modelprofile.ReasoningHigh
-		route.Reason = "current-info query routed to codex high; shell actions blocked"
-	case coding || complex:
-		route.Model = modelprofile.AliasCodex
-		route.Effort = modelprofile.ReasoningHigh
-		route.Reason = "coding or complex query routed to codex high"
+		route.Reason = "current-info query keeps spark profile; shell actions blocked"
+	case coding:
+		route.Reason = "coding query keeps spark profile unless complex"
 	}
 	return route
 }
 
 func routeProfileForRouting(route routingRoute, fallback appServerModelProfile, sparkEffort string) appServerModelProfile {
-	alias := modelprofile.ResolveAlias(route.Model, fallback.Alias)
+	alias := modelprofile.ResolveAlias(route.Model, modelprofile.AliasSpark)
 	if alias == "" {
 		alias = modelprofile.AliasSpark
 	}
 	model := modelprofile.ModelForAlias(alias)
-	if model == "" {
-		model = strings.TrimSpace(fallback.Model)
-	}
 	if model == "" {
 		model = modelprofile.ModelForAlias(modelprofile.AliasSpark)
 	}

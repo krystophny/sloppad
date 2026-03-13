@@ -11,7 +11,7 @@ import (
 	"github.com/krystophny/tabura/internal/modelprofile"
 )
 
-func TestClassifyRoutingRouteCurrentInfoUsesCodexHigh(t *testing.T) {
+func TestClassifyRoutingRouteCurrentInfoUsesSpark(t *testing.T) {
 	route := classifyRoutingRoute("Wie wird das Wetter heute in Graz?")
 	if route.Domain != routingDomainCurrentInfo {
 		t.Fatalf("domain = %q, want %q", route.Domain, routingDomainCurrentInfo)
@@ -19,31 +19,31 @@ func TestClassifyRoutingRouteCurrentInfoUsesCodexHigh(t *testing.T) {
 	if route.Complexity != routingComplexitySimple {
 		t.Fatalf("complexity = %q, want %q", route.Complexity, routingComplexitySimple)
 	}
-	if route.Model != modelprofile.AliasCodex {
-		t.Fatalf("model = %q, want %q", route.Model, modelprofile.AliasCodex)
+	if route.Model != "" {
+		t.Fatalf("model = %q, want empty for spark default", route.Model)
 	}
-	if route.Effort != modelprofile.ReasoningHigh {
-		t.Fatalf("effort = %q, want %q", route.Effort, modelprofile.ReasoningHigh)
+	if route.Effort != "" {
+		t.Fatalf("effort = %q, want empty for spark default", route.Effort)
 	}
 	if !route.BlockShell {
 		t.Fatal("expected BlockShell for current-info route")
 	}
 }
 
-func TestClassifyRoutingRouteSimpleGeneralKeepsConfiguredModel(t *testing.T) {
+func TestClassifyRoutingRouteSimpleGeneralUsesSparkDefault(t *testing.T) {
 	route := classifyRoutingRoute("summarize this note")
 	if route.Domain != routingDomainGeneral {
 		t.Fatalf("domain = %q, want %q", route.Domain, routingDomainGeneral)
 	}
 	if route.Model != "" {
-		t.Fatalf("model = %q, want empty to keep configured model", route.Model)
+		t.Fatalf("model = %q, want empty for spark default", route.Model)
 	}
 	if route.Effort != "" {
-		t.Fatalf("effort = %q, want empty to keep configured model effort", route.Effort)
+		t.Fatalf("effort = %q, want empty for spark default", route.Effort)
 	}
 }
 
-func TestClassifyRoutingRouteComplexCodingUsesCodexHigh(t *testing.T) {
+func TestClassifyRoutingRouteComplexCodingUsesGPTHigh(t *testing.T) {
 	text := "Please do a deep dive root cause analysis of this timeout bug in our Go repo and propose architecture fixes."
 	route := classifyRoutingRoute(text)
 	if route.Domain != routingDomainCoding {
@@ -52,8 +52,8 @@ func TestClassifyRoutingRouteComplexCodingUsesCodexHigh(t *testing.T) {
 	if route.Complexity != routingComplexityComplex {
 		t.Fatalf("complexity = %q, want %q", route.Complexity, routingComplexityComplex)
 	}
-	if route.Model != modelprofile.AliasCodex {
-		t.Fatalf("model = %q, want %q", route.Model, modelprofile.AliasCodex)
+	if route.Model != modelprofile.AliasGPT {
+		t.Fatalf("model = %q, want %q", route.Model, modelprofile.AliasGPT)
 	}
 	if route.Effort != modelprofile.ReasoningHigh {
 		t.Fatalf("effort = %q, want %q", route.Effort, modelprofile.ReasoningHigh)
@@ -98,20 +98,20 @@ func TestEnforceRoutingPolicyAllowsItemActionsForNonCurrentInfo(t *testing.T) {
 	}
 }
 
-func TestRouteProfileForRoutingAppliesCodexHigh(t *testing.T) {
+func TestRouteProfileForRoutingAppliesGPTHigh(t *testing.T) {
 	base := appServerModelProfile{
 		Alias: modelprofile.AliasCodex,
 		Model: modelprofile.ModelForAlias(modelprofile.AliasCodex),
 	}
 	profile := routeProfileForRouting(routingRoute{
-		Model:  modelprofile.AliasCodex,
+		Model:  modelprofile.AliasGPT,
 		Effort: modelprofile.ReasoningHigh,
 	}, base, modelprofile.ReasoningLow)
-	if profile.Alias != modelprofile.AliasCodex {
-		t.Fatalf("alias = %q, want %q", profile.Alias, modelprofile.AliasCodex)
+	if profile.Alias != modelprofile.AliasGPT {
+		t.Fatalf("alias = %q, want %q", profile.Alias, modelprofile.AliasGPT)
 	}
-	if profile.Model != modelprofile.ModelForAlias(modelprofile.AliasCodex) {
-		t.Fatalf("model = %q, want codex model", profile.Model)
+	if profile.Model != modelprofile.ModelForAlias(modelprofile.AliasGPT) {
+		t.Fatalf("model = %q, want gpt model", profile.Model)
 	}
 	if got := strings.TrimSpace(strFromAny(profile.TurnParams["effort"])); got != modelprofile.ReasoningHigh {
 		t.Fatalf("effort = %q, want %q", got, modelprofile.ReasoningHigh)
@@ -120,8 +120,8 @@ func TestRouteProfileForRoutingAppliesCodexHigh(t *testing.T) {
 
 func TestRouteProfileForRoutingUsesSparkFallbackWithConfiguredEffort(t *testing.T) {
 	base := appServerModelProfile{
-		Alias: modelprofile.AliasSpark,
-		Model: modelprofile.ModelForAlias(modelprofile.AliasSpark),
+		Alias: modelprofile.AliasCodex,
+		Model: modelprofile.ModelForAlias(modelprofile.AliasCodex),
 	}
 	profile := routeProfileForRouting(routingRoute{}, base, modelprofile.ReasoningMedium)
 	if profile.Alias != modelprofile.AliasSpark {
