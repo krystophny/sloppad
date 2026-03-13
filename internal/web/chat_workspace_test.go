@@ -608,7 +608,13 @@ func TestApplyWorkspacePromptContextIncludesActiveWorkspaceSummary(t *testing.T)
 	if !strings.Contains(prompt, "Active sphere: work") {
 		t.Fatalf("prompt missing active sphere line: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Anchor workspace: Default ("+project.RootPath+")") {
+	if !strings.Contains(prompt, "Default repo workspace: "+project.Name+" ("+project.RootPath+")") {
+		t.Fatalf("prompt missing repo workspace line: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Workspace rule: treat the default repo workspace as today's main coding context unless the user explicitly focuses another workspace.") {
+		t.Fatalf("prompt missing workspace rule line: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Today's anchor workspace: Default ("+project.RootPath+")") {
 		t.Fatalf("prompt missing anchor workspace line: %q", prompt)
 	}
 	if !strings.Contains(prompt, "Focused target workspace: Focused ("+focus.DirPath+")") {

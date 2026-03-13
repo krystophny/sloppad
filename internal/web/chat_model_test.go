@@ -27,11 +27,11 @@ func TestAppServerModelProfileForProjectNormalizesReasoning(t *testing.T) {
 		ChatModel:                modelprofile.AliasGPT,
 		ChatModelReasoningEffort: "minimal",
 	})
-	if profile.Alias != modelprofile.AliasGPT {
-		t.Fatalf("profile.Alias = %q, want %q", profile.Alias, modelprofile.AliasGPT)
+	if profile.Alias != modelprofile.AliasCodex {
+		t.Fatalf("profile.Alias = %q, want %q", profile.Alias, modelprofile.AliasCodex)
 	}
-	if profile.Model != modelprofile.ModelGPT {
-		t.Fatalf("profile.Model = %q, want %q", profile.Model, modelprofile.ModelGPT)
+	if profile.Model != modelprofile.ModelCodex {
+		t.Fatalf("profile.Model = %q, want %q", profile.Model, modelprofile.ModelCodex)
 	}
 	if profile.ThreadParams != nil {
 		t.Fatalf("profile.ThreadParams = %#v, want nil", profile.ThreadParams)

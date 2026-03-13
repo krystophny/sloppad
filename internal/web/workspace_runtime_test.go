@@ -247,6 +247,63 @@ func TestNewAppReusesPersistedDailyWorkspace(t *testing.T) {
 	}
 }
 
+func TestNewAppPrefersLocalProjectWorkspaceOnStartup(t *testing.T) {
+	dataDir := t.TempDir()
+	localProjectDir := filepath.Join(t.TempDir(), "tabula")
+	if err := os.MkdirAll(localProjectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localProjectDir) error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localProjectDir, "go.mod"), []byte("module github.com/krystophny/tabura\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(go.mod) error: %v", err)
+	}
+
+	app, err := New(dataDir, localProjectDir, "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Shutdown(context.Background())
+	})
+
+	project, err := app.ensureDefaultProjectRecord()
+	if err != nil {
+		t.Fatalf("ensureDefaultProjectRecord() error: %v", err)
+	}
+	if project.Name != "Tabura" {
+		t.Fatalf("default project name = %q, want %q", project.Name, "Tabura")
+	}
+	if err := app.ensureStartupProjectWithWorkspace(); err != nil {
+		t.Fatalf("ensureStartupProjectWithWorkspace() error: %v", err)
+	}
+	workspace, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace() error: %v", err)
+	}
+	if workspace.IsDaily {
+		t.Fatal("active workspace is_daily = true, want false for local project startup")
+	}
+	if workspace.DirPath != localProjectDir {
+		t.Fatalf("active workspace dir_path = %q, want %q", workspace.DirPath, localProjectDir)
+	}
+	activeProjectID, err := app.store.ActiveProjectID()
+	if err != nil {
+		t.Fatalf("ActiveProjectID() error: %v", err)
+	}
+	if activeProjectID != project.ID {
+		t.Fatalf("active project id = %q, want %q", activeProjectID, project.ID)
+	}
+	workspace, resolvedProject, err := app.resolveChatSessionTarget("", "", nil)
+	if err != nil {
+		t.Fatalf("resolveChatSessionTarget() error: %v", err)
+	}
+	if resolvedProject == nil || resolvedProject.ID != project.ID {
+		t.Fatalf("resolved project = %#v, want %q", resolvedProject, project.ID)
+	}
+	if workspace.DirPath != localProjectDir {
+		t.Fatalf("resolved workspace dir_path = %q, want %q", workspace.DirPath, localProjectDir)
+	}
+}
+
 func TestProjectAPIModelIncludesWorkspaceChatSession(t *testing.T) {
 	app := newAuthedTestApp(t)
 

@@ -19,9 +19,17 @@ type workspaceFocusRequest struct {
 }
 
 func (a *App) anchorWorkspace() (store.Workspace, error) {
+	if strings.TrimSpace(a.localProjectDir) != "" {
+		if err := a.ensureStartupProjectWithWorkspace(); err != nil {
+			return store.Workspace{}, err
+		}
+	}
 	workspace, err := a.store.ActiveWorkspace()
 	switch {
 	case err == nil:
+		if strings.TrimSpace(a.localProjectDir) != "" {
+			return workspace, nil
+		}
 		if workspace.IsDaily && workspaceDailyDate(workspace) != dailyWorkspaceDate(a.runtimeNow()) {
 			return a.ensureTodayDailyWorkspace()
 		}

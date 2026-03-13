@@ -135,50 +135,38 @@ func classifyRoutingRoute(text string) routingRoute {
 		Domain:     domain,
 		Complexity: complexity,
 		BlockShell: currentInfo,
-		Model:      modelprofile.AliasSpark,
-		Effort:     modelprofile.ReasoningLow,
-		Reason:     "simple query routed to spark low",
+		Model:      modelprofile.AliasCodex,
+		Effort:     modelprofile.ReasoningHigh,
+		Reason:     "all queries routed to codex high",
 	}
 
 	switch {
 	case currentInfo:
-		route.Model = modelprofile.AliasCodex
-		route.Effort = modelprofile.ReasoningHigh
 		route.Reason = "current-info query routed to codex high; shell actions blocked"
 	case complex:
-		route.Model = modelprofile.AliasCodex
-		route.Effort = modelprofile.ReasoningHigh
 		route.Reason = "complex query routed to codex high"
 	}
 	return route
 }
 
 func routeProfileForRouting(route routingRoute, fallback appServerModelProfile, sparkEffort string) appServerModelProfile {
+	_ = sparkEffort
 	alias := modelprofile.ResolveAlias(route.Model, fallback.Alias)
 	if alias == "" {
-		alias = modelprofile.AliasSpark
+		alias = modelprofile.AliasCodex
 	}
 	model := modelprofile.ModelForAlias(alias)
 	if model == "" {
 		model = strings.TrimSpace(fallback.Model)
 	}
 	if model == "" {
-		model = modelprofile.ModelForAlias(modelprofile.AliasSpark)
+		model = modelprofile.ModelForAlias(modelprofile.AliasCodex)
 	}
 	effort := modelprofile.NormalizeReasoningEffort(alias, route.Effort)
 	if effort == "" {
 		effort = modelprofile.MainThreadReasoningEffort(alias)
 	}
-	var turnParams map[string]interface{}
-	if alias == modelprofile.AliasSpark {
-		configured := strings.TrimSpace(sparkEffort)
-		if strings.TrimSpace(route.Effort) != "" {
-			configured = route.Effort
-		}
-		turnParams = appServerReasoningParamsForModel(model, configured)
-	} else {
-		turnParams = modelprofile.MainThreadReasoningParamsForEffort(alias, effort)
-	}
+	turnParams := modelprofile.MainThreadReasoningParamsForEffort(alias, effort)
 	return appServerModelProfile{
 		Alias:        alias,
 		Model:        model,

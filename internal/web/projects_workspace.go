@@ -93,6 +93,27 @@ func (a *App) ensureWorkspaceForProject(project store.Project, activate bool) (s
 }
 
 func (a *App) ensureStartupProjectWithWorkspace() error {
+	if strings.TrimSpace(a.localProjectDir) != "" {
+		project, err := a.ensureDefaultProjectRecord()
+		if err != nil {
+			return err
+		}
+		workspace, err := a.ensureWorkspaceForProject(project, false)
+		if err != nil {
+			return err
+		}
+		activeWorkspace, activeErr := a.store.ActiveWorkspace()
+		if activeErr != nil || activeWorkspace.ID != workspace.ID {
+			if err := a.store.SetActiveWorkspace(workspace.ID); err != nil {
+				return err
+			}
+			a.closeAllAppSessions()
+		}
+		if err := a.store.SetActiveProjectID(project.ID); err != nil {
+			return err
+		}
+		return nil
+	}
 	_, err := a.ensureStartupWorkspace()
 	return err
 }

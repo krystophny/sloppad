@@ -27,11 +27,9 @@ export const ASSISTANT_ACTIVITY_POLL_MS = 1200;
 export const CHAT_WS_STALE_THRESHOLD_MS = 20000;
 export const ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS = 1500;
 export const ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS = 450;
-export const PROJECT_CHAT_MODEL_ALIASES = ['codex', 'gpt', 'spark'];
+export const PROJECT_CHAT_MODEL_ALIASES = ['codex'];
 export const PROJECT_CHAT_MODEL_REASONING_EFFORTS = {
   codex: ['low', 'medium', 'high', 'xhigh'],
-  gpt: ['low', 'medium', 'high', 'xhigh'],
-  spark: ['low', 'medium', 'high', 'xhigh'],
 };
 export const TTS_SILENT_STORAGE_KEY = 'tabura.ttsSilent';
 export const YOLO_MODE_STORAGE_KEY = 'tabura.yoloMode';
@@ -200,8 +198,6 @@ export const state = {
   },
   reasoningEffortsByAlias: {
     codex: ['low', 'medium', 'high', 'xhigh'],
-    gpt: ['low', 'medium', 'high', 'xhigh'],
-    spark: ['low', 'medium', 'high', 'xhigh'],
   },
   contextUsed: 0,
   contextMax: 0,

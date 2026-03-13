@@ -15,13 +15,8 @@ type appServerModelProfile struct {
 }
 
 func (a *App) effectiveProjectChatModelAlias(project store.Project) string {
-	if alias := modelprofile.ResolveAlias(project.ChatModel, ""); alias != "" {
-		return alias
-	}
-	if alias := modelprofile.AliasForModel(a.appServerModel); alias != "" {
-		return alias
-	}
-	return modelprofile.AliasSpark
+	_ = project
+	return modelprofile.AliasCodex
 }
 
 func (a *App) effectiveProjectChatModelReasoningEffort(project store.Project) string {
@@ -41,14 +36,9 @@ func (a *App) appServerModelProfileForProject(project store.Project) appServerMo
 		model = strings.TrimSpace(a.appServerModel)
 	}
 	if model == "" {
-		model = modelprofile.ModelForAlias(modelprofile.AliasSpark)
+		model = modelprofile.ModelForAlias(modelprofile.AliasCodex)
 	}
-	var reasoning map[string]interface{}
-	if alias == modelprofile.AliasSpark {
-		reasoning = appServerReasoningParamsForModel(model, a.appServerSparkReasoningEffort)
-	} else {
-		reasoning = modelprofile.MainThreadReasoningParamsForEffort(alias, effort)
-	}
+	reasoning := modelprofile.MainThreadReasoningParamsForEffort(alias, effort)
 	return appServerModelProfile{
 		Alias:        alias,
 		Model:        model,
@@ -67,19 +57,16 @@ func (a *App) appServerModelProfileForProjectKey(projectKey string) appServerMod
 	}
 	alias := modelprofile.AliasForModel(a.appServerModel)
 	if alias == "" {
-		alias = modelprofile.AliasSpark
+		alias = modelprofile.AliasCodex
 	}
 	legacyModel := modelprofile.ModelForAlias(alias)
 	if legacyModel == "" {
 		legacyModel = strings.TrimSpace(a.appServerModel)
 	}
 	if legacyModel == "" {
-		legacyModel = modelprofile.ModelForAlias(modelprofile.AliasSpark)
+		legacyModel = modelprofile.ModelForAlias(modelprofile.AliasCodex)
 	}
 	legacyReasoning := modelprofile.MainThreadReasoningParamsForEffort(alias, modelprofile.MainThreadReasoningEffort(alias))
-	if alias == modelprofile.AliasSpark {
-		legacyReasoning = appServerReasoningParamsForModel(legacyModel, a.appServerSparkReasoningEffort)
-	}
 	return appServerModelProfile{
 		Alias:        alias,
 		Model:        legacyModel,

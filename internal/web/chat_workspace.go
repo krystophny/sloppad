@@ -355,6 +355,8 @@ func summarizeWorkspaceItems(workspace store.Workspace, items []store.Item) stri
 
 type workspacePromptContext struct {
 	ActiveSphere    string
+	ProjectName     string
+	ProjectRootPath string
 	AnchorWorkspace store.Workspace
 	FocusWorkspace  store.Workspace
 	FocusExplicit   bool
@@ -362,6 +364,10 @@ type workspacePromptContext struct {
 }
 
 func (a *App) loadWorkspacePromptContext(projectKey string) *workspacePromptContext {
+	project, err := a.store.GetProjectByProjectKey(strings.TrimSpace(projectKey))
+	if err != nil {
+		return nil
+	}
 	anchor, err := a.fallbackWorkspaceForProjectKey(projectKey)
 	if err != nil || anchor == nil {
 		return nil
@@ -383,6 +389,8 @@ func (a *App) loadWorkspacePromptContext(projectKey string) *workspacePromptCont
 	}
 	return &workspacePromptContext{
 		ActiveSphere:    activeSphere,
+		ProjectName:     strings.TrimSpace(project.Name),
+		ProjectRootPath: strings.TrimSpace(project.RootPath),
 		AnchorWorkspace: *anchor,
 		FocusWorkspace:  focus,
 		FocusExplicit:   explicit,
@@ -397,7 +405,11 @@ func prependWorkspacePromptContext(prompt string, ctx *workspacePromptContext) s
 	var b strings.Builder
 	b.WriteString("## Workspace Context\n")
 	fmt.Fprintf(&b, "Active sphere: %s\n", ctx.ActiveSphere)
-	fmt.Fprintf(&b, "Anchor workspace: %s (%s)\n", ctx.AnchorWorkspace.Name, ctx.AnchorWorkspace.DirPath)
+	if ctx.ProjectName != "" && ctx.ProjectRootPath != "" {
+		fmt.Fprintf(&b, "Default repo workspace: %s (%s)\n", ctx.ProjectName, ctx.ProjectRootPath)
+		b.WriteString("Workspace rule: treat the default repo workspace as today's main coding context unless the user explicitly focuses another workspace.\n")
+	}
+	fmt.Fprintf(&b, "Today's anchor workspace: %s (%s)\n", ctx.AnchorWorkspace.Name, ctx.AnchorWorkspace.DirPath)
 	if ctx.FocusExplicit {
 		fmt.Fprintf(&b, "Focused target workspace: %s (%s)\n", ctx.FocusWorkspace.Name, ctx.FocusWorkspace.DirPath)
 	} else {

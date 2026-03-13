@@ -108,6 +108,23 @@ func (a *App) resolveChatSessionTarget(projectID, projectKey string, workspaceID
 	}
 
 	if workspace, err := a.store.ActiveWorkspace(); err == nil {
+		if strings.TrimSpace(a.localProjectDir) != "" {
+			if startupErr := a.ensureStartupProjectWithWorkspace(); startupErr == nil {
+				project, projectErr := a.ensureDefaultProjectRecord()
+				if projectErr != nil {
+					return store.Workspace{}, nil, projectErr
+				}
+				session, sessionErr := a.chatSessionForProject(project)
+				if sessionErr != nil {
+					return store.Workspace{}, nil, sessionErr
+				}
+				workspace, err = a.store.GetWorkspace(session.WorkspaceID)
+				if err != nil {
+					return store.Workspace{}, nil, err
+				}
+				return workspace, &project, nil
+			}
+		}
 		if workspace.IsDaily && workspaceDailyDate(workspace) != dailyWorkspaceDate(a.runtimeNow()) {
 			workspace, err = a.ensureTodayDailyWorkspace()
 			if err != nil {
@@ -123,6 +140,24 @@ func (a *App) resolveChatSessionTarget(projectID, projectKey string, workspaceID
 		return store.Workspace{}, nil, err
 	}
 
+	if strings.TrimSpace(a.localProjectDir) != "" {
+		if err := a.ensureStartupProjectWithWorkspace(); err != nil {
+			return store.Workspace{}, nil, err
+		}
+		project, err := a.ensureDefaultProjectRecord()
+		if err != nil {
+			return store.Workspace{}, nil, err
+		}
+		session, err := a.chatSessionForProject(project)
+		if err != nil {
+			return store.Workspace{}, nil, err
+		}
+		workspace, err := a.store.GetWorkspace(session.WorkspaceID)
+		if err != nil {
+			return store.Workspace{}, nil, err
+		}
+		return workspace, &project, nil
+	}
 	workspace, err := a.ensureTodayDailyWorkspace()
 	if err != nil {
 		return store.Workspace{}, nil, err

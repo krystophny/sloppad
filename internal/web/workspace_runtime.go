@@ -129,6 +129,26 @@ func defaultProjectNameFromPath(path string) string {
 	return base
 }
 
+func isTaburaRepoPath(path string) bool {
+	cleanPath := strings.TrimSpace(path)
+	if cleanPath == "" {
+		return false
+	}
+	goModPath := filepath.Join(cleanPath, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "module github.com/krystophny/tabura")
+}
+
+func defaultProjectNameForPath(path string) string {
+	if isTaburaRepoPath(path) {
+		return "Tabura"
+	}
+	return defaultProjectNameFromPath(path)
+}
+
 func slugifyProjectName(name string) string {
 	lower := strings.ToLower(strings.TrimSpace(name))
 	if lower == "" {
@@ -263,10 +283,14 @@ func (a *App) ensureDefaultProjectRecord() (store.Project, error) {
 		if err == nil {
 			canvasID := a.canvasSessionIDForProject(existing)
 			mcpURL := strings.TrimSpace(existing.MCPURL)
+			targetName := defaultProjectNameForPath(localProjectKey)
 			if mcpURL == "" {
 				mcpURL = strings.TrimSpace(a.localMCPURL)
 			}
-			if canvasID != strings.TrimSpace(existing.CanvasSessionID) || mcpURL != strings.TrimSpace(existing.MCPURL) {
+			if strings.TrimSpace(existing.Name) != targetName {
+				_ = a.store.UpdateProjectLocation(existing.ID, targetName, existing.ProjectKey, existing.RootPath, existing.Kind)
+			}
+			if canvasID != strings.TrimSpace(existing.CanvasSessionID) || mcpURL != strings.TrimSpace(existing.MCPURL) || strings.TrimSpace(existing.Name) != targetName {
 				_ = a.store.UpdateProjectRuntime(existing.ID, mcpURL, canvasID)
 				if refreshed, refreshErr := a.store.GetProject(existing.ID); refreshErr == nil {
 					existing = refreshed
@@ -304,7 +328,7 @@ func (a *App) ensureDefaultProjectRecord() (store.Project, error) {
 	if localProjectKey != "" {
 		kind = "linked"
 		rootPath = localProjectKey
-		name = defaultProjectNameFromPath(rootPath)
+		name = defaultProjectNameForPath(rootPath)
 	}
 	absRoot, err := filepath.Abs(rootPath)
 	if err != nil {
@@ -320,15 +344,29 @@ func (a *App) ensureDefaultProjectRecord() (store.Project, error) {
 			return store.Project{}, err
 		}
 		absRoot = filepath.Clean(boot.Paths.ProjectDir)
-		name = defaultProjectNameFromPath(absRoot)
+		name = defaultProjectNameForPath(absRoot)
 	}
 	projectKey := absRoot
 	if existing, err := a.store.GetProjectByProjectKey(projectKey); err == nil {
+		targetName := defaultProjectNameForPath(absRoot)
+		if strings.TrimSpace(existing.Name) != targetName {
+			_ = a.store.UpdateProjectLocation(existing.ID, targetName, existing.ProjectKey, existing.RootPath, existing.Kind)
+			if refreshed, refreshErr := a.store.GetProject(existing.ID); refreshErr == nil {
+				existing = refreshed
+			}
+		}
 		return existing, nil
 	} else if !isNoRows(err) {
 		return store.Project{}, err
 	}
 	if existing, err := a.store.GetProjectByRootPath(absRoot); err == nil {
+		targetName := defaultProjectNameForPath(absRoot)
+		if strings.TrimSpace(existing.Name) != targetName {
+			_ = a.store.UpdateProjectLocation(existing.ID, targetName, existing.ProjectKey, existing.RootPath, existing.Kind)
+			if refreshed, refreshErr := a.store.GetProject(existing.ID); refreshErr == nil {
+				existing = refreshed
+			}
+		}
 		return existing, nil
 	} else if !isNoRows(err) {
 		return store.Project{}, err

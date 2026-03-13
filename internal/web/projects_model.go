@@ -326,10 +326,7 @@ func (a *App) updateProjectChatModel(projectID, rawModel, rawReasoningEffort str
 	if err != nil {
 		return store.Project{}, err
 	}
-	modelAlias := modelprofile.ResolveAlias(rawModel, "")
-	if modelAlias == "" {
-		return store.Project{}, errors.New("model must be one of: codex, gpt, spark")
-	}
+	modelAlias := modelprofile.AliasCodex
 	reasoningEffort := strings.TrimSpace(modelprofile.NormalizeReasoningEffort(modelAlias, rawReasoningEffort))
 	if reasoningEffort == "" {
 		reasoningEffort = strings.TrimSpace(modelprofile.MainThreadReasoningEffort(modelAlias))

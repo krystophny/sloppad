@@ -30,16 +30,16 @@ func TestClassifyRoutingRouteCurrentInfoUsesCodexHigh(t *testing.T) {
 	}
 }
 
-func TestClassifyRoutingRouteSimpleGeneralUsesSparkLow(t *testing.T) {
+func TestClassifyRoutingRouteSimpleGeneralUsesCodexHigh(t *testing.T) {
 	route := classifyRoutingRoute("summarize this note")
 	if route.Domain != routingDomainGeneral {
 		t.Fatalf("domain = %q, want %q", route.Domain, routingDomainGeneral)
 	}
-	if route.Model != modelprofile.AliasSpark {
-		t.Fatalf("model = %q, want %q", route.Model, modelprofile.AliasSpark)
+	if route.Model != modelprofile.AliasCodex {
+		t.Fatalf("model = %q, want %q", route.Model, modelprofile.AliasCodex)
 	}
-	if route.Effort != modelprofile.ReasoningLow {
-		t.Fatalf("effort = %q, want %q", route.Effort, modelprofile.ReasoningLow)
+	if route.Effort != modelprofile.ReasoningHigh {
+		t.Fatalf("effort = %q, want %q", route.Effort, modelprofile.ReasoningHigh)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestEnforceRoutingPolicyAllowsItemActionsForNonCurrentInfo(t *testing.T) {
 
 func TestRouteProfileForRoutingAppliesCodexHigh(t *testing.T) {
 	base := appServerModelProfile{
-		Alias: modelprofile.AliasSpark,
-		Model: modelprofile.ModelForAlias(modelprofile.AliasSpark),
+		Alias: modelprofile.AliasCodex,
+		Model: modelprofile.ModelForAlias(modelprofile.AliasCodex),
 	}
 	profile := routeProfileForRouting(routingRoute{
 		Model:  modelprofile.AliasCodex,

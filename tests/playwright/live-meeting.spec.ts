@@ -66,7 +66,7 @@ async function setHarnessMeetingState(
           chat_session_id: 'chat-1',
           canvas_session_id: 'local',
           chat_mode: 'chat',
-          chat_model: 'spark',
+          chat_model: 'codex',
           chat_model_reasoning_effort: 'low',
           run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
         },
