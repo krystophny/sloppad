@@ -33,10 +33,10 @@
   display: grid;
   place-items: center;
   padding:
-    calc(4rem + var(--safe-area-top))
-    calc(2rem + var(--safe-area-right))
-    calc(3rem + var(--safe-area-bottom))
-    calc(2rem + var(--safe-area-left));
+    calc(2rem + var(--safe-area-top))
+    calc(1.5rem + var(--safe-area-right))
+    calc(2rem + var(--safe-area-bottom))
+    calc(1.5rem + var(--safe-area-left));
 }
 
 .companion-idle-frame {
@@ -44,11 +44,11 @@
   display: grid;
   gap: 1.5rem;
   justify-items: center;
-  padding: clamp(2rem, 5vw, 3rem);
-  border: 1px solid var(--companion-panel-border);
-  border-radius: 32px;
-  background: var(--companion-panel);
-  backdrop-filter: blur(14px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .companion-idle-face {
