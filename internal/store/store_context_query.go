@@ -204,7 +204,7 @@ func (s *Store) ListItemsByContextPrefix(prefix string) ([]Item, error) {
 	if cleanPrefix == "" {
 		return nil, errors.New("context is required")
 	}
-	return s.ListItemsFiltered(ItemListFilter{Context: cleanPrefix})
+	return s.ListItemsFiltered(ItemListFilter{Label: cleanPrefix})
 }
 
 func (s *Store) filterArtifactsByContextIDs(artifacts []Artifact, contextIDs []int64) ([]Artifact, error) {

@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-func (s *Store) CreateContext(name string, parentID *int64) (Context, error) {
+func (s *Store) CreateLabel(name string, parentID *int64) (Label, error) {
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
-		return Context{}, errors.New("context name is required")
+		return Label{}, errors.New("label name is required")
 	}
 	if parentID != nil && *parentID <= 0 {
-		return Context{}, errors.New("parent_id must be a positive integer")
+		return Label{}, errors.New("parent_id must be a positive integer")
 	}
 	var existingID int64
 	err := s.db.QueryRow(
@@ -29,9 +29,9 @@ func (s *Store) CreateContext(name string, parentID *int64) (Context, error) {
 	).Scan(&existingID)
 	switch {
 	case err == nil:
-		return s.GetContext(existingID)
+		return s.GetLabel(existingID)
 	case !errors.Is(err, sql.ErrNoRows):
-		return Context{}, err
+		return Label{}, err
 	}
 	res, err := s.db.Exec(
 		`INSERT INTO contexts (name, parent_id) VALUES (?, ?)`,
@@ -39,16 +39,16 @@ func (s *Store) CreateContext(name string, parentID *int64) (Context, error) {
 		parentID,
 	)
 	if err != nil {
-		return Context{}, err
+		return Label{}, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return Context{}, err
+		return Label{}, err
 	}
-	return s.GetContext(id)
+	return s.GetLabel(id)
 }
 
-func (s *Store) GetContext(id int64) (Context, error) {
+func (s *Store) GetLabel(id int64) (Label, error) {
 	row := s.db.QueryRow(
 		`SELECT id, name, color, parent_id, created_at
 		 FROM contexts
@@ -56,53 +56,53 @@ func (s *Store) GetContext(id int64) (Context, error) {
 		id,
 	)
 	var (
-		ctx      Context
+		label    Label
 		parentID sql.NullInt64
 	)
-	if err := row.Scan(&ctx.ID, &ctx.Name, &ctx.Color, &parentID, &ctx.CreatedAt); err != nil {
-		return Context{}, err
+	if err := row.Scan(&label.ID, &label.Name, &label.Color, &parentID, &label.CreatedAt); err != nil {
+		return Label{}, err
 	}
-	ctx.ParentID = nullInt64Pointer(parentID)
-	return ctx, nil
+	label.ParentID = nullInt64Pointer(parentID)
+	return label, nil
 }
 
-func (s *Store) LinkContextToWorkspace(contextID, workspaceID int64) error {
-	if contextID <= 0 || workspaceID <= 0 {
-		return errors.New("context_id and workspace_id must be positive integers")
+func (s *Store) LinkLabelToWorkspace(labelID, workspaceID int64) error {
+	if labelID <= 0 || workspaceID <= 0 {
+		return errors.New("label_id and workspace_id must be positive integers")
 	}
 	_, err := s.db.Exec(
 		`INSERT OR IGNORE INTO context_workspaces (context_id, workspace_id) VALUES (?, ?)`,
-		contextID,
+		labelID,
 		workspaceID,
 	)
 	return err
 }
 
-func (s *Store) LinkContextToItem(contextID, itemID int64) error {
-	if contextID <= 0 || itemID <= 0 {
-		return errors.New("context_id and item_id must be positive integers")
+func (s *Store) LinkLabelToItem(labelID, itemID int64) error {
+	if labelID <= 0 || itemID <= 0 {
+		return errors.New("label_id and item_id must be positive integers")
 	}
 	_, err := s.db.Exec(
 		`INSERT OR IGNORE INTO context_items (context_id, item_id) VALUES (?, ?)`,
-		contextID,
+		labelID,
 		itemID,
 	)
 	return err
 }
 
-func (s *Store) LinkContextToArtifact(contextID, artifactID int64) error {
-	if contextID <= 0 || artifactID <= 0 {
-		return errors.New("context_id and artifact_id must be positive integers")
+func (s *Store) LinkLabelToArtifact(labelID, artifactID int64) error {
+	if labelID <= 0 || artifactID <= 0 {
+		return errors.New("label_id and artifact_id must be positive integers")
 	}
 	_, err := s.db.Exec(
 		`INSERT OR IGNORE INTO context_artifacts (context_id, artifact_id) VALUES (?, ?)`,
-		contextID,
+		labelID,
 		artifactID,
 	)
 	return err
 }
 
-func (s *Store) ListContexts() ([]Context, error) {
+func (s *Store) ListLabels() ([]Label, error) {
 	rows, err := s.db.Query(
 		`SELECT id, name, color, parent_id, created_at
 		 FROM contexts
@@ -112,17 +112,17 @@ func (s *Store) ListContexts() ([]Context, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Context
+	var out []Label
 	for rows.Next() {
 		var (
-			ctx      Context
+			label    Label
 			parentID sql.NullInt64
 		)
-		if err := rows.Scan(&ctx.ID, &ctx.Name, &ctx.Color, &parentID, &ctx.CreatedAt); err != nil {
+		if err := rows.Scan(&label.ID, &label.Name, &label.Color, &parentID, &label.CreatedAt); err != nil {
 			return nil, err
 		}
-		ctx.ParentID = nullInt64Pointer(parentID)
-		out = append(out, ctx)
+		label.ParentID = nullInt64Pointer(parentID)
+		out = append(out, label)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

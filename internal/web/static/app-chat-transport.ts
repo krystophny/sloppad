@@ -3,7 +3,7 @@ import * as context from './app-context.js';
 import { openCanonicalActionCommandCenter } from './app-command-center.js';
 import { closeTurnWs, openTurnWs } from './turn-client.js';
 
-const { marked, apiURL, wsURL, renderCanvas, clearCanvas, resolveCanvasApprovalRequest, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
+const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
 
 const showStatus = (...args) => refs.showStatus(...args);
@@ -128,31 +128,6 @@ export function sendCanvasPositionEvent(anchor, options: Record<string, any> = {
   return sendChatWsJSON(payload);
 }
 
-function approvalRequestCanvasText(payload) {
-  const description = String(payload?.description || 'Approval required').trim();
-  const action = String(payload?.action || payload?.request_kind || '').trim().replace(/_/g, ' ');
-  const reason = String(payload?.reason || '').trim();
-  const grantRoot = String(payload?.grant_root || '').trim();
-  const lines = ['# Approval required', ''];
-  if (description) {
-    lines.push(description, '');
-  }
-  if (action) {
-    lines.push(`- Action: ${action}`);
-  }
-  if (reason) {
-    lines.push(`- Reason: ${reason}`);
-  }
-  if (grantRoot) {
-    lines.push(`- Scope: ${grantRoot}`);
-  }
-  if (lines[lines.length - 1] !== '') {
-    lines.push('');
-  }
-  lines.push('Choose **Approve**, **Reject**, or **Cancel** below to continue.');
-  return lines.join('\n');
-}
-
 function suppressedSystemActionStatusText(action) {
   const actionType = String(action?.action_type || action?.type || 'command').trim().replace(/_/g, ' ');
   const status = String(action?.status || '').trim();
@@ -166,22 +141,7 @@ function suppressedSystemActionStatusText(action) {
 }
 
 function renderApprovalRequestCanvas(payload) {
-  const requestID = String(payload?.request_id || '').trim();
-  if (!requestID) return;
-  renderCanvas({
-    kind: 'text_artifact',
-    title: `.tabura/artifacts/tmp/approval-${requestID}.md`,
-    text: approvalRequestCanvasText(payload),
-    meta: {
-      real_artifact: false,
-      approval_request: true,
-      request_id: requestID,
-      action: String(payload?.action || payload?.request_kind || '').trim(),
-      reason: String(payload?.reason || '').trim(),
-      grant_root: String(payload?.grant_root || '').trim(),
-    },
-  });
-  showCanvasColumn('canvas-text');
+  void payload;
 }
 
 export function openChatWs() {
@@ -579,14 +539,12 @@ export function handleChatEvent(payload) {
 
   if (type === 'approval_request') {
     renderApprovalRequestCard(payload);
-    renderApprovalRequestCanvas(payload);
     showStatus('approval required');
     return;
   }
 
   if (type === 'approval_resolved') {
     resolveApprovalRequestCard(payload?.request_id, payload?.decision);
-    resolveCanvasApprovalRequest(payload?.request_id, payload?.decision);
     return;
   }
 
@@ -620,16 +578,7 @@ export function handleChatEvent(payload) {
     state.turnFirstResponseShown = false;
     // Reset TTS state for new turn
     stopTTSPlayback();
-    const pos = getLastInputPosition();
-    if (isVoiceTurn() || state.hasArtifact) {
-      hideOverlay();
-    } else if (isMobileSilent()) {
-      hideOverlay();
-    } else {
-      showOverlay(pos.x, pos.y + 24);
-      updateOverlay('_Thinking..._');
-      getUiState().overlayTurnId = payload.turn_id || null;
-    }
+    hideOverlay();
     return;
   }
 
@@ -678,12 +627,7 @@ export function handleChatEvent(payload) {
       }
     }
 
-    if (!isVoiceTurn() && !isMobileSilent() && !state.hasArtifact) {
-      const cleaned = cleanForOverlay(md);
-      if (cleaned) updateOverlay(cleaned);
-    } else if (!isVoiceTurn()) {
-      hideOverlay();
-    }
+    if (!isVoiceTurn()) hideOverlay();
     return;
   }
 
@@ -749,19 +693,7 @@ export function handleChatEvent(payload) {
       return;
     }
     if (!isVoiceTurn()) {
-      if (autoCanvas || state.hasArtifact) {
-        hideOverlay();
-        state.canvasActionThisTurn = false;
-        return;
-      }
-      const cleaned = cleanForOverlay(md);
-      if (state.canvasActionThisTurn && !cleaned) {
-        hideOverlay();
-      } else if (cleaned) {
-        updateOverlay(cleaned);
-      } else {
-        hideOverlay();
-      }
+      hideOverlay();
     }
     state.canvasActionThisTurn = false;
     // If live dialogue is active but no TTS was queued (for example silent
@@ -871,8 +803,7 @@ export function handleChatEvent(payload) {
     showStatus(errText);
     updateAssistantActivityIndicator();
     void refreshAssistantActivity();
-    updateOverlay(`**Error:** ${errText}`);
-    window.setTimeout(() => hideOverlay(), 2000);
+    hideOverlay();
     if (isDialogueLiveSession()) {
       onLiveSessionTTSPlaybackComplete();
     }

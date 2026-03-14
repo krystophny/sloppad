@@ -157,8 +157,7 @@ export function isVoiceTranscriptSubmitPending() {
 
 export function hasPendingOverlayTurn() {
   const ui = getUiState();
-  if (!ui || !ui.overlayVisible) return false;
-  return Boolean(String(ui.overlayTurnId || '').trim());
+  return Boolean(ui?.overlayVisible);
 }
 
 export function isDirectAssistantWorking() {

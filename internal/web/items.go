@@ -109,24 +109,24 @@ func parseItemListFilterQuery(r *http.Request) (store.ItemListFilter, error) {
 		}
 		filter.ProjectID = &rawProjectID
 	}
-	if rawContextID := strings.TrimSpace(r.URL.Query().Get("context_id")); rawContextID != "" {
-		if strings.EqualFold(rawContextID, "null") {
-			return store.ItemListFilter{}, errors.New("context_id must be a positive integer")
+	if rawLabelID := strings.TrimSpace(r.URL.Query().Get("label_id")); rawLabelID != "" {
+		if strings.EqualFold(rawLabelID, "null") {
+			return store.ItemListFilter{}, errors.New("label_id must be a positive integer")
 		}
-		contextID, err := strconv.ParseInt(rawContextID, 10, 64)
-		if err != nil || contextID <= 0 {
-			return store.ItemListFilter{}, errors.New("context_id must be a positive integer")
+		labelID, err := strconv.ParseInt(rawLabelID, 10, 64)
+		if err != nil || labelID <= 0 {
+			return store.ItemListFilter{}, errors.New("label_id must be a positive integer")
 		}
-		filter.ContextID = &contextID
+		filter.LabelID = &labelID
 	}
-	if rawContext := strings.TrimSpace(r.URL.Query().Get("context")); rawContext != "" {
-		if strings.EqualFold(rawContext, "null") {
-			return store.ItemListFilter{}, errors.New("context must not be null")
+	if rawLabel := strings.TrimSpace(r.URL.Query().Get("label")); rawLabel != "" {
+		if strings.EqualFold(rawLabel, "null") {
+			return store.ItemListFilter{}, errors.New("label must not be null")
 		}
-		if filter.ContextID != nil {
-			return store.ItemListFilter{}, errors.New("context cannot be combined with context_id")
+		if filter.LabelID != nil {
+			return store.ItemListFilter{}, errors.New("label cannot be combined with label_id")
 		}
-		filter.Context = rawContext
+		filter.Label = rawLabel
 	}
 	return filter, nil
 }

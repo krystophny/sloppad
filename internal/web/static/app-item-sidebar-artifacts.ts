@@ -117,14 +117,14 @@ export function buildIdeaNoteMarkdown(title, artifactMeta) {
   } else {
     detail.push('- No notes yet.');
   }
-  detail.push('', '## Context');
+  detail.push('', '## Label');
   const captureMode = String(artifactMeta?.capture_mode || '').trim();
   if (captureMode) detail.push(`- Captured: ${captureMode}`);
   const workspace = String(artifactMeta?.workspace || '').trim();
   if (workspace) detail.push(`- Workspace: ${workspace}`);
   const capturedAt = String(artifactMeta?.captured_at || '').trim();
   if (capturedAt) detail.push(`- Date: ${capturedAt}`);
-  if (detail[detail.length - 1] === '## Context') {
+  if (detail[detail.length - 1] === '## Label') {
     detail.push('- Date: unavailable');
   }
   const refinements = Array.isArray(artifactMeta?.refinements) ? artifactMeta.refinements : [];

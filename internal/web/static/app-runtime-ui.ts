@@ -265,10 +265,8 @@ export function showVoiceCaptureNotice(message, x = null, y = null) {
     lastVoiceCaptureNoticeText = text;
     lastVoiceCaptureNoticeAt = now;
   }
-  const px = Number.isFinite(x) ? x : Math.floor(window.innerWidth / 2);
-  const py = Number.isFinite(y) ? y : Math.floor(window.innerHeight / 2);
-  showOverlay(px, py + 20);
-  updateOverlay(text);
+  void x;
+  void y;
 }
 
 export function microphoneUnavailableMessage() {

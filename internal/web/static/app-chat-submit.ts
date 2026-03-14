@@ -267,7 +267,7 @@ export async function submitMessage(text, options: Record<string, any> = {}) {
       pending?.remove();
       trackAssistantTurnFinished('');
       appendPlainMessage('system', `Send failed: ${detail}`);
-      updateOverlay(`**Send failed:** ${detail}`);
+      showStatus(`send failed: ${detail}`);
       updateAssistantActivityIndicator();
       return false;
     }
@@ -296,8 +296,9 @@ export async function submitMessage(text, options: Record<string, any> = {}) {
     const pending = takePendingRow('');
     pending?.remove();
     trackAssistantTurnFinished('');
-    appendPlainMessage('system', `Send failed: ${String(err?.message || err)}`);
-    updateOverlay(`**Send failed:** ${String(err?.message || err)}`);
+    const detail = String(err?.message || err);
+    appendPlainMessage('system', `Send failed: ${detail}`);
+    showStatus(`send failed: ${detail}`);
     updateAssistantActivityIndicator();
     return false;
   } finally {

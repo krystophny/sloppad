@@ -18,8 +18,28 @@ import {
   sendTurnConfig,
   sendTurnTranscriptSegment,
 } from './turn-client.js';
+import {
+  acquireMicStream,
+  buildNormalizedSpeechWav,
+  canUseMicrophoneCapture,
+  describeAudioTrack,
+  firstNonEmptyChunkMimeType,
+  isVoiceVADAutoSendEnabled,
+  openPrintView,
+  releaseMicStream,
+  requestMicRefresh,
+  startPCMBackupCapture,
+  stopPCMBackupCapture,
+  takePCMBackupWavBlob,
+} from './app-voice-audio.js';
+export {
+  acquireMicStream,
+  openPrintView,
+  releaseMicStream,
+  requestMicRefresh,
+} from './app-voice-audio.js';
 
-const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, resumeDialogueListen, setDialogueTTSBargeInMode, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav, normalizeSpeechSamples } = env;
+const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, resumeDialogueListen, setDialogueTTSBargeInMode, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
 
 const showStatus = (...args) => refs.showStatus(...args);
@@ -44,9 +64,6 @@ const syncVoiceLifecycle = (...args) => refs.syncVoiceLifecycle(...args);
 const maybeHandleDictationTranscript = (...args) => refs.maybeHandleDictationTranscript(...args);
 const beginConversationVoiceCapture = (...args) => refs.beginConversationVoiceCapture(...args);
 
-const VOICE_VAD_AUTO_SEND_DEFAULT = true;
-const VOICE_VAD_AUTO_SEND_STORAGE_KEY = 'tabura.voiceVadAutoSend';
-const VOICE_VAD_AUTO_SEND_QUERY_PARAM = 'voice_vad_auto_send';
 const VOICE_VAD_NO_SPEECH_MS = 4000;
 const VOICE_VAD_MAX_RECORDING_HARD_MS = 240000;
 const HOTWORD_VAD_NO_SPEECH_MS = 7000;
@@ -229,330 +246,6 @@ function isFirefoxLinux() {
   return ua.includes('firefox') && ua.includes('linux') && !ua.includes('android');
 }
 
-function firstNonEmptyChunkMimeType(chunks) {
-  if (!Array.isArray(chunks)) return '';
-  for (const chunk of chunks) {
-    const mt = String(chunk?.type || '').trim();
-    if (mt) return mt;
-  }
-  return '';
-}
-
-function describeAudioTrack(stream) {
-  const track = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks()[0] : null;
-  if (!track) return {};
-  const settings = typeof track.getSettings === 'function' ? (track.getSettings() || {}) : {};
-  const constraints = typeof track.getConstraints === 'function' ? (track.getConstraints() || {}) : {};
-  return {
-    label: String(track.label || '').trim(),
-    ready_state: String(track.readyState || '').trim(),
-    muted: Boolean(track.muted),
-    settings,
-    constraints,
-  };
-}
-
-function buildNormalizedSpeechWav(samples, sampleRate) {
-  const normalized = normalizeSpeechSamples(samples);
-  const wavBlob = float32ToWav(normalized.samples, sampleRate);
-  if (normalized.applied && normalized.samples instanceof Float32Array && normalized.samples !== samples) {
-    normalized.samples.fill(0);
-  }
-  return {
-    blob: wavBlob,
-    normalization_gain: Number(normalized.gain || 1),
-    normalization_peak: Number(normalized.peak || 0),
-    normalization_applied: normalized.applied === true,
-  };
-}
-
-function clearPCMBackupChunks(capture) {
-  const pcm = capture?._pcmBackup;
-  if (!pcm || !Array.isArray(pcm.chunks)) return;
-  for (const chunk of pcm.chunks) {
-    if (chunk instanceof Float32Array) {
-      chunk.fill(0);
-    }
-  }
-  pcm.chunks = [];
-  pcm.totalSamples = 0;
-}
-
-function stopPCMBackupCapture(capture, { preserveSamples = true } = {}) {
-  const pcm = capture?._pcmBackup;
-  if (!pcm) return;
-  if (pcm.processorNode) {
-    try { pcm.processorNode.onaudioprocess = null; } catch (_) {}
-    try { pcm.processorNode.disconnect(); } catch (_) {}
-  }
-  if (pcm.sourceNode) {
-    try { pcm.sourceNode.disconnect(); } catch (_) {}
-  }
-  if (pcm.sinkNode) {
-    try { pcm.sinkNode.disconnect(); } catch (_) {}
-  }
-  if (pcm.audioContext) {
-    try { pcm.audioContext.close(); } catch (_) {}
-  }
-  pcm.processorNode = null;
-  pcm.sourceNode = null;
-  pcm.sinkNode = null;
-  pcm.audioContext = null;
-  if (!preserveSamples) {
-    clearPCMBackupChunks(capture);
-    capture._pcmBackup = null;
-  }
-}
-
-function startPCMBackupCapture(capture, stream) {
-  if (!isFirefoxLinux()) return false;
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor) return false;
-  let audioContext = null;
-  let sourceNode = null;
-  let processorNode = null;
-  let sinkNode = null;
-  try {
-    audioContext = new AudioContextCtor();
-    if (audioContext.state === 'suspended' && typeof audioContext.resume === 'function') {
-      void audioContext.resume().catch(() => {});
-    }
-    if (typeof audioContext.createMediaStreamSource !== 'function' || typeof audioContext.createScriptProcessor !== 'function') {
-      if (audioContext) {
-        try { audioContext.close(); } catch (_) {}
-      }
-      return false;
-    }
-    sourceNode = audioContext.createMediaStreamSource(stream);
-    processorNode = audioContext.createScriptProcessor(4096, 1, 1);
-    sinkNode = typeof audioContext.createGain === 'function' ? audioContext.createGain() : null;
-    if (sinkNode && sinkNode.gain) sinkNode.gain.value = 0;
-    const backup = {
-      audioContext,
-      sourceNode,
-      processorNode,
-      sinkNode,
-      sampleRate: Number(audioContext.sampleRate) || 16000,
-      chunks: [],
-      totalSamples: 0,
-    };
-    processorNode.onaudioprocess = (event) => {
-      const input = event?.inputBuffer?.getChannelData?.(0);
-      if (!(input instanceof Float32Array) || input.length === 0) return;
-      const copy = new Float32Array(input.length);
-      copy.set(input);
-      backup.chunks.push(copy);
-      backup.totalSamples += copy.length;
-    };
-    sourceNode.connect(processorNode);
-    if (sinkNode) {
-      processorNode.connect(sinkNode);
-      sinkNode.connect(audioContext.destination);
-    } else {
-      processorNode.connect(audioContext.destination);
-    }
-    capture._pcmBackup = backup;
-    return true;
-  } catch (_) {
-    try { processorNode?.disconnect(); } catch (_) {}
-    try { sourceNode?.disconnect(); } catch (_) {}
-    try { sinkNode?.disconnect(); } catch (_) {}
-    try { audioContext?.close(); } catch (_) {}
-    return false;
-  }
-}
-
-function takePCMBackupWavBlob(capture) {
-  const pcm = capture?._pcmBackup;
-  if (!pcm || !Array.isArray(pcm.chunks) || pcm.totalSamples <= 0) return null;
-  const merged = new Float32Array(pcm.totalSamples);
-  let offset = 0;
-  for (const chunk of pcm.chunks) {
-    if (!(chunk instanceof Float32Array) || chunk.length === 0) continue;
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  clearPCMBackupChunks(capture);
-  if (offset <= 0) {
-    merged.fill(0);
-    return null;
-  }
-  const samples = offset === merged.length ? merged : new Float32Array(merged.subarray(0, offset));
-  const normalized = buildNormalizedSpeechWav(samples, pcm.sampleRate || 16000);
-  merged.fill(0);
-  if (samples !== merged) {
-    samples.fill(0);
-  }
-  if (!(normalized.blob instanceof Blob) || normalized.blob.size <= 44) return null;
-  return normalized;
-}
-
-
-function canUseMicrophoneCapture() {
-  return Boolean(window.MediaRecorder)
-    && Boolean(navigator.mediaDevices)
-    && typeof navigator.mediaDevices.getUserMedia === 'function';
-}
-
-const MIC_CAPTURE_CONSTRAINTS = {
-  echoCancellation: true,
-  autoGainControl: true,
-  noiseSuppression: true,
-  channelCount: 1,
-  volume: 1.0,
-};
-
-let _cachedMicStream = null;
-let _micStreamPromise = null;
-let _cachedMicStreamCleanup = null;
-let _micRefreshRequested = false;
-
-function detachCachedMicStreamObservers() {
-  if (typeof _cachedMicStreamCleanup === 'function') {
-    try {
-      _cachedMicStreamCleanup();
-    } catch (_) {}
-  }
-  _cachedMicStreamCleanup = null;
-}
-
-export function requestMicRefresh() {
-  _micRefreshRequested = true;
-}
-
-function streamHasLiveAudioTrack(stream) {
-  if (!stream || typeof stream.getAudioTracks !== 'function') return false;
-  if (typeof stream.active === 'boolean' && !stream.active) return false;
-  const tracks = stream.getAudioTracks();
-  if (!Array.isArray(tracks) || tracks.length === 0) return false;
-  return tracks.every((track) => {
-    if (!track) return false;
-    if (String(track.readyState || '').toLowerCase() !== 'live') return false;
-    if (typeof track.enabled === 'boolean' && !track.enabled) return false;
-    if (typeof track.muted === 'boolean' && track.muted) return false;
-    return true;
-  });
-}
-
-function invalidateCachedMicStream({ stopTracks = false } = {}) {
-  const stream = _cachedMicStream;
-  detachCachedMicStreamObservers();
-  _cachedMicStream = null;
-  if (!stream || !stopTracks || typeof stream.getTracks !== 'function') return;
-  try {
-    stream.getTracks().forEach((track) => {
-      try {
-        if (track?.readyState !== 'ended') track.stop();
-      } catch (_) {}
-    });
-  } catch (_) {}
-}
-
-function observeCachedMicStream(stream) {
-  if (!stream || typeof stream.getAudioTracks !== 'function') return;
-  const tracks = stream.getAudioTracks();
-  const disposers = [];
-  const invalidate = () => {
-    requestMicRefresh();
-    if (_cachedMicStream === stream) {
-      const activeCapture = state.chatVoiceCapture;
-      if (activeCapture && activeCapture.mediaStream === stream && !activeCapture.stopping) {
-        return;
-      }
-      invalidateCachedMicStream({ stopTracks: false });
-    }
-  };
-
-  if (typeof stream.addEventListener === 'function') {
-    const onInactive = () => invalidate();
-    try {
-      stream.addEventListener('inactive', onInactive, { once: true });
-      disposers.push(() => {
-        try {
-          stream.removeEventListener('inactive', onInactive);
-        } catch (_) {}
-      });
-    } catch (_) {}
-  }
-
-  tracks.forEach((track) => {
-    if (!track || typeof track.addEventListener !== 'function') return;
-    const onEnded = () => invalidate();
-    const onMute = () => invalidate();
-    try {
-      track.addEventListener('ended', onEnded, { once: true });
-      track.addEventListener('mute', onMute, { once: true });
-      disposers.push(() => {
-        try { track.removeEventListener('ended', onEnded); } catch (_) {}
-        try { track.removeEventListener('mute', onMute); } catch (_) {}
-      });
-    } catch (_) {}
-  });
-
-  _cachedMicStreamCleanup = () => {
-    for (const dispose of disposers) {
-      try { dispose(); } catch (_) {}
-    }
-  };
-}
-
-export function acquireMicStream() {
-  if (_cachedMicStream && !_micRefreshRequested && streamHasLiveAudioTrack(_cachedMicStream)) {
-    return Promise.resolve(_cachedMicStream);
-  }
-  if (_cachedMicStream) invalidateCachedMicStream({ stopTracks: false });
-  if (_micStreamPromise) return _micStreamPromise;
-  _micStreamPromise = navigator.mediaDevices.getUserMedia({
-    audio: { ...MIC_CAPTURE_CONSTRAINTS },
-  }).then((stream) => {
-    const track = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks()[0] : null;
-    if (track && typeof track.applyConstraints === 'function') {
-      void track.applyConstraints({ ...MIC_CAPTURE_CONSTRAINTS }).catch(() => {});
-    }
-    _micRefreshRequested = false;
-    _cachedMicStream = stream;
-    observeCachedMicStream(stream);
-    _micStreamPromise = null;
-    return stream;
-  }).catch((err) => {
-    _micStreamPromise = null;
-    throw err;
-  });
-  return _micStreamPromise;
-}
-
-export function releaseMicStream({ force = false } = {}) {
-  if (!_cachedMicStream) return;
-  const activeCapture = state.chatVoiceCapture;
-  if (!force && activeCapture && activeCapture.mediaStream === _cachedMicStream && !activeCapture.stopping) {
-    return;
-  }
-  invalidateCachedMicStream({ stopTracks: true });
-}
-
-export function parseOptionalBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized === '1' || normalized === 'true' || normalized === 'on' || normalized === 'yes') return true;
-  if (normalized === '0' || normalized === 'false' || normalized === 'off' || normalized === 'no') return false;
-  return null;
-}
-
-export function isVoiceVADAutoSendEnabled() {
-  try {
-    const queryValue = new URL(window.location.href).searchParams.get(VOICE_VAD_AUTO_SEND_QUERY_PARAM);
-    const queryFlag = parseOptionalBoolean(queryValue);
-    if (queryFlag !== null) return queryFlag;
-  } catch (_) {}
-  try {
-    const storedValue = window.localStorage.getItem(VOICE_VAD_AUTO_SEND_STORAGE_KEY);
-    const storedFlag = parseOptionalBoolean(storedValue);
-    if (storedFlag !== null) return storedFlag;
-  } catch (_) {}
-  return VOICE_VAD_AUTO_SEND_DEFAULT;
-}
-
 let _sttMimeType = '';
 let _sttParts = [];
 let _sttActive = false;
@@ -561,28 +254,6 @@ let _sttAbortController = null;
 function recordHarnessSTTAction(action, payload = {}) {
   if (!Array.isArray(window.__harnessLog)) return;
   window.__harnessLog.push({ type: 'stt', action, ...payload });
-}
-
-function recordHarnessPrintAction(action, payload = {}) {
-  if (!Array.isArray(window.__harnessLog)) return;
-  window.__harnessLog.push({ type: 'print', action, ...payload });
-}
-
-export function openPrintView(url) {
-  const target = String(url || '').trim();
-  if (!target) return;
-  let frame = document.getElementById('print-frame');
-  if (!(frame instanceof HTMLIFrameElement)) {
-    frame = document.createElement('iframe');
-    frame.id = 'print-frame';
-    frame.style.display = 'none';
-    document.body.appendChild(frame);
-  }
-  const separator = target.includes('?') ? '&' : '?';
-  const nextURL = `${target}${separator}__tabura_print=${Date.now()}`;
-  frame.setAttribute('src', nextURL);
-  recordHarnessPrintAction('open', { url: nextURL });
-  showStatus('print view opened');
 }
 
 export function sttStart(mimeType) {

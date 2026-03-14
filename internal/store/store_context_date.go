@@ -109,7 +109,7 @@ func (s *Store) syncWorkspaceDateContext(workspaceID int64, dailyDate *string) e
 	if err != nil {
 		return err
 	}
-	return s.LinkContextToWorkspace(contextID, workspaceID)
+	return s.LinkLabelToWorkspace(contextID, workspaceID)
 }
 
 func (s *Store) syncItemDateContext(itemID int64, workspaceID *int64) error {
@@ -146,5 +146,5 @@ func (s *Store) syncItemDateContext(itemID int64, workspaceID *int64) error {
 	if err != nil {
 		return err
 	}
-	return s.LinkContextToItem(contextID, itemID)
+	return s.LinkLabelToItem(contextID, itemID)
 }

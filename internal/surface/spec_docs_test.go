@@ -73,7 +73,7 @@ func TestInteractionGrammarDocIsIndexedAndLinked(t *testing.T) {
 		"- **Artifact**",
 		"- **Item**",
 		"- **Actor**",
-		"- **Context**",
+		"- **Label**",
 		"- Dialogue",
 		"- Meeting",
 	}

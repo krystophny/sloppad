@@ -25,8 +25,8 @@ const suppressSyntheticClick = (...args) => refs.suppressSyntheticClick(...args)
 const showItemSidebarDelegateMenu = (...args) => refs.showItemSidebarDelegateMenu(...args);
 const performItemSidebarTriage = (...args) => refs.performItemSidebarTriage(...args);
 const performItemSidebarStateUpdate = (...args) => refs.performItemSidebarStateUpdate(...args);
-const showItemSidebarContextFilterMenu = (...args) => refs.showItemSidebarContextFilterMenu(...args);
-const applyItemSidebarContextFilter = (...args) => refs.applyItemSidebarContextFilter(...args);
+const showItemSidebarLabelFilterMenu = (...args) => refs.showItemSidebarLabelFilterMenu(...args);
+const applyItemSidebarLabelFilter = (...args) => refs.applyItemSidebarLabelFilter(...args);
 const normalizeWorkspaceBrowserPath = (...args) => refs.normalizeWorkspaceBrowserPath(...args);
 const loadWorkspaceBrowserPath = (...args) => refs.loadWorkspaceBrowserPath(...args);
 const parentWorkspaceBrowserPath = (...args) => refs.parentWorkspaceBrowserPath(...args);
@@ -104,8 +104,8 @@ export async function loadItemSidebarView(view = state.itemSidebarView, filters 
   hideItemSidebarMenu();
   state.itemSidebarView = normalizedView;
   state.itemSidebarFilters = normalizedFilters;
-  if (!(Number(state.itemSidebarFilters?.context_id || 0) > 0)) {
-    state.itemSidebarContextLabel = '';
+  if (!(Number(state.itemSidebarFilters?.label_id || 0) > 0)) {
+    state.itemSidebarLabelName = '';
   }
   state.itemSidebarLoading = true;
   state.itemSidebarError = '';
@@ -587,29 +587,29 @@ export function renderItemSidebarList(list) {
   const activeItem = items.find((entry) => Number(entry?.id || 0) === Number(state.itemSidebarActiveItemID || 0)) || null;
   const actions = document.createElement('div');
   actions.className = 'sidebar-actions';
-  const activeContextID = Number(state.itemSidebarFilters?.context_id || 0);
-  const contextFilterButton = document.createElement('button');
-  contextFilterButton.type = 'button';
-  contextFilterButton.className = 'edge-btn';
-  contextFilterButton.id = 'item-sidebar-context-filter';
-  contextFilterButton.textContent = activeContextID > 0
-    ? `Context: ${String(state.itemSidebarContextLabel || '').trim() || `#${activeContextID}`}`
-    : 'Filter by Context';
-  contextFilterButton.addEventListener('click', () => {
-    const rect = contextFilterButton.getBoundingClientRect();
-    void showItemSidebarContextFilterMenu(rect.left, rect.bottom + 8);
+  const activeLabelID = Number(state.itemSidebarFilters?.label_id || 0);
+  const labelFilterButton = document.createElement('button');
+  labelFilterButton.type = 'button';
+  labelFilterButton.className = 'edge-btn';
+  labelFilterButton.id = 'item-sidebar-label-filter';
+  labelFilterButton.textContent = activeLabelID > 0
+    ? `Label: ${String(state.itemSidebarLabelName || '').trim() || `#${activeLabelID}`}`
+    : 'Filter by Label';
+  labelFilterButton.addEventListener('click', () => {
+    const rect = labelFilterButton.getBoundingClientRect();
+    void showItemSidebarLabelFilterMenu(rect.left, rect.bottom + 8);
   });
-  actions.appendChild(contextFilterButton);
-  if (activeContextID > 0) {
-    const clearContextButton = document.createElement('button');
-    clearContextButton.type = 'button';
-    clearContextButton.className = 'edge-btn';
-    clearContextButton.id = 'item-sidebar-context-clear';
-    clearContextButton.textContent = 'Clear Context Filter';
-    clearContextButton.addEventListener('click', () => {
-      void applyItemSidebarContextFilter(0, '');
+  actions.appendChild(labelFilterButton);
+  if (activeLabelID > 0) {
+    const clearLabelButton = document.createElement('button');
+    clearLabelButton.type = 'button';
+    clearLabelButton.className = 'edge-btn';
+    clearLabelButton.id = 'item-sidebar-label-clear';
+    clearLabelButton.textContent = 'Clear Label Filter';
+    clearLabelButton.addEventListener('click', () => {
+      void applyItemSidebarLabelFilter(0, '');
     });
-    actions.appendChild(clearContextButton);
+    actions.appendChild(clearLabelButton);
   }
   const newMailButton = document.createElement('button');
   newMailButton.type = 'button';

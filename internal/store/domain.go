@@ -92,13 +92,13 @@ type ItemListFilter struct {
 	WorkspaceID           *int64  `json:"workspace_id,omitempty"`
 	WorkspaceUnassigned   bool    `json:"workspace_unassigned,omitempty"`
 	ProjectID             *string `json:"project_id,omitempty"`
-	ContextID             *int64  `json:"context_id,omitempty"`
-	Context               string  `json:"context,omitempty"`
-	resolvedContextGroups [][]int64
-	contextResolved       bool
+	LabelID               *int64  `json:"label_id,omitempty"`
+	Label                 string  `json:"label,omitempty"`
+	resolvedLabelGroups   [][]int64
+	labelResolved         bool
 }
 
-type Context struct {
+type Label struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Color     string `json:"color,omitempty"`

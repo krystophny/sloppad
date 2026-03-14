@@ -9,17 +9,17 @@ import (
 func TestEnsureDateContextHierarchyRepairsParentChain(t *testing.T) {
 	s := newTestStore(t)
 
-	year, err := s.CreateContext("2026", nil)
+	year, err := s.CreateLabel("2026", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(year) error: %v", err)
+		t.Fatalf("CreateLabel(year) error: %v", err)
 	}
-	month, err := s.CreateContext("2026/03", nil)
+	month, err := s.CreateLabel("2026/03", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(month) error: %v", err)
+		t.Fatalf("CreateLabel(month) error: %v", err)
 	}
-	day, err := s.CreateContext("2026/03/11", nil)
+	day, err := s.CreateLabel("2026/03/11", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(day) error: %v", err)
+		t.Fatalf("CreateLabel(day) error: %v", err)
 	}
 
 	dayID, err := s.EnsureDateContextHierarchy(time.Date(2026, time.March, 11, 16, 4, 0, 0, time.FixedZone("CET", 3600)))
@@ -30,9 +30,9 @@ func TestEnsureDateContextHierarchyRepairsParentChain(t *testing.T) {
 		t.Fatalf("EnsureDateContextHierarchy() = %d, want existing day context %d", dayID, day.ID)
 	}
 
-	updatedYear := mustGetContextByName(t, s, "2026")
-	updatedMonth := mustGetContextByName(t, s, "2026/03")
-	updatedDay := mustGetContextByName(t, s, "2026/03/11")
+	updatedYear := mustGetLabelByName(t, s, "2026")
+	updatedMonth := mustGetLabelByName(t, s, "2026/03")
+	updatedDay := mustGetLabelByName(t, s, "2026/03/11")
 	if updatedYear.ParentID != nil {
 		t.Fatalf("year parent_id = %v, want nil", updatedYear.ParentID)
 	}
@@ -53,9 +53,9 @@ func TestEnsureDailyWorkspaceLinksDateContextHierarchy(t *testing.T) {
 		t.Fatalf("EnsureDailyWorkspace() error: %v", err)
 	}
 
-	year := mustGetContextByName(t, s, "2026")
-	month := mustGetContextByName(t, s, "2026/03")
-	day := mustGetContextByName(t, s, "2026/03/11")
+	year := mustGetLabelByName(t, s, "2026")
+	month := mustGetLabelByName(t, s, "2026/03")
+	day := mustGetLabelByName(t, s, "2026/03/11")
 	if month.ParentID == nil || *month.ParentID != year.ID {
 		t.Fatalf("month parent_id = %v, want %d", month.ParentID, year.ID)
 	}
@@ -150,32 +150,32 @@ func TestDateAndTopicContextQueriesCanBeCombined(t *testing.T) {
 	}
 
 	workRootID := contextIDByNameForTest(t, s, "work")
-	workRoot, err := s.GetContext(workRootID)
+	workRoot, err := s.GetLabel(workRootID)
 	if err != nil {
-		t.Fatalf("GetContext(work) error: %v", err)
+		t.Fatalf("GetLabel(work) error: %v", err)
 	}
 	privateRootID := contextIDByNameForTest(t, s, "private")
-	privateRoot, err := s.GetContext(privateRootID)
+	privateRoot, err := s.GetLabel(privateRootID)
 	if err != nil {
-		t.Fatalf("GetContext(private) error: %v", err)
+		t.Fatalf("GetLabel(private) error: %v", err)
 	}
-	plasmaContext, err := s.CreateContext("work/plasma", &workRoot.ID)
+	plasmaContext, err := s.CreateLabel("work/plasma", &workRoot.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(work/plasma) error: %v", err)
+		t.Fatalf("CreateLabel(work/plasma) error: %v", err)
 	}
-	healthContext, err := s.CreateContext("private/health", &privateRoot.ID)
+	healthContext, err := s.CreateLabel("private/health", &privateRoot.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(private/health) error: %v", err)
+		t.Fatalf("CreateLabel(private/health) error: %v", err)
 	}
-	marchDay := mustGetContextByName(t, s, "2026/03/11")
-	if err := s.LinkContextToWorkspace(plasmaContext.ID, plasmaWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(plasma) error: %v", err)
+	marchDay := mustGetLabelByName(t, s, "2026/03/11")
+	if err := s.LinkLabelToWorkspace(plasmaContext.ID, plasmaWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(plasma) error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(marchDay.ID, healthWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(march day) error: %v", err)
+	if err := s.LinkLabelToWorkspace(marchDay.ID, healthWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(march day) error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(healthContext.ID, healthWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(health) error: %v", err)
+	if err := s.LinkLabelToWorkspace(healthContext.ID, healthWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(health) error: %v", err)
 	}
 
 	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
@@ -213,14 +213,14 @@ func TestDateAndTopicContextQueriesCanBeCombined(t *testing.T) {
 	}
 }
 
-func mustGetContextByName(t *testing.T, s *Store, name string) Context {
+func mustGetLabelByName(t *testing.T, s *Store, name string) Label {
 	t.Helper()
 	contextID := contextIDByNameForTest(t, s, name)
-	context, err := s.GetContext(contextID)
+	label, err := s.GetLabel(contextID)
 	if err != nil {
-		t.Fatalf("GetContext(%q) error: %v", name, err)
+		t.Fatalf("GetLabel(%q) error: %v", name, err)
 	}
-	return context
+	return label
 }
 
 func hasContextLink(t *testing.T, s *Store, linkTable, entityColumn string, entityID, contextID int64) bool {

@@ -1284,25 +1284,25 @@ func TestItemSummaryFilters(t *testing.T) {
 func TestItemSummaryFiltersByContextIncludingDescendants(t *testing.T) {
 	s := newTestStore(t)
 
-	parent, err := s.CreateContext("Work", nil)
+	parent, err := s.CreateLabel("Work", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(parent) error: %v", err)
+		t.Fatalf("CreateLabel(parent) error: %v", err)
 	}
-	child, err := s.CreateContext("W7x", &parent.ID)
+	child, err := s.CreateLabel("W7x", &parent.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(child) error: %v", err)
+		t.Fatalf("CreateLabel(child) error: %v", err)
 	}
-	privateCtx, err := s.CreateContext("Private", nil)
+	privateCtx, err := s.CreateLabel("Private", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(private) error: %v", err)
+		t.Fatalf("CreateLabel(private) error: %v", err)
 	}
 
 	workspace, err := s.CreateWorkspace("Alpha", filepath.Join(t.TempDir(), "alpha"))
 	if err != nil {
 		t.Fatalf("CreateWorkspace() error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(child.ID, workspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace() error: %v", err)
+	if err := s.LinkLabelToWorkspace(child.ID, workspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace() error: %v", err)
 	}
 
 	now := time.Date(2026, time.March, 8, 10, 0, 0, 0, time.UTC)
@@ -1322,8 +1322,8 @@ func TestItemSummaryFiltersByContextIncludingDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem(private) error: %v", err)
 	}
-	if err := s.LinkContextToItem(privateCtx.ID, privateItem.ID); err != nil {
-		t.Fatalf("LinkContextToItem() error: %v", err)
+	if err := s.LinkLabelToItem(privateCtx.ID, privateItem.ID); err != nil {
+		t.Fatalf("LinkLabelToItem() error: %v", err)
 	}
 	directChildItem, err := s.CreateItem("Direct child context item", ItemOptions{
 		State:        ItemStateInbox,
@@ -1332,11 +1332,11 @@ func TestItemSummaryFiltersByContextIncludingDescendants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem(direct child) error: %v", err)
 	}
-	if err := s.LinkContextToItem(child.ID, directChildItem.ID); err != nil {
-		t.Fatalf("LinkContextToItem(child) error: %v", err)
+	if err := s.LinkLabelToItem(child.ID, directChildItem.ID); err != nil {
+		t.Fatalf("LinkLabelToItem(child) error: %v", err)
 	}
 
-	parentFilter := ItemListFilter{ContextID: &parent.ID}
+	parentFilter := ItemListFilter{LabelID: &parent.ID}
 	parentItems, err := s.ListInboxItemsFiltered(now, parentFilter)
 	if err != nil {
 		t.Fatalf("ListInboxItemsFiltered(parent) error: %v", err)

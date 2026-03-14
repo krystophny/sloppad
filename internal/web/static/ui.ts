@@ -12,7 +12,6 @@ const uiState = {
   mode: 'rasa',
   recording: false,
   overlayVisible: false,
-  overlayTurnId: null,
   inputAnchor: null,
   cursorAnchor: null,
   cursorPinned: false,
@@ -112,15 +111,6 @@ function paneAnchoredPosition() {
     x: rect.left + uiState.lastInputPaneLocalX - pane.scrollLeft,
     y: rect.top + uiState.lastInputPaneLocalY - pane.scrollTop,
   };
-}
-
-function overlayEl() {
-  return document.getElementById('overlay');
-}
-
-function overlayContentEl() {
-  const ol = overlayEl();
-  return ol ? ol.querySelector('.overlay-content') : null;
 }
 
 export function showIndicatorMode(mode, x, y) {
@@ -224,38 +214,17 @@ export function hideTextInput() {
 }
 
 export function showOverlay(x, y) {
-  const el = overlayEl();
-  if (!el) return;
-  const content = overlayContentEl();
-  if (content) content.innerHTML = '';
-  const cx = typeof x === 'number' ? x : window.innerWidth / 2 - 150;
-  const cy = typeof y === 'number' ? y : window.innerHeight / 3;
-  el.style.left = `${Math.max(8, Math.min(cx, window.innerWidth - 320))}px`;
-  el.style.top = `${Math.max(8, Math.min(cy, window.innerHeight - 200))}px`;
-  el.style.display = '';
-  uiState.overlayVisible = true;
+  void x;
+  void y;
+  uiState.overlayVisible = false;
 }
 
 export function hideOverlay() {
-  const el = overlayEl();
-  if (!el) return;
-  el.style.display = 'none';
   uiState.overlayVisible = false;
-  uiState.overlayTurnId = null;
 }
 
 export function updateOverlay(markdownText) {
-  const content = overlayContentEl();
-  if (!content) return;
-  content.innerHTML = renderMarkdown(markdownText);
-  const ol = overlayEl();
-  if (ol) {
-    ol.scrollTop = ol.scrollHeight;
-  }
-  const mj = window.MathJax;
-  if (mj && typeof mj.typesetPromise === 'function') {
-    void mj.typesetPromise([content]).catch(() => {});
-  }
+  void markdownText;
 }
 
 export function isOverlayVisible() {

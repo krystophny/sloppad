@@ -1,4 +1,4 @@
-export interface Context {
+export interface Label {
   id: number;
   name: string;
   color?: string;
@@ -11,7 +11,7 @@ export interface Workspace {
   dir_path: string;
   sphere?: 'work' | 'private' | '';
   is_active: boolean;
-  contexts?: Context[];
+  labels?: Label[];
 }
 
 export interface Artifact {
@@ -20,7 +20,7 @@ export interface Artifact {
   title: string;
   ref_path?: string;
   ref_url?: string;
-  contexts?: Context[];
+  labels?: Label[];
 }
 
 export interface Item {
@@ -30,7 +30,7 @@ export interface Item {
   workspace_id?: number | null;
   artifact_id?: number | null;
   actor_id?: number | null;
-  contexts?: Context[];
+  labels?: Label[];
 }
 
 export interface Actor {

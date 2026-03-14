@@ -40,9 +40,8 @@ export function normalizeItemSidebarView(rawView) {
 export function normalizeItemSidebarFilters(rawFilters = null) {
   const filters = rawFilters && typeof rawFilters === 'object' ? rawFilters : {};
   const source = String(filters.source || '').trim().toLowerCase();
-  const projectID = String(filters.project_id || '').trim();
-  const contextIDRaw = Number(filters.context_id || 0);
-  const contextID = Number.isFinite(contextIDRaw) && contextIDRaw > 0 ? Math.trunc(contextIDRaw) : null;
+  const labelIDRaw = Number(filters.label_id || 0);
+  const labelID = Number.isFinite(labelIDRaw) && labelIDRaw > 0 ? Math.trunc(labelIDRaw) : null;
   const allSpheres = filters.all_spheres === true;
   const workspaceRaw = filters.workspace_id;
   const workspaceUnassigned = String(workspaceRaw || '').trim().toLowerCase() === 'null'
@@ -55,8 +54,7 @@ export function normalizeItemSidebarFilters(rawFilters = null) {
     all_spheres: allSpheres,
     source,
     workspace_id: workspaceID,
-    project_id: projectID,
-    context_id: contextID,
+    label_id: labelID,
     workspace_unassigned: workspaceUnassigned,
   };
 }
@@ -72,11 +70,8 @@ function appendItemSidebarFilterQuery(path, filters = state.itemSidebarFilters) 
   } else if (Number.isFinite(normalized.workspace_id) && normalized.workspace_id > 0) {
     nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}workspace_id=${encodeURIComponent(String(normalized.workspace_id))}`;
   }
-  if (normalized.project_id) {
-    nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}project_id=${encodeURIComponent(normalized.project_id)}`;
-  }
-  if (Number.isFinite(normalized.context_id) && normalized.context_id > 0) {
-    nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}context_id=${encodeURIComponent(String(normalized.context_id))}`;
+  if (Number.isFinite(normalized.label_id) && normalized.label_id > 0) {
+    nextPath = `${nextPath}${nextPath.includes('?') ? '&' : '?'}label_id=${encodeURIComponent(String(normalized.label_id))}`;
   }
   return nextPath;
 }
@@ -316,34 +311,15 @@ export async function fetchItemSidebarWorkspaces() {
     .filter((workspace) => workspace.id > 0 && workspace.name);
 }
 
-export async function fetchItemSidebarProjects() {
-  const resp = await fetch(apiURL('projects'), { cache: 'no-store' });
+export async function fetchItemSidebarLabels() {
+  const resp = await fetch(apiURL('labels'), { cache: 'no-store' });
   if (!resp.ok) {
     const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
     throw new Error(detail);
   }
   const payload = await resp.json();
-  const projects = Array.isArray(payload?.projects) ? payload.projects : [];
-  return projects
-    .map((project) => ({
-      id: String(project?.id || '').trim(),
-      name: String(project?.name || '').trim(),
-      sphere: String(project?.sphere || '').trim().toLowerCase(),
-    }))
-    .filter((project) => project.id
-      && project.name
-      && (!project.sphere || project.sphere === normalizeActiveSphere(state.activeSphere)));
-}
-
-export async function fetchItemSidebarContexts() {
-  const resp = await fetch(apiURL('contexts'), { cache: 'no-store' });
-  if (!resp.ok) {
-    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
-    throw new Error(detail);
-  }
-  const payload = await resp.json();
-  const contexts = Array.isArray(payload?.contexts) ? payload.contexts : [];
-  const normalized = contexts
+  const labels = Array.isArray(payload?.labels) ? payload.labels : [];
+  const normalized = labels
     .map((entry) => ({
       id: Number(entry?.id || 0),
       name: String(entry?.name || '').trim(),
@@ -387,45 +363,45 @@ export async function fetchItemSidebarContexts() {
   return ordered;
 }
 
-export async function applyItemSidebarContextFilter(contextID = 0, contextLabel = '') {
-  const normalizedContextID = Number.isFinite(Number(contextID)) && Number(contextID) > 0
-    ? Math.trunc(Number(contextID))
+export async function applyItemSidebarLabelFilter(labelID = 0, labelName = '') {
+  const normalizedLabelID = Number.isFinite(Number(labelID)) && Number(labelID) > 0
+    ? Math.trunc(Number(labelID))
     : 0;
-  state.itemSidebarContextLabel = normalizedContextID > 0
-    ? (String(contextLabel || '').trim() || `Context ${normalizedContextID}`)
+  state.itemSidebarLabelName = normalizedLabelID > 0
+    ? (String(labelName || '').trim() || `Label ${normalizedLabelID}`)
     : '';
   const nextFilters = {
     ...state.itemSidebarFilters,
-    context_id: normalizedContextID > 0 ? normalizedContextID : null,
+    label_id: normalizedLabelID > 0 ? normalizedLabelID : null,
   };
   await loadItemSidebarView(state.itemSidebarView, nextFilters);
-  showStatus(normalizedContextID > 0
-    ? `context filter: ${state.itemSidebarContextLabel}`
-    : 'context filter cleared');
+  showStatus(normalizedLabelID > 0
+    ? `label filter: ${state.itemSidebarLabelName}`
+    : 'label filter cleared');
   return true;
 }
 
-export async function showItemSidebarContextFilterMenu(x, y) {
+export async function showItemSidebarLabelFilterMenu(x, y) {
   try {
-    const contexts = await fetchItemSidebarContexts();
-    const currentContextID = Number(state.itemSidebarFilters?.context_id || 0);
+    const labels = await fetchItemSidebarLabels();
+    const currentLabelID = Number(state.itemSidebarFilters?.label_id || 0);
     const entries = [{
-      label: currentContextID > 0 ? 'All contexts' : 'All contexts (current)',
-      action: 'clear_context_filter',
-      onClick: () => applyItemSidebarContextFilter(0, ''),
+      label: currentLabelID > 0 ? 'All labels' : 'All labels (current)',
+      action: 'clear_label_filter',
+      onClick: () => applyItemSidebarLabelFilter(0, ''),
     }];
-    contexts.forEach((entry) => {
+    labels.forEach((entry) => {
       const prefix = entry.depth > 0 ? `${'  '.repeat(entry.depth)}↳ ` : '';
       entries.push({
-        label: entry.id === currentContextID ? `${prefix}${entry.name} (current)` : `${prefix}${entry.name}`,
-        action: 'set_context_filter',
-        onClick: () => applyItemSidebarContextFilter(entry.id, entry.name),
+        label: entry.id === currentLabelID ? `${prefix}${entry.name} (current)` : `${prefix}${entry.name}`,
+        action: 'set_label_filter',
+        onClick: () => applyItemSidebarLabelFilter(entry.id, entry.name),
       });
     });
     showItemSidebarMenu(entries, x, y);
     return true;
   } catch (err) {
-    showStatus(`context filter failed: ${String(err?.message || err || 'unknown error')}`);
+    showStatus(`label filter failed: ${String(err?.message || err || 'unknown error')}`);
     return false;
   }
 }
@@ -514,30 +490,6 @@ export async function performItemSidebarWorkspaceUpdate(item, workspaceID = null
     return true;
   } catch (err) {
     showStatus(`workspace picker failed: ${String(err?.message || err || 'unknown error')}`);
-    return false;
-  }
-}
-
-export async function performItemSidebarProjectUpdate(item, projectID = '', projectName = '') {
-  const itemID = Number(item?.id || 0);
-  if (itemID <= 0) return false;
-  const body = { project_id: projectID || null };
-  try {
-    const resp = await fetch(apiURL(`items/${encodeURIComponent(String(itemID))}/project`), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
-      throw new Error(detail);
-    }
-    state.itemSidebarActiveItemID = itemID;
-    await loadItemSidebarView(state.itemSidebarView);
-    showStatus(projectID ? `context set to ${String(projectName || '').trim() || 'selected context'}` : 'context cleared');
-    return true;
-  } catch (err) {
-    showStatus(`context picker failed: ${String(err?.message || err || 'unknown error')}`);
     return false;
   }
 }
@@ -666,37 +618,6 @@ export async function showItemSidebarWorkspaceMenu(item, x, y) {
   }
 }
 
-export async function showItemSidebarProjectMenu(item, x, y) {
-  try {
-    const projects = await fetchItemSidebarProjects();
-    if (projects.length === 0) {
-      showStatus('no contexts available');
-      return false;
-    }
-    const currentProjectID = String(item?.project_id || '').trim();
-    const entries = [];
-    if (currentProjectID) {
-      entries.push({
-        label: 'Clear context',
-        action: 'clear_project',
-        onClick: () => performItemSidebarProjectUpdate(item, '', ''),
-      });
-    }
-    projects.forEach((project) => {
-      entries.push({
-        label: project.id === currentProjectID ? `${project.name} (current)` : project.name,
-        action: 'reassign_project',
-        onClick: () => performItemSidebarProjectUpdate(item, project.id, project.name),
-      });
-    });
-    showItemSidebarMenu(entries, x, y);
-    return true;
-  } catch (err) {
-    showStatus(`context picker failed: ${String(err?.message || err || 'unknown error')}`);
-    return false;
-  }
-}
-
 export function showItemSidebarReviewMenu(item, x, y) {
   if (!isGitHubPRSidebarItem(item)) {
     showStatus('review dispatch only works for PR items');
@@ -753,11 +674,6 @@ export function showItemSidebarActionMenu(item, x, y) {
         action: 'workspace',
         onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
       },
-      {
-        label: 'Context...',
-        action: 'project',
-        onClick: () => showItemSidebarProjectMenu(item, x, y),
-      },
       ...sphereEntry,
       {
         label: itemSidebarActionLabel('delete', item),
@@ -779,11 +695,6 @@ export function showItemSidebarActionMenu(item, x, y) {
         action: 'workspace',
         onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
       },
-      {
-        label: 'Context...',
-        action: 'project',
-        onClick: () => showItemSidebarProjectMenu(item, x, y),
-      },
       ...sphereEntry,
       {
         label: itemSidebarActionLabel('delete', item),
@@ -804,11 +715,6 @@ export function showItemSidebarActionMenu(item, x, y) {
         label: 'Workspace...',
         action: 'workspace',
         onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      {
-        label: 'Context...',
-        action: 'project',
-        onClick: () => showItemSidebarProjectMenu(item, x, y),
       },
       ...sphereEntry,
       {
@@ -833,11 +739,6 @@ export function showItemSidebarActionMenu(item, x, y) {
         label: 'Workspace...',
         action: 'workspace',
         onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      {
-        label: 'Context...',
-        action: 'project',
-        onClick: () => showItemSidebarProjectMenu(item, x, y),
       },
       ...sphereEntry,
       {

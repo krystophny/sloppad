@@ -12,7 +12,7 @@ Tabura has exactly five primary product nouns:
 - **Artifact** — curated content shown on canvas. Not every file is an artifact; artifacts are created lazily when interacted with, synced from external systems, or explicitly captured. Has kind, file path or URL, and metadata. Non-file artifacts (email, issue) can be materialized as real files in a workspace.
 - **Item** — an open loop requiring attention. Tracked in the inbox. Has state (inbox/waiting/someday/done), an optional artifact, an optional actor, and a workspace where it is tracked. Items do not always have artifacts; bare tasks like "call Bob" are items without artifacts.
 - **Actor** — a human or agent responsible for progress.
-- **Context** — a hierarchical organizational tag. Attached to items, artifacts, and workspaces. The only cross-cutting grouping mechanism. Workspace contexts cascade: querying a context includes items and artifacts in workspaces carrying that context. Querying a parent context includes everything under it.
+- **Label** — a hierarchical organizing label. Attached to items, artifacts, and workspaces. The only cross-cutting grouping mechanism. Workspace labels cascade: querying a label includes items and artifacts in workspaces carrying that label. Querying a parent label includes everything under it.
 
 Project is not a product concept. Session and message are transport or storage details, not user-facing ontology.
 
@@ -21,13 +21,13 @@ Project is not a product concept. Session and message are transport or storage d
 1. The canvas shows artifacts, always. Bare items (no artifact) show in the sidebar only.
 2. An item may have zero or more artifacts with roles (source, related, output). One artifact is designated primary and shown on canvas. Bare tasks (no artifact) show in sidebar only.
 3. A workspace is a directory. No virtual workspaces. Composition via filesystem tools. The default fallback is today's persistent Daily Workspace.
-4. Contexts are the only cross-cutting grouping mechanism. No ProjectID anywhere.
-5. Work and private are top-level contexts, not a separate "sphere" field. They follow the same rules as all other contexts.
+4. Labels are the only cross-cutting grouping mechanism. Project is not a product concept.
+5. Work and private are top-level labels, not a separate "sphere" field. They follow the same rules as all other labels.
 6. Intent classification is workspace-independent. Execution is workspace-aware.
 
-### Context hierarchy and filtering
+### Label hierarchy and filtering
 
-Contexts form a tree. Examples:
+Labels form a tree. Examples:
 
 ```
 work/
@@ -43,24 +43,24 @@ important
 urgent
 ```
 
-Filtering by a parent context includes everything under it. Filters combine: work/w7x + urgent = urgent W7X items. Filtering works globally across all nouns — items, artifacts, workspaces.
+Filtering by a parent label includes everything under it. Filters combine: work/w7x + urgent = urgent W7X items. Filtering works globally across all nouns — items, artifacts, workspaces.
 
 ### Time tracking
 
-Time accrues to ALL contexts on whatever you interact with, including ancestor contexts. Working on an item tagged work/w7x credits time to both work/w7x and work. If the item also carries urgent, time credits to that too. Filtering time by "work" gives total work time across all sub-contexts. Filtering by "urgent" gives total time on urgent things regardless of topic. No explicit time-tracking activation needed — the system tracks what you touch.
+Time accrues to ALL labels on whatever you interact with, including ancestor labels. Working on an item labeled work/w7x credits time to both work/w7x and work. If the item also carries urgent, time credits to that too. Filtering time by "work" gives total work time across all sub-labels. Filtering by "urgent" gives total time on urgent things regardless of topic. No explicit time-tracking activation needed — the system tracks what you touch.
 
 ### Triage and assignment
 
-Contexts auto-assigned from external container mappings (configured once per source). Workspace assignment is always manual. Most items float in inbox with contexts only, no workspace.
+Labels auto-assigned from external container mappings (configured once per source). Workspace assignment is always manual. Most items float in inbox with labels only, no workspace.
 
 Triage flow:
 
-1. External sync → item (inbox) + artifact + auto-contexts from container mappings
-2. User sees item in inbox with contexts already set
+1. External sync → item (inbox) + artifact + auto-labels from container mappings
+2. User sees item in inbox with labels already set
 3. Triage options:
-   - Reply and mark done (no workspace needed, contexts sufficient)
+   - Reply and mark done (no workspace needed, labels sufficient)
    - Assign to workspace (explicit: "track this in ~/write/DEMO-2025")
-   - Add more contexts
+   - Add more labels
    - Materialize artifact into workspace (explicit archival)
    - Delegate to actor
 
@@ -87,7 +87,7 @@ Use cases:
 
 How real entities map to the five nouns:
 
-| Entity | Workspace | Artifact | Item | Contexts |
+| Entity | Workspace | Artifact | Item | Labels |
 |---|---|---|---|---|
 | Scientific data (`~/data/`) | One workspace (whole git-lfs repo) | Files become artifacts when opened | Items when action needed | work/w7x, work/DEMO-2025 |
 | Code project (`~/code/tabula/`) | One workspace per repo | GitHub issues/PRs synced as artifacts | Issues/PRs are items tracked here | work/tabura, work/plasma-codes |
@@ -98,17 +98,17 @@ How real entities map to the five nouns:
 | Email (personal Gmail) | No workspace by default. | Email body+metadata. Materializable as .eml. | Inbox item. | private + auto from folder mappings |
 | Tasks (Todoist) | Assigned manually or left floating | Often bare (no artifact) | The item IS the task | Auto from Todoist project mappings |
 | Calendar (Google) | Assigned manually | Meeting agenda/notes. Transcript after meeting. | Meeting event. Transitions to Meeting live session. | Auto from calendar mappings |
-| GitHub issues/PRs | Tracked in code workspace | Issue/PR content as artifact | Item in code workspace | work/tabura, topic contexts |
+| GitHub issues/PRs | Tracked in code workspace | Issue/PR content as artifact | Item in code workspace | work/tabura, topic labels |
 
 ### Inbox
 
-Inbox is a global view accessible from any workspace sidebar. It shows all items in inbox state. The inbox is filterable by context: selecting a context narrows the view to items carrying that context (or any child context). Unfiltered inbox shows everything.
+Inbox is a global view accessible from any workspace sidebar. It shows all items in inbox state. The inbox is filterable by label: selecting a label narrows the view to items carrying that label (or any child label). Unfiltered inbox shows everything.
 
 ### Daily workspaces
 
 Starting without an explicit workspace activates today's Daily Workspace. It is a persistent directory under `<data-dir>/daily/YYYY/MM/DD/`, and it is reused across restarts for the same day.
 
-Daily Workspaces also carry stable date contexts in the same hierarchy: `YYYY`, `YYYY/MM`, and `YYYY/MM/DD`. Those date contexts combine with topic contexts, for example `2026/03/11 + work/plasma`.
+Daily Workspaces also carry stable date labels in the same hierarchy: `YYYY`, `YYYY/MM`, and `YYYY/MM/DD`. Those date labels combine with topic labels, for example `2026/03/11 + work/plasma`.
 
 - **Day rollover**: the next interaction after midnight creates and activates a new Daily Workspace for the new date.
 - **Promote**: renaming the Daily Workspace turns it into a normal explicit workspace while retaining its recorded date.
@@ -131,7 +131,7 @@ The registered fast-path families include:
 
 - source sync and external sync commands
 - calendar and briefing requests
-- cursor, titled-item, item, workspace, and project commands
+- cursor, titled-item, item, and workspace commands
 - GitHub issue and artifact-linking commands
 - runtime control commands such as `toggle_silent`, `toggle_live_dialogue`, `cancel_work`, and `show_status`
 - direct UI loopback controls for `system_action` events and push-to-talk hold/release
@@ -181,7 +181,7 @@ Auxiliary surfaces are allowed only when all of the following are true:
 
 - The surface is narrower than the main workspace.
 - The surface exists to make one job materially faster.
-- The surface writes back into the same Workspace / Artifact / Item / Actor / Context ontology.
+- The surface writes back into the same Workspace / Artifact / Item / Actor / Label ontology.
 - The surface does not create its own action grammar.
 - The surface does not create a parallel runtime shell, inbox, review system, or workspace universe.
 

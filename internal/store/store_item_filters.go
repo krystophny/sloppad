@@ -31,16 +31,16 @@ func normalizeItemListFilter(filter ItemListFilter) (ItemListFilter, error) {
 			normalized.ProjectID = &projectID
 		}
 	}
-	normalized.Context = normalizeOptionalContextQuery(filter.Context)
-	if filter.ContextID != nil {
-		if *filter.ContextID <= 0 {
-			return ItemListFilter{}, errors.New("context_id must be a positive integer")
+	normalized.Label = normalizeOptionalContextQuery(filter.Label)
+	if filter.LabelID != nil {
+		if *filter.LabelID <= 0 {
+			return ItemListFilter{}, errors.New("label_id must be a positive integer")
 		}
-		value := *filter.ContextID
-		normalized.ContextID = &value
+		value := *filter.LabelID
+		normalized.LabelID = &value
 	}
-	if normalized.Context != "" && normalized.ContextID != nil {
-		return ItemListFilter{}, errors.New("context cannot be combined with context_id")
+	if normalized.Label != "" && normalized.LabelID != nil {
+		return ItemListFilter{}, errors.New("label cannot be combined with label_id")
 	}
 	return normalized, nil
 }
@@ -50,17 +50,17 @@ func (s *Store) prepareItemListFilter(filter ItemListFilter) (ItemListFilter, er
 	if err != nil {
 		return ItemListFilter{}, err
 	}
-	if normalized.Context == "" {
+	if normalized.Label == "" {
 		return normalized, nil
 	}
-	for _, term := range splitContextQueryTerms(normalized.Context) {
-		contextIDs, err := s.resolveContextQueryIDs(term)
+	for _, term := range splitContextQueryTerms(normalized.Label) {
+		labelIDs, err := s.resolveContextQueryIDs(term)
 		if err != nil {
 			return ItemListFilter{}, err
 		}
-		normalized.resolvedContextGroups = append(normalized.resolvedContextGroups, contextIDs)
+		normalized.resolvedLabelGroups = append(normalized.resolvedLabelGroups, labelIDs)
 	}
-	normalized.contextResolved = true
+	normalized.labelResolved = true
 	return normalized, nil
 }
 
@@ -96,25 +96,25 @@ func appendItemFilterClauses(parts []string, args []any, filter ItemListFilter, 
 		parts = append(parts, `COALESCE(`+column("project_id")+`, `+workspaceProjectColumn()+`) = ?`)
 		args = append(args, *filter.ProjectID)
 	}
-	if filter.contextResolved {
-		if len(filter.resolvedContextGroups) == 0 {
+	if filter.labelResolved {
+		if len(filter.resolvedLabelGroups) == 0 {
 			parts = append(parts, "0=1")
 			return parts, args
 		}
-		for _, contextIDs := range filter.resolvedContextGroups {
-			if len(contextIDs) == 0 {
+		for _, labelIDs := range filter.resolvedLabelGroups {
+			if len(labelIDs) == 0 {
 				parts = append(parts, "0=1")
 				return parts, args
 			}
-			contextItemMatch, contextItemArgs := contextLinkExistsClause("context_items", "item_id", outerColumn("id"), contextIDs)
-			contextWorkspaceMatch, contextWorkspaceArgs := contextLinkExistsClause("context_workspaces", "workspace_id", outerColumn("workspace_id"), contextIDs)
-			parts = append(parts, `(`+contextItemMatch+` OR `+contextWorkspaceMatch+`)`)
-			args = append(args, contextItemArgs...)
-			args = append(args, contextWorkspaceArgs...)
+			labelItemMatch, labelItemArgs := contextLinkExistsClause("context_items", "item_id", outerColumn("id"), labelIDs)
+			labelWorkspaceMatch, labelWorkspaceArgs := contextLinkExistsClause("context_workspaces", "workspace_id", outerColumn("workspace_id"), labelIDs)
+			parts = append(parts, `(`+labelItemMatch+` OR `+labelWorkspaceMatch+`)`)
+			args = append(args, labelItemArgs...)
+			args = append(args, labelWorkspaceArgs...)
 		}
 		return parts, args
 	}
-	if filter.ContextID != nil {
+	if filter.LabelID != nil {
 		contextItemMatch := `EXISTS (
 WITH RECURSIVE context_tree(id) AS (
   SELECT id FROM contexts WHERE id = ?
@@ -142,7 +142,7 @@ JOIN context_tree tree ON tree.id = cw.context_id
 WHERE cw.workspace_id = ` + outerColumn("workspace_id") + `
 )`
 		parts = append(parts, `(`+contextItemMatch+` OR `+contextWorkspaceMatch+`)`)
-		args = append(args, *filter.ContextID, *filter.ContextID)
+		args = append(args, *filter.LabelID, *filter.LabelID)
 	}
 	return parts, args
 }

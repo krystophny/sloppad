@@ -9,17 +9,17 @@ import (
 func TestContextPrefixQueriesAcrossWorkspacesItemsAndArtifacts(t *testing.T) {
 	s := newTestStore(t)
 
-	work, err := s.CreateContext("Work", nil)
+	work, err := s.CreateLabel("Work", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(work) error: %v", err)
+		t.Fatalf("CreateLabel(work) error: %v", err)
 	}
-	w7x, err := s.CreateContext("W7x", &work.ID)
+	w7x, err := s.CreateLabel("W7x", &work.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(w7x) error: %v", err)
+		t.Fatalf("CreateLabel(w7x) error: %v", err)
 	}
-	privateCtx, err := s.CreateContext("Private", nil)
+	privateCtx, err := s.CreateLabel("Private", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(private) error: %v", err)
+		t.Fatalf("CreateLabel(private) error: %v", err)
 	}
 
 	workspaceDir := filepath.Join(t.TempDir(), "w7x")
@@ -27,15 +27,15 @@ func TestContextPrefixQueriesAcrossWorkspacesItemsAndArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspace() error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(w7x.ID, workspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace() error: %v", err)
+	if err := s.LinkLabelToWorkspace(w7x.ID, workspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace() error: %v", err)
 	}
 	privateWorkspace, err := s.CreateWorkspace("Private Workspace", filepath.Join(t.TempDir(), "private"))
 	if err != nil {
 		t.Fatalf("CreateWorkspace(private) error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(privateCtx.ID, privateWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(private) error: %v", err)
+	if err := s.LinkLabelToWorkspace(privateCtx.ID, privateWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(private) error: %v", err)
 	}
 
 	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
@@ -54,8 +54,8 @@ func TestContextPrefixQueriesAcrossWorkspacesItemsAndArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem(private) error: %v", err)
 	}
-	if err := s.LinkContextToItem(privateCtx.ID, privateItem.ID); err != nil {
-		t.Fatalf("LinkContextToItem(private) error: %v", err)
+	if err := s.LinkLabelToItem(privateCtx.ID, privateItem.ID); err != nil {
+		t.Fatalf("LinkLabelToItem(private) error: %v", err)
 	}
 
 	workspaceArtifactPath := filepath.Join(workspaceDir, "notes.md")
@@ -69,16 +69,16 @@ func TestContextPrefixQueriesAcrossWorkspacesItemsAndArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateArtifact(direct) error: %v", err)
 	}
-	if err := s.LinkContextToArtifact(w7x.ID, directArtifact.ID); err != nil {
-		t.Fatalf("LinkContextToArtifact() error: %v", err)
+	if err := s.LinkLabelToArtifact(w7x.ID, directArtifact.ID); err != nil {
+		t.Fatalf("LinkLabelToArtifact() error: %v", err)
 	}
 	privateArtifactTitle := "Private artifact"
 	privateArtifact, err := s.CreateArtifact(ArtifactKindMarkdown, nil, nil, &privateArtifactTitle, nil)
 	if err != nil {
 		t.Fatalf("CreateArtifact(private) error: %v", err)
 	}
-	if err := s.LinkContextToArtifact(privateCtx.ID, privateArtifact.ID); err != nil {
-		t.Fatalf("LinkContextToArtifact(private) error: %v", err)
+	if err := s.LinkLabelToArtifact(privateCtx.ID, privateArtifact.ID); err != nil {
+		t.Fatalf("LinkLabelToArtifact(private) error: %v", err)
 	}
 
 	workspaces, err := s.ListWorkspacesByContextPrefix("work/w7x")
@@ -116,17 +116,17 @@ func TestContextPrefixQueriesAcrossWorkspacesItemsAndArtifacts(t *testing.T) {
 func TestContextPrefixQueriesMatchFlatContextNames(t *testing.T) {
 	s := newTestStore(t)
 
-	march11, err := s.CreateContext("2026/03/11", nil)
+	march11, err := s.CreateLabel("2026/03/11", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(march11) error: %v", err)
+		t.Fatalf("CreateLabel(march11) error: %v", err)
 	}
-	march12, err := s.CreateContext("2026/03/12", nil)
+	march12, err := s.CreateLabel("2026/03/12", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(march12) error: %v", err)
+		t.Fatalf("CreateLabel(march12) error: %v", err)
 	}
-	april01, err := s.CreateContext("2026/04/01", nil)
+	april01, err := s.CreateLabel("2026/04/01", nil)
 	if err != nil {
-		t.Fatalf("CreateContext(april01) error: %v", err)
+		t.Fatalf("CreateLabel(april01) error: %v", err)
 	}
 
 	past := time.Now().UTC().Add(-1 * time.Hour).Format(time.RFC3339)
@@ -134,22 +134,22 @@ func TestContextPrefixQueriesMatchFlatContextNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateItem(march11) error: %v", err)
 	}
-	if err := s.LinkContextToItem(march11.ID, march11Item.ID); err != nil {
-		t.Fatalf("LinkContextToItem(march11) error: %v", err)
+	if err := s.LinkLabelToItem(march11.ID, march11Item.ID); err != nil {
+		t.Fatalf("LinkLabelToItem(march11) error: %v", err)
 	}
 	march12Item, err := s.CreateItem("March 12 item", ItemOptions{State: ItemStateInbox, VisibleAfter: &past})
 	if err != nil {
 		t.Fatalf("CreateItem(march12) error: %v", err)
 	}
-	if err := s.LinkContextToItem(march12.ID, march12Item.ID); err != nil {
-		t.Fatalf("LinkContextToItem(march12) error: %v", err)
+	if err := s.LinkLabelToItem(march12.ID, march12Item.ID); err != nil {
+		t.Fatalf("LinkLabelToItem(march12) error: %v", err)
 	}
 	aprilItem, err := s.CreateItem("April 1 item", ItemOptions{State: ItemStateInbox, VisibleAfter: &past})
 	if err != nil {
 		t.Fatalf("CreateItem(april) error: %v", err)
 	}
-	if err := s.LinkContextToItem(april01.ID, aprilItem.ID); err != nil {
-		t.Fatalf("LinkContextToItem(april) error: %v", err)
+	if err := s.LinkLabelToItem(april01.ID, aprilItem.ID); err != nil {
+		t.Fatalf("LinkLabelToItem(april) error: %v", err)
 	}
 
 	items, err := s.ListItemsByContextPrefix("2026/03")
@@ -189,32 +189,32 @@ func TestArtifactContextPrefixQueriesCanCombineDateAndTopicContexts(t *testing.T
 	}
 
 	workRootID := contextIDByNameForTest(t, s, "work")
-	workRoot, err := s.GetContext(workRootID)
+	workRoot, err := s.GetLabel(workRootID)
 	if err != nil {
-		t.Fatalf("GetContext(work) error: %v", err)
+		t.Fatalf("GetLabel(work) error: %v", err)
 	}
 	privateRootID := contextIDByNameForTest(t, s, "private")
-	privateRoot, err := s.GetContext(privateRootID)
+	privateRoot, err := s.GetLabel(privateRootID)
 	if err != nil {
-		t.Fatalf("GetContext(private) error: %v", err)
+		t.Fatalf("GetLabel(private) error: %v", err)
 	}
-	plasmaContext, err := s.CreateContext("work/plasma", &workRoot.ID)
+	plasmaContext, err := s.CreateLabel("work/plasma", &workRoot.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(work/plasma) error: %v", err)
+		t.Fatalf("CreateLabel(work/plasma) error: %v", err)
 	}
-	healthContext, err := s.CreateContext("private/health", &privateRoot.ID)
+	healthContext, err := s.CreateLabel("private/health", &privateRoot.ID)
 	if err != nil {
-		t.Fatalf("CreateContext(private/health) error: %v", err)
+		t.Fatalf("CreateLabel(private/health) error: %v", err)
 	}
-	marchDay := mustGetContextByName(t, s, "2026/03/11")
-	if err := s.LinkContextToWorkspace(plasmaContext.ID, plasmaWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(plasma) error: %v", err)
+	marchDay := mustGetLabelByName(t, s, "2026/03/11")
+	if err := s.LinkLabelToWorkspace(plasmaContext.ID, plasmaWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(plasma) error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(marchDay.ID, healthWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(march day) error: %v", err)
+	if err := s.LinkLabelToWorkspace(marchDay.ID, healthWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(march day) error: %v", err)
 	}
-	if err := s.LinkContextToWorkspace(healthContext.ID, healthWorkspace.ID); err != nil {
-		t.Fatalf("LinkContextToWorkspace(health) error: %v", err)
+	if err := s.LinkLabelToWorkspace(healthContext.ID, healthWorkspace.ID); err != nil {
+		t.Fatalf("LinkLabelToWorkspace(health) error: %v", err)
 	}
 
 	plasmaPath := filepath.Join(plasmaWorkspace.DirPath, "plan.md")
