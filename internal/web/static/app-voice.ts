@@ -2,6 +2,7 @@ import * as env from './app-env.js';
 import * as context from './app-context.js';
 import {
   clearDialogueDiagnostics,
+  emitDialogueServerDiagnostic,
   pushDialogueDiagnosticEvent,
   recordDialogueSTTEmpty,
   recordDialogueSTTResult,
@@ -18,7 +19,7 @@ import {
   sendTurnTranscriptSegment,
 } from './turn-client.js';
 
-const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, resumeDialogueListen, setDialogueTTSBargeInMode, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
+const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, resumeDialogueListen, setDialogueTTSBargeInMode, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav, normalizeSpeechSamples } = env;
 const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES } = context;
 
 const showStatus = (...args) => refs.showStatus(...args);
@@ -201,10 +202,9 @@ function normalizeVoiceTriggerSource(value: unknown): string {
 }
 
 export function newMediaRecorder(stream) {
-  const candidates = [
-    'audio/ogg;codecs=opus',
-    'audio/webm;codecs=opus',
-  ];
+  const candidates = isFirefoxLinux()
+    ? ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus']
+    : ['audio/ogg;codecs=opus', 'audio/webm;codecs=opus'];
   const isSupported = typeof window.MediaRecorder?.isTypeSupported === 'function'
     ? (t) => window.MediaRecorder.isTypeSupported(t)
     : () => false;
@@ -224,6 +224,11 @@ export function isLikelyIOS() {
     || (ua.includes('macintosh') && navigator.maxTouchPoints > 1);
 }
 
+function isFirefoxLinux() {
+  const ua = String(navigator.userAgent || '').toLowerCase();
+  return ua.includes('firefox') && ua.includes('linux') && !ua.includes('android');
+}
+
 function firstNonEmptyChunkMimeType(chunks) {
   if (!Array.isArray(chunks)) return '';
   for (const chunk of chunks) {
@@ -231,6 +236,155 @@ function firstNonEmptyChunkMimeType(chunks) {
     if (mt) return mt;
   }
   return '';
+}
+
+function describeAudioTrack(stream) {
+  const track = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks()[0] : null;
+  if (!track) return {};
+  const settings = typeof track.getSettings === 'function' ? (track.getSettings() || {}) : {};
+  const constraints = typeof track.getConstraints === 'function' ? (track.getConstraints() || {}) : {};
+  return {
+    label: String(track.label || '').trim(),
+    ready_state: String(track.readyState || '').trim(),
+    muted: Boolean(track.muted),
+    settings,
+    constraints,
+  };
+}
+
+function buildNormalizedSpeechWav(samples, sampleRate) {
+  const normalized = normalizeSpeechSamples(samples);
+  const wavBlob = float32ToWav(normalized.samples, sampleRate);
+  if (normalized.applied && normalized.samples instanceof Float32Array && normalized.samples !== samples) {
+    normalized.samples.fill(0);
+  }
+  return {
+    blob: wavBlob,
+    normalization_gain: Number(normalized.gain || 1),
+    normalization_peak: Number(normalized.peak || 0),
+    normalization_applied: normalized.applied === true,
+  };
+}
+
+function clearPCMBackupChunks(capture) {
+  const pcm = capture?._pcmBackup;
+  if (!pcm || !Array.isArray(pcm.chunks)) return;
+  for (const chunk of pcm.chunks) {
+    if (chunk instanceof Float32Array) {
+      chunk.fill(0);
+    }
+  }
+  pcm.chunks = [];
+  pcm.totalSamples = 0;
+}
+
+function stopPCMBackupCapture(capture, { preserveSamples = true } = {}) {
+  const pcm = capture?._pcmBackup;
+  if (!pcm) return;
+  if (pcm.processorNode) {
+    try { pcm.processorNode.onaudioprocess = null; } catch (_) {}
+    try { pcm.processorNode.disconnect(); } catch (_) {}
+  }
+  if (pcm.sourceNode) {
+    try { pcm.sourceNode.disconnect(); } catch (_) {}
+  }
+  if (pcm.sinkNode) {
+    try { pcm.sinkNode.disconnect(); } catch (_) {}
+  }
+  if (pcm.audioContext) {
+    try { pcm.audioContext.close(); } catch (_) {}
+  }
+  pcm.processorNode = null;
+  pcm.sourceNode = null;
+  pcm.sinkNode = null;
+  pcm.audioContext = null;
+  if (!preserveSamples) {
+    clearPCMBackupChunks(capture);
+    capture._pcmBackup = null;
+  }
+}
+
+function startPCMBackupCapture(capture, stream) {
+  if (!isFirefoxLinux()) return false;
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return false;
+  let audioContext = null;
+  let sourceNode = null;
+  let processorNode = null;
+  let sinkNode = null;
+  try {
+    audioContext = new AudioContextCtor();
+    if (audioContext.state === 'suspended' && typeof audioContext.resume === 'function') {
+      void audioContext.resume().catch(() => {});
+    }
+    if (typeof audioContext.createMediaStreamSource !== 'function' || typeof audioContext.createScriptProcessor !== 'function') {
+      if (audioContext) {
+        try { audioContext.close(); } catch (_) {}
+      }
+      return false;
+    }
+    sourceNode = audioContext.createMediaStreamSource(stream);
+    processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+    sinkNode = typeof audioContext.createGain === 'function' ? audioContext.createGain() : null;
+    if (sinkNode && sinkNode.gain) sinkNode.gain.value = 0;
+    const backup = {
+      audioContext,
+      sourceNode,
+      processorNode,
+      sinkNode,
+      sampleRate: Number(audioContext.sampleRate) || 16000,
+      chunks: [],
+      totalSamples: 0,
+    };
+    processorNode.onaudioprocess = (event) => {
+      const input = event?.inputBuffer?.getChannelData?.(0);
+      if (!(input instanceof Float32Array) || input.length === 0) return;
+      const copy = new Float32Array(input.length);
+      copy.set(input);
+      backup.chunks.push(copy);
+      backup.totalSamples += copy.length;
+    };
+    sourceNode.connect(processorNode);
+    if (sinkNode) {
+      processorNode.connect(sinkNode);
+      sinkNode.connect(audioContext.destination);
+    } else {
+      processorNode.connect(audioContext.destination);
+    }
+    capture._pcmBackup = backup;
+    return true;
+  } catch (_) {
+    try { processorNode?.disconnect(); } catch (_) {}
+    try { sourceNode?.disconnect(); } catch (_) {}
+    try { sinkNode?.disconnect(); } catch (_) {}
+    try { audioContext?.close(); } catch (_) {}
+    return false;
+  }
+}
+
+function takePCMBackupWavBlob(capture) {
+  const pcm = capture?._pcmBackup;
+  if (!pcm || !Array.isArray(pcm.chunks) || pcm.totalSamples <= 0) return null;
+  const merged = new Float32Array(pcm.totalSamples);
+  let offset = 0;
+  for (const chunk of pcm.chunks) {
+    if (!(chunk instanceof Float32Array) || chunk.length === 0) continue;
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  clearPCMBackupChunks(capture);
+  if (offset <= 0) {
+    merged.fill(0);
+    return null;
+  }
+  const samples = offset === merged.length ? merged : new Float32Array(merged.subarray(0, offset));
+  const normalized = buildNormalizedSpeechWav(samples, pcm.sampleRate || 16000);
+  merged.fill(0);
+  if (samples !== merged) {
+    samples.fill(0);
+  }
+  if (!(normalized.blob instanceof Blob) || normalized.blob.size <= 44) return null;
+  return normalized;
 }
 
 
@@ -244,6 +398,8 @@ const MIC_CAPTURE_CONSTRAINTS = {
   echoCancellation: true,
   autoGainControl: true,
   noiseSuppression: true,
+  channelCount: 1,
+  volume: 1.0,
 };
 
 let _cachedMicStream = null;
@@ -349,6 +505,10 @@ export function acquireMicStream() {
   _micStreamPromise = navigator.mediaDevices.getUserMedia({
     audio: { ...MIC_CAPTURE_CONSTRAINTS },
   }).then((stream) => {
+    const track = typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks()[0] : null;
+    if (track && typeof track.applyConstraints === 'function') {
+      void track.applyConstraints({ ...MIC_CAPTURE_CONSTRAINTS }).catch(() => {});
+    }
     _micRefreshRequested = false;
     _cachedMicStream = stream;
     observeCachedMicStream(stream);
@@ -533,6 +693,7 @@ export function stopChatVoiceMedia(capture) {
   if (capture.vadState?.isRunning) {
     stopVADMonitor(capture);
   }
+  stopPCMBackupCapture(capture, { preserveSamples: true });
   if (capture.mediaRecorder) {
     try {
       if (capture.mediaRecorder.state !== 'inactive') {
@@ -586,8 +747,6 @@ export async function startSileroVADMonitor(capture) {
   const triggerSource = normalizeVoiceTriggerSource(capture?.triggerSource);
   const isHotwordCapture = triggerSource === VOICE_TRIGGER_SOURCE_HOTWORD;
   const vadNoSpeechMs = isHotwordCapture ? HOTWORD_VAD_NO_SPEECH_MS : VOICE_VAD_NO_SPEECH_MS;
-  const redemptionMs = isHotwordCapture ? 1200 : 600;
-  const minSpeechMs = isHotwordCapture ? 400 : 250;
 
   const vadState = {
     sileroInstance: null,
@@ -614,13 +773,13 @@ export async function startSileroVADMonitor(capture) {
     const instance = await initVAD({
       stream: vadStream,
       audioContext: capture._vadAudioContext || undefined,
-      positiveSpeechThreshold: 0.6,
-      negativeSpeechThreshold: 0.35,
-      redemptionMs,
-      minSpeechMs,
-      preSpeechPadMs: 300,
+      redemptionMs: isHotwordCapture ? 1400 : undefined,
+      minSpeechMs: isHotwordCapture ? 400 : undefined,
       onSpeechStart() {
         if (!vadState.isRunning || vadState.committed) return;
+        emitDialogueServerDiagnostic('voice_capture_vad_speech_start', {
+          trigger_source: triggerSource,
+        });
         if (vadState.noSpeechTimer) {
           window.clearTimeout(vadState.noSpeechTimer);
           vadState.noSpeechTimer = null;
@@ -629,13 +788,25 @@ export async function startSileroVADMonitor(capture) {
       onSpeechEnd(audio) {
         if (!vadState.isRunning || vadState.committed) return;
         vadState.committed = true;
+        emitDialogueServerDiagnostic('voice_capture_vad_speech_end', {
+          trigger_source: triggerSource,
+          samples: audio instanceof Float32Array ? audio.length : 0,
+        });
         if (audio instanceof Float32Array && audio.length > 0) {
-          capture._vadAudioBlob = float32ToWav(audio, 16000);
+          const normalized = buildNormalizedSpeechWav(audio, 16000);
+          capture._vadAudioBlob = normalized.blob;
+          capture._vadAudioNormalization = normalized;
           capture._vadAudioDurationMs = Math.round((audio.length / 16000) * 1000);
           capture._vadAutoStopped = true;
         }
         stopVADMonitor(capture);
         void stopVoiceCaptureAndSend();
+      },
+      onError(err) {
+        emitDialogueServerDiagnostic('voice_capture_vad_error', {
+          trigger_source: triggerSource,
+          message: String(err?.message || err || 'unknown error'),
+        });
       },
     });
 
@@ -703,7 +874,10 @@ export function stopChatVoiceMediaAndFlush(capture) {
       resolve();
     };
     const onStop = () => {
-      finish();
+      // Some desktop browsers enqueue the final dataavailable chunk just after
+      // stop. Give the recorder a brief settle window so we do not submit an
+      // empty blob and misclassify real speech as "recording too short".
+      timeoutId = window.setTimeout(finish, 120);
     };
     const onError = () => {
       finish();
@@ -762,11 +936,19 @@ export async function beginVoiceCapture(x, y, anchor, options: Record<string, an
     mediaStream: null,
     mediaRecorder: null,
     chunks: [],
+    recorderChunkCount: 0,
+    recorderChunkBytes: 0,
     startedAtMs: Date.now(),
   };
+  emitDialogueServerDiagnostic('voice_capture_begin', {
+    trigger_source: triggerSource,
+    firefox_linux: isFirefoxLinux(),
+    live_dialogue: isDialogueLiveSession(),
+  });
   state.chatVoiceCapture = capture;
   state.lastInputOrigin = 'voice';
   state.voiceAwaitingTurn = false;
+  state.dialogueSpeechRecognizedAt = 0;
   state.indicatorSuppressedByCanvasUpdate = false;
   startVoiceLifecycleOp('voice-capture-begin');
   setVoiceLifecycle(VOICE_LIFECYCLE.RECORDING, 'voice-capture-begin');
@@ -785,6 +967,11 @@ export async function beginVoiceCapture(x, y, anchor, options: Record<string, an
     }
     const recorder = newMediaRecorder(stream);
     capture.mimeType = String(recorder?.mimeType || '').trim();
+    emitDialogueServerDiagnostic('voice_capture_stream_ready', {
+      trigger_source: triggerSource,
+      audio_tracks: typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks().length : 0,
+      track: describeAudioTrack(stream),
+    });
     if (state.chatVoiceCapture !== capture) {
       if (vadAudioContext) { try { vadAudioContext.close(); } catch (_) {} }
       return;
@@ -793,10 +980,19 @@ export async function beginVoiceCapture(x, y, anchor, options: Record<string, an
     capture.mediaRecorder = recorder;
     capture._vadAudioContext = vadAudioContext;
     vadAudioContext = null;
+    const pcmBackupStarted = startPCMBackupCapture(capture, stream);
+    emitDialogueServerDiagnostic('voice_recorder_ready', {
+      trigger_source: triggerSource,
+      mime_type: capture.mimeType || '',
+      pcm_backup_started: pcmBackupStarted,
+      track: describeAudioTrack(stream),
+    });
     capture.active = true;
     recorder.addEventListener('dataavailable', (ev) => {
       if (!ev?.data || ev.data.size <= 0) return;
       capture.chunks.push(ev.data);
+      capture.recorderChunkCount += 1;
+      capture.recorderChunkBytes += Number(ev.data.size) || 0;
     });
     recorder.start(VOICE_VAD_RECORDER_CHUNK_MS);
     if (!capture.stopRequested) {
@@ -857,32 +1053,72 @@ export async function stopVoiceCaptureAndSend() {
   try {
     let sttBlob = null;
     let mimeType = '';
+    let sttSource = '';
+    let normalizationGain = 1;
+    let normalizationPeak = 0;
+    let normalizationApplied = false;
     if (capture._vadAudioBlob) {
       // VAD auto-stop: use speech audio directly, skip MediaRecorder flush
       // so Safari cannot interfere via its broken stop/dataavailable ordering.
       sttBlob = capture._vadAudioBlob;
       mimeType = 'audio/wav';
+      sttSource = 'vad_blob';
       capture._vadAudioBlob = null;
+      normalizationGain = Number(capture?._vadAudioNormalization?.normalization_gain || 1);
+      normalizationPeak = Number(capture?._vadAudioNormalization?.normalization_peak || 0);
+      normalizationApplied = capture?._vadAudioNormalization?.normalization_applied === true;
+      capture._vadAudioNormalization = null;
     } else {
       // Manual stop / timeout: flush MediaRecorder and use its chunks.
       await stopChatVoiceMediaAndFlush(capture);
-      mimeType = String(capture.mimeType || '').trim();
-      if (!mimeType) {
-        mimeType = firstNonEmptyChunkMimeType(capture.chunks);
-      }
-      if (capture.chunks.length > 0) {
-        sttBlob = mimeType
-          ? new Blob(capture.chunks, { type: mimeType })
-          : new Blob(capture.chunks);
+      const pcmFallbackBlob = takePCMBackupWavBlob(capture);
+      if (isFirefoxLinux() && pcmFallbackBlob) {
+        sttBlob = pcmFallbackBlob.blob;
+        mimeType = 'audio/wav';
+        sttSource = 'pcm_backup';
+        normalizationGain = Number(pcmFallbackBlob.normalization_gain || 1);
+        normalizationPeak = Number(pcmFallbackBlob.normalization_peak || 0);
+        normalizationApplied = pcmFallbackBlob.normalization_applied === true;
+      } else {
+        mimeType = String(capture.mimeType || '').trim();
         if (!mimeType) {
-          mimeType = String(sttBlob?.type || '').trim();
+          mimeType = firstNonEmptyChunkMimeType(capture.chunks);
         }
-        capture.chunks = [];
-      }
-      if (!mimeType) {
-        mimeType = isLikelyIOS() ? 'audio/mp4' : 'audio/webm';
+        if (capture.chunks.length > 0) {
+          sttBlob = mimeType
+            ? new Blob(capture.chunks, { type: mimeType })
+            : new Blob(capture.chunks);
+          sttSource = 'recorder';
+          if (!mimeType) {
+            mimeType = String(sttBlob?.type || '').trim();
+          }
+          capture.chunks = [];
+        }
+        if (!mimeType) {
+          mimeType = isLikelyIOS() ? 'audio/mp4' : 'audio/webm';
+        }
+        if (!sttBlob && pcmFallbackBlob) {
+          sttBlob = pcmFallbackBlob.blob;
+          mimeType = 'audio/wav';
+          sttSource = 'pcm_backup';
+          normalizationGain = Number(pcmFallbackBlob.normalization_gain || 1);
+          normalizationPeak = Number(pcmFallbackBlob.normalization_peak || 0);
+          normalizationApplied = pcmFallbackBlob.normalization_applied === true;
+        }
       }
     }
+    emitDialogueServerDiagnostic('voice_capture_finalize', {
+      trigger_source: triggerSource,
+      source: sttSource || 'unknown',
+      mime_type: mimeType || '',
+      recorder_chunk_count: Number(capture.recorderChunkCount || 0),
+      recorder_chunk_bytes: Number(capture.recorderChunkBytes || 0),
+      pcm_backup_samples: Number(capture?._pcmBackup?.totalSamples || 0),
+      normalization_gain: normalizationGain,
+      normalization_peak: normalizationPeak,
+      normalization_applied: normalizationApplied,
+      upload_bytes: Number(sttBlob?.size || 0),
+    });
     recordDialogueSTTStart(triggerSource, mimeType, Boolean(sttBlob && capture._vadAudioDurationMs));
     sttStart(mimeType);
     if (sttBlob) {
@@ -891,6 +1127,11 @@ export async function stopVoiceCaptureAndSend() {
     const result = await sttStop();
     remoteStopped = true;
     const transcript = String(result?.text || '').trim();
+    emitDialogueServerDiagnostic('voice_stt_result', {
+      trigger_source: triggerSource,
+      reason: String(result?.reason || '').trim(),
+      chars: transcript.length,
+    });
     if (!transcript) {
       recordDialogueSTTEmpty(triggerSource, result?.reason);
       if (isDialogueLiveSession() && triggerSource !== VOICE_TRIGGER_SOURCE_MANUAL) {
@@ -904,10 +1145,10 @@ export async function stopVoiceCaptureAndSend() {
       0,
       Number(capture._vadAudioDurationMs || 0) || (Date.now() - Number(capture.startedAtMs || Date.now())),
     );
+    state.dialogueSpeechRecognizedAt = Date.now();
     recordDialogueSTTResult(triggerSource, transcript.length, segmentDurationMs, Boolean(capture.interruptedAssistant));
     if (isDialogueAutoCapture) {
-      state.voiceAwaitingTurn = false;
-      setVoiceLifecycle(VOICE_LIFECYCLE.IDLE, 'dialogue-turn-segment');
+      setVoiceLifecycle(VOICE_LIFECYCLE.AWAITING_TURN, 'dialogue-turn-segment');
       updateAssistantActivityIndicator();
       if (isTurnIntelligenceConnected()) {
         if (sendTurnTranscriptSegment(transcript, segmentDurationMs, Boolean(capture.interruptedAssistant))) {
@@ -941,6 +1182,10 @@ export async function stopVoiceCaptureAndSend() {
     updateAssistantActivityIndicator();
     const message = String(err?.message || err || 'voice capture failed');
     recordDialogueVoiceError(triggerSource, message);
+    emitDialogueServerDiagnostic('voice_capture_error', {
+      trigger_source: triggerSource,
+      message,
+    });
     const pos = getLastInputPosition();
     const x = Number.isFinite(pos?.x) ? Number(pos.x) : null;
     const y = Number.isFinite(pos?.y) ? Number(pos.y) : null;
@@ -960,6 +1205,7 @@ export async function stopVoiceCaptureAndSend() {
     if (state.chatVoiceCapture === capture) {
       state.chatVoiceCapture = null;
     }
+    stopPCMBackupCapture(capture, { preserveSamples: false });
     if (opSeq === state.voiceLifecycleSeq) {
       syncVoiceLifecycle('voice-capture-stop-finished');
     }

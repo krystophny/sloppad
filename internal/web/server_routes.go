@@ -140,6 +140,7 @@ func (a *App) Router() http.Handler {
 	r.Put("/api/chat/sessions/{session_id}/dictation/draft", a.handleChatSessionDictationDraftPut)
 	r.Get("/api/hotword/status", a.handleHotwordStatus)
 	r.Post("/api/stt/transcribe", a.handleSTTTranscribe)
+	r.Post("/api/dialogue/diagnostics", a.handleDialogueDiagnostics)
 	r.Get("/api/stt/config", a.handleSTTConfigGet)
 	r.Put("/api/stt/config", a.handleSTTConfigPut)
 	r.Get("/api/stt/replacements", a.handleSTTReplacementsGet)

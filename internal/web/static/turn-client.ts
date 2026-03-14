@@ -188,6 +188,16 @@ export function sendTurnPlaybackProgress(playing: boolean, playedMs: number) {
   });
 }
 
+export function sendTurnClientDiagnostic(kind: string, payload: Record<string, any> = {}) {
+  const normalizedKind = String(kind || '').trim();
+  if (!normalizedKind) return false;
+  return sendTurnEvent({
+    type: 'turn_client_diag',
+    kind: normalizedKind,
+    payload,
+  });
+}
+
 export function resetTurnIntelligence() {
   return sendTurnEvent({ type: 'turn_reset' });
 }

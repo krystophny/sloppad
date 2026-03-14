@@ -48,4 +48,4 @@ export {
   getPreRollAudio,
   getHotwordMicStream,
 } from './hotword.js';
-export { initVAD, ensureVADLoaded, float32ToWav } from './vad.js';
+export { initVAD, ensureVADLoaded, float32ToWav, normalizeSpeechSamples } from './vad.js';

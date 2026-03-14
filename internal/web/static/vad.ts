@@ -71,11 +71,11 @@ export async function initVAD(options: Record<string, any> = {}) {
   const onFrameProcessed = typeof options.onFrameProcessed === 'function' ? options.onFrameProcessed : null;
   const onError = typeof options.onError === 'function' ? options.onError : null;
 
-  const positiveSpeechThreshold = Number(options.positiveSpeechThreshold) || 0.6;
-  const negativeSpeechThreshold = Number(options.negativeSpeechThreshold) || 0.35;
-  const redemptionFrames = Math.round((Number(options.redemptionMs) || 600) / 32);
-  const minSpeechFrames = Math.round((Number(options.minSpeechMs) || 250) / 32);
-  const preSpeechPadFrames = Math.round((Number(options.preSpeechPadMs) || 300) / 32);
+  const positiveSpeechThreshold = Number(options.positiveSpeechThreshold) || 0.3;
+  const negativeSpeechThreshold = Number(options.negativeSpeechThreshold) || 0.25;
+  const redemptionFrames = Math.round((Number(options.redemptionMs) || 1400) / 32);
+  const minSpeechFrames = Math.round((Number(options.minSpeechMs) || 400) / 32);
+  const preSpeechPadFrames = Math.round((Number(options.preSpeechPadMs) || 800) / 32);
 
   const stream = options.stream instanceof MediaStream ? options.stream : null;
 
@@ -87,7 +87,6 @@ export async function initVAD(options: Record<string, any> = {}) {
 
   try {
     const micVADOptions: Record<string, any> = {
-      model: 'v5',
       baseAssetPath: VAD_ASSET_PATH,
       onnxWASMBasePath: VAD_ASSET_PATH,
       positiveSpeechThreshold,
@@ -110,6 +109,12 @@ export async function initVAD(options: Record<string, any> = {}) {
         if (onFrameProcessed) onFrameProcessed(probs);
       },
     };
+    if (typeof options.model === 'string' && options.model.trim()) {
+      micVADOptions.model = options.model.trim();
+    }
+    if (typeof options.processorType === 'string' && options.processorType.trim()) {
+      micVADOptions.processorType = options.processorType.trim();
+    }
     if (stream) micVADOptions.stream = stream;
     if (options.audioContext instanceof AudioContext) {
       micVADOptions.audioContext = options.audioContext;
@@ -140,6 +145,32 @@ export async function initVAD(options: Record<string, any> = {}) {
     if (onError) onError(err);
     return null;
   }
+}
+
+export function normalizeSpeechSamples(samples, options: Record<string, any> = {}) {
+  if (!(samples instanceof Float32Array) || samples.length === 0) {
+    return { samples, gain: 1, peak: 0, applied: false };
+  }
+  const targetPeak = Number.isFinite(Number(options.targetPeak)) ? Number(options.targetPeak) : 0.9;
+  const maxGain = Number.isFinite(Number(options.maxGain)) ? Number(options.maxGain) : 6;
+  const minPeak = Number.isFinite(Number(options.minPeak)) ? Number(options.minPeak) : 0.003;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i += 1) {
+    const value = Math.abs(samples[i]);
+    if (value > peak) peak = value;
+  }
+  if (peak < minPeak || peak <= 0) {
+    return { samples, gain: 1, peak, applied: false };
+  }
+  const gain = Math.min(maxGain, targetPeak / peak);
+  if (!(gain > 1.001)) {
+    return { samples, gain: 1, peak, applied: false };
+  }
+  const normalized = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    normalized[i] = Math.max(-1, Math.min(1, samples[i] * gain));
+  }
+  return { samples: normalized, gain, peak, applied: true };
 }
 
 function createMockVADInstance(mock, callbacks) {

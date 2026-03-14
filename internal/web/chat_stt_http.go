@@ -47,6 +47,7 @@ func (a *App) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	defer zeroBytes(data)
 	if len(data) < 1024 {
+		log.Printf("stt empty: reason=recording_too_short mime=%s bytes=%d", strings.TrimSpace(mimeType), len(data))
 		writeJSON(w, map[string]string{"text": "", "reason": "recording_too_short"})
 		return
 	}
@@ -82,6 +83,7 @@ func (a *App) handleSTTTranscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
+		log.Printf("stt empty: reason=empty_transcript mime=%s bytes=%d", normalizedMimeType, len(normalizedData))
 		writeJSON(w, map[string]string{"text": "", "reason": "empty_transcript"})
 		return
 	}

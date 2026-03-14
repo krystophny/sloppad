@@ -162,16 +162,18 @@ func handleTurnWSTextMessage(conn *turnWSConn, data []byte) {
 		return
 	}
 	var msg struct {
-		Type                 string  `json:"type"`
-		Active               *bool   `json:"active"`
-		Text                 string  `json:"text"`
-		DurationMS           int     `json:"duration_ms"`
-		InterruptedAssistant bool    `json:"interrupted_assistant"`
-		SpeechProb           float64 `json:"speech_prob"`
-		Playing              *bool   `json:"playing"`
-		PlayedMS             int     `json:"played_ms"`
-		Profile              string  `json:"profile"`
-		EvalLoggingEnabled   *bool   `json:"eval_logging_enabled"`
+		Type                 string         `json:"type"`
+		Kind                 string         `json:"kind"`
+		Payload              map[string]any `json:"payload"`
+		Active               *bool          `json:"active"`
+		Text                 string         `json:"text"`
+		DurationMS           int            `json:"duration_ms"`
+		InterruptedAssistant bool           `json:"interrupted_assistant"`
+		SpeechProb           float64        `json:"speech_prob"`
+		Playing              *bool          `json:"playing"`
+		PlayedMS             int            `json:"played_ms"`
+		Profile              string         `json:"profile"`
+		EvalLoggingEnabled   *bool          `json:"eval_logging_enabled"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
@@ -236,6 +238,15 @@ func handleTurnWSTextMessage(conn *turnWSConn, data []byte) {
 			return
 		}
 		conn.controller.UpdatePlayback(*msg.Playing, msg.PlayedMS)
+	case "turn_client_diag":
+		if metrics := conn.controller.SnapshotMetrics(); metrics.EvalLoggingEnabled {
+			log.Printf(
+				"turn client_diag session=%s kind=%s payload=%s",
+				conn.sessionID,
+				strings.TrimSpace(msg.Kind),
+				compactDialogueDiagnosticPayload(msg.Payload),
+			)
+		}
 	}
 }
 

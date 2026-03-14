@@ -170,6 +170,7 @@ export const state = {
   hotwordActive: false,
   voiceTranscriptSubmitInFlight: false,
   voiceAwaitingTurn: false,
+  dialogueSpeechRecognizedAt: 0,
   voiceTurns: new Set(),
   voiceLifecycle: 'idle',
   voiceLifecycleSeq: 0,

@@ -1,5 +1,6 @@
 import { refs, state } from './app-context.js';
-import { isTurnIntelligenceConnected, sendTurnConfig } from './turn-client.js';
+import { isTurnIntelligenceConnected, sendTurnClientDiagnostic, sendTurnConfig } from './turn-client.js';
+import { apiURL } from './paths.js';
 
 const DIALOGUE_DIAGNOSTIC_EVENT_LIMIT = 120;
 
@@ -46,6 +47,26 @@ export function recordDialogueVoiceDiagnostic(kind, payload: Record<string, any>
     return;
   }
   pushDialogueDiagnosticEvent(kind, payload);
+}
+
+export function emitDialogueServerDiagnostic(kind, payload: Record<string, any> = {}) {
+  const normalizedKind = String(kind || '').trim();
+  if (!normalizedKind) return;
+  if (isTurnIntelligenceConnected()) {
+    sendTurnClientDiagnostic(`dialogue:${normalizedKind}`, payload);
+  }
+  void fetch(apiURL('dialogue/diagnostics'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: String(state.chatSessionId || '').trim(),
+      kind: normalizedKind,
+      payload,
+    }),
+    keepalive: true,
+  }).catch(() => {});
 }
 
 export function recordDialogueSTTStart(triggerSource, mimeType, usedVADBlob) {

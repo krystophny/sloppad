@@ -1,5 +1,5 @@
 import { initVAD, float32ToWav } from './vad.js';
-import { recordDialogueVoiceDiagnostic } from './app-dialogue-diagnostics.js';
+import { emitDialogueServerDiagnostic, recordDialogueVoiceDiagnostic } from './app-dialogue-diagnostics.js';
 import {
   isTurnIntelligenceConnected,
   sendTurnListenState,
@@ -11,11 +11,7 @@ export const LIVE_SESSION_MODE_DIALOGUE = 'dialogue';
 export const LIVE_SESSION_MODE_MEETING = 'meeting';
 export const LIVE_SESSION_HOTWORD_DEFAULT = 'Alexa';
 
-const BARGE_IN_THRESHOLD = 0.75;
-const BARGE_IN_CONSECUTIVE_FRAMES = 3;
 const BARGE_IN_FALLBACK_GRACE_MS = 220;
-const DIALOGUE_LISTEN_FALLBACK_THRESHOLD = 0.42;
-const DIALOGUE_LISTEN_FALLBACK_FRAMES = 4;
 
 const hooks = {
   canStartDialogueListen: null,
@@ -39,10 +35,11 @@ const state = {
   hotword: LIVE_SESSION_HOTWORD_DEFAULT,
   dialogueListenActive: false,
   dialogueListenSileroVAD: null,
+  dialogueListenVADStream: null,
+  dialogueListenVADAudioContext: null,
   dialogueSessionToken: 0,
   ttsBargeInMode: false,
   ttsBargeInArmedAt: 0,
-  bargeInConsecutive: 0,
   bargeInPending: false,
   meetingCapture: null,
   meetingSessionID: '',
@@ -76,13 +73,22 @@ function clearDialogueSileroVAD() {
     try { state.dialogueListenSileroVAD.destroy(); } catch (_) {}
     state.dialogueListenSileroVAD = null;
   }
+  if (state.dialogueListenVADStream) {
+    for (const track of state.dialogueListenVADStream.getTracks()) {
+      try { track.stop(); } catch (_) {}
+    }
+    state.dialogueListenVADStream = null;
+  }
+  if (state.dialogueListenVADAudioContext) {
+    try { state.dialogueListenVADAudioContext.close(); } catch (_) {}
+    state.dialogueListenVADAudioContext = null;
+  }
 }
 
 function closeDialogueListenWindow() {
   clearDialogueSileroVAD();
   state.ttsBargeInMode = false;
   state.ttsBargeInArmedAt = 0;
-  state.bargeInConsecutive = 0;
   state.bargeInPending = false;
   if (state.dialogueListenActive) {
     state.dialogueListenActive = false;
@@ -96,7 +102,6 @@ function pauseDialogueListenForCapture() {
   state.dialogueListenActive = false;
   state.ttsBargeInMode = false;
   state.ttsBargeInArmedAt = 0;
-  state.bargeInConsecutive = 0;
   state.bargeInPending = false;
   sendTurnListenState(false);
   notifyStateChange();
@@ -122,6 +127,9 @@ function nextDialogueToken() {
 }
 
 function fireDialogueListenError(message) {
+  emitDialogueServerDiagnostic('dialogue_listen_error', {
+    message: String(message || '').trim(),
+  });
   closeDialogueListenWindow();
   if (typeof hooks.onDialogueListenError === 'function') {
     hooks.onDialogueListenError(message);
@@ -130,13 +138,19 @@ function fireDialogueListenError(message) {
 
 async function startSileroDialogueMonitor(stream, token) {
   try {
-    let dialogueSpeechConsecutive = 0;
+    const vadStream = typeof stream?.clone === 'function' ? stream.clone() : stream;
+    state.dialogueListenVADStream = vadStream && vadStream !== stream ? vadStream : null;
+    const vadAudioContext = state.dialogueListenVADAudioContext || undefined;
     const handleDialogueSpeechDetected = (via) => {
       if (token !== state.dialogueSessionToken) return;
       if (!state.dialogueListenActive) return;
       const interruptedAssistant = Boolean(state.ttsBargeInMode);
       if (interruptedAssistant && !localBargeInFallbackArmed()) return;
       recordDialogueVoiceDiagnostic('dialogue_listen_speech_detected', {
+        via: String(via || '').trim() || 'unknown',
+        barge_in: interruptedAssistant,
+      });
+      emitDialogueServerDiagnostic('dialogue_listen_speech_detected', {
         via: String(via || '').trim() || 'unknown',
         barge_in: interruptedAssistant,
       });
@@ -150,14 +164,9 @@ async function startSileroDialogueMonitor(stream, token) {
       onDialogueSpeechDetected();
     };
     const instance = await initVAD({
-      stream,
-      positiveSpeechThreshold: 0.5,
-      negativeSpeechThreshold: 0.3,
-      redemptionMs: 300,
-      minSpeechMs: 100,
-      preSpeechPadMs: 0,
+      stream: vadStream,
+      audioContext: vadAudioContext,
       onSpeechStart() {
-        dialogueSpeechConsecutive = 0;
         handleDialogueSpeechDetected('silero_on_speech_start');
       },
       onFrameProcessed(probs) {
@@ -168,29 +177,11 @@ async function startSileroDialogueMonitor(stream, token) {
         if (isTurnIntelligenceConnected()) {
           sendTurnSpeechProbability(p, state.ttsBargeInMode);
         }
-        if (!state.ttsBargeInMode) {
-          state.bargeInConsecutive = 0;
-          if (p >= DIALOGUE_LISTEN_FALLBACK_THRESHOLD) {
-            dialogueSpeechConsecutive += 1;
-            if (dialogueSpeechConsecutive >= DIALOGUE_LISTEN_FALLBACK_FRAMES) {
-              dialogueSpeechConsecutive = 0;
-              handleDialogueSpeechDetected('frame_probability_fallback');
-            }
-            return;
-          }
-          dialogueSpeechConsecutive = 0;
-          return;
-        }
-        if (!localBargeInFallbackArmed()) return;
-        if (p >= BARGE_IN_THRESHOLD) {
-          state.bargeInConsecutive += 1;
-          if (state.bargeInConsecutive >= BARGE_IN_CONSECUTIVE_FRAMES) {
-            state.bargeInConsecutive = 0;
-            handleDialogueSpeechDetected('frame_probability_fallback');
-          }
-        } else {
-          state.bargeInConsecutive = 0;
-        }
+      },
+      onError(err) {
+        emitDialogueServerDiagnostic('dialogue_listen_vad_error', {
+          message: String(err?.message || err || 'unknown error'),
+        });
       },
     });
 
@@ -206,6 +197,11 @@ async function startSileroDialogueMonitor(stream, token) {
 
     state.dialogueListenSileroVAD = instance;
     instance.start();
+    emitDialogueServerDiagnostic('dialogue_listen_vad_ready', {
+      token,
+      cloned_stream: Boolean(state.dialogueListenVADStream),
+      audio_context: vadAudioContext ? 'dedicated' : 'default',
+    });
     notifyStateChange();
   } catch (err) {
     if (token === state.dialogueSessionToken && state.dialogueListenActive) {
@@ -230,8 +226,23 @@ async function openDialogueListenWindow() {
   if (!canStartDialogueListen()) return;
   closeDialogueListenWindow();
   const token = nextDialogueToken();
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (AudioContextCtor) {
+    try {
+      state.dialogueListenVADAudioContext = new AudioContextCtor();
+      if (state.dialogueListenVADAudioContext.state === 'suspended' && typeof state.dialogueListenVADAudioContext.resume === 'function') {
+        void state.dialogueListenVADAudioContext.resume().catch(() => {});
+      }
+    } catch (_) {
+      state.dialogueListenVADAudioContext = null;
+    }
+  }
   state.dialogueListenActive = true;
   sendTurnListenState(true);
+  emitDialogueServerDiagnostic('dialogue_listen_open', {
+    token,
+    barge_in_mode: state.ttsBargeInMode,
+  });
   notifyStateChange();
 
   if (typeof hooks.requestMicRefresh === 'function') {
@@ -239,16 +250,19 @@ async function openDialogueListenWindow() {
   }
 
   try {
-    const audioCtx = typeof hooks.getAudioContext === 'function' ? hooks.getAudioContext() : null;
-    if (audioCtx && audioCtx.state === 'suspended' && typeof audioCtx.resume === 'function') {
-      await audioCtx.resume().catch(() => {});
-    }
     const stream = typeof hooks.acquireMicStream === 'function' ? await hooks.acquireMicStream() : null;
     if (token !== state.dialogueSessionToken) return;
     if (!stream) {
+      emitDialogueServerDiagnostic('dialogue_listen_stream_missing', {
+        token,
+      });
       fireDialogueListenError('microphone unavailable — check browser permissions');
       return;
     }
+    emitDialogueServerDiagnostic('dialogue_listen_stream_ready', {
+      token,
+      audio_tracks: typeof stream?.getAudioTracks === 'function' ? stream.getAudioTracks().length : 0,
+    });
     if (!canStartDialogueListen()) {
       closeDialogueListenWindow();
       return;
@@ -257,6 +271,10 @@ async function openDialogueListenWindow() {
   } catch (err) {
     if (token !== state.dialogueSessionToken) return;
     const detail = String(err?.message || err || 'unknown error');
+    emitDialogueServerDiagnostic('dialogue_listen_open_error', {
+      token,
+      message: detail,
+    });
     fireDialogueListenError(`dialogue listen failed: ${detail}`);
   }
 }
@@ -401,7 +419,6 @@ export function resumeDialogueListen() {
 export function setDialogueTTSBargeInMode(active) {
   state.ttsBargeInMode = Boolean(active);
   state.ttsBargeInArmedAt = state.ttsBargeInMode ? Date.now() : 0;
-  state.bargeInConsecutive = 0;
   if (!state.ttsBargeInMode) {
     state.bargeInPending = false;
   }

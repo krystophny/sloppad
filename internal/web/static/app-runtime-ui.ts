@@ -748,6 +748,9 @@ function dialogueCompanionState() {
   }
   if (state.ttsPlaying) return COMPANION_RUNTIME_STATES.TALKING;
   if (state.voiceAwaitingTurn || hasLocalStopCapableWork()) return COMPANION_RUNTIME_STATES.THINKING;
+  if (Number(state.dialogueSpeechRecognizedAt) > 0 && (Date.now() - Number(state.dialogueSpeechRecognizedAt)) < 1800) {
+    return COMPANION_RUNTIME_STATES.THINKING;
+  }
   if (mode === VOICE_LIFECYCLE.LISTENING) return COMPANION_RUNTIME_STATES.LISTENING;
   return COMPANION_RUNTIME_STATES.IDLE;
 }
