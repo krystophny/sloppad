@@ -32,6 +32,8 @@ type ExchangeEWSMailProvider struct {
 var _ EmailProvider = (*ExchangeEWSMailProvider)(nil)
 var _ DraftProvider = (*ExchangeEWSMailProvider)(nil)
 var _ MessagePageProvider = (*ExchangeEWSMailProvider)(nil)
+var _ NamedFolderProvider = (*ExchangeEWSMailProvider)(nil)
+var _ ServerFilterProvider = (*ExchangeEWSMailProvider)(nil)
 
 func ExchangeEWSConfigFromMap(label string, config map[string]any) (ExchangeEWSConfig, error) {
 	cfg := ExchangeEWSConfig{Label: strings.TrimSpace(label)}
@@ -277,6 +279,88 @@ func (p *ExchangeEWSMailProvider) Trash(ctx context.Context, messageIDs []string
 	return len(ids), nil
 }
 
+func (p *ExchangeEWSMailProvider) MoveToFolder(ctx context.Context, messageIDs []string, folder string) (int, error) {
+	ids := compactMessageIDs(messageIDs)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	folderID, err := p.resolveFolderRef(ctx, folder)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(folderID) == "" {
+		return 0, fmt.Errorf("exchange ews folder %q not found", strings.TrimSpace(folder))
+	}
+	if err := p.client.MoveItems(ctx, ids, folderID); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
+func (p *ExchangeEWSMailProvider) ServerFilterCapabilities() ServerFilterCapabilities {
+	return ServerFilterCapabilities{
+		Provider:         p.ProviderName(),
+		SupportsList:     true,
+		SupportsUpsert:   true,
+		SupportsDelete:   true,
+		SupportsArchive:  true,
+		SupportsTrash:    true,
+		SupportsMoveTo:   true,
+		SupportsMarkRead: true,
+		SupportsForward:  true,
+	}
+}
+
+func (p *ExchangeEWSMailProvider) ListServerFilters(ctx context.Context) ([]ServerFilter, error) {
+	rules, err := p.client.GetInboxRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ServerFilter, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, p.ruleToServerFilter(ctx, rule))
+	}
+	return out, nil
+}
+
+func (p *ExchangeEWSMailProvider) UpsertServerFilter(ctx context.Context, filter ServerFilter) (ServerFilter, error) {
+	op := ews.RuleOperationCreate
+	if strings.TrimSpace(filter.ID) != "" {
+		op = ews.RuleOperationSet
+	}
+	rule, err := p.serverFilterToRule(ctx, filter)
+	if err != nil {
+		return ServerFilter{}, err
+	}
+	if err := p.client.UpdateInboxRules(ctx, []ews.RuleOperation{{Kind: op, Rule: rule}}); err != nil {
+		return ServerFilter{}, err
+	}
+	if op == ews.RuleOperationSet {
+		return p.ruleToServerFilter(ctx, rule), nil
+	}
+	// EWS create does not return the created rule id; reload rules and find by name.
+	rules, err := p.client.GetInboxRules(ctx)
+	if err != nil {
+		return ServerFilter{}, err
+	}
+	for _, existing := range rules {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(filter.Name)) {
+			return p.ruleToServerFilter(ctx, existing), nil
+		}
+	}
+	return p.ruleToServerFilter(ctx, rule), nil
+}
+
+func (p *ExchangeEWSMailProvider) DeleteServerFilter(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("exchange ews rule id is required")
+	}
+	return p.client.UpdateInboxRules(ctx, []ews.RuleOperation{{
+		Kind: ews.RuleOperationDelete,
+		Rule: ews.Rule{ID: strings.TrimSpace(id)},
+	}})
+}
+
 func (p *ExchangeEWSMailProvider) Delete(ctx context.Context, messageIDs []string) (int, error) {
 	ids := compactMessageIDs(messageIDs)
 	if err := p.client.DeleteItems(ctx, ids, true); err != nil {
@@ -471,6 +555,16 @@ func (p *ExchangeEWSMailProvider) resolveFolderRef(ctx context.Context, folder s
 	if folderInfo != nil && strings.TrimSpace(folderInfo.ID) != "" {
 		return strings.TrimSpace(folderInfo.ID), nil
 	}
+	if idx := strings.LastIndex(clean, "/"); idx >= 0 && idx < len(clean)-1 {
+		last := strings.TrimSpace(clean[idx+1:])
+		folderInfo, err = p.client.FindFolderByName(ctx, last)
+		if err != nil {
+			return "", err
+		}
+		if folderInfo != nil && strings.TrimSpace(folderInfo.ID) != "" {
+			return strings.TrimSpace(folderInfo.ID), nil
+		}
+	}
 	return clean, nil
 }
 
@@ -506,6 +600,135 @@ func compactMessageIDs(values []string) []string {
 		}
 		seen[clean] = struct{}{}
 		out = append(out, clean)
+	}
+	return out
+}
+
+func (p *ExchangeEWSMailProvider) ruleToServerFilter(ctx context.Context, rule ews.Rule) ServerFilter {
+	moveTarget := strings.TrimSpace(rule.Actions.MoveToFolderID)
+	if clean := p.cfg.ArchiveFolder; strings.EqualFold(moveTarget, "archive") && clean != "" {
+		moveTarget = clean
+	}
+	out := ServerFilter{
+		ID:      strings.TrimSpace(rule.ID),
+		Name:    strings.TrimSpace(rule.Name),
+		Enabled: rule.Enabled,
+		Criteria: ServerFilterCriteria{
+			Subject: strings.Join(rule.Conditions.ContainsSubjectStrings, " "),
+		},
+		Action: ServerFilterAction{
+			Trash:     rule.Actions.Delete,
+			MarkRead:  rule.Actions.MarkAsRead,
+			ForwardTo: mailboxesToStrings(rule.Actions.RedirectToRecipients),
+			MoveTo:    moveTarget,
+		},
+	}
+	if len(rule.Conditions.ContainsSenderStrings) > 0 {
+		out.Criteria.From = strings.Join(rule.Conditions.ContainsSenderStrings, " ")
+	} else if len(rule.Conditions.FromAddresses) > 0 {
+		out.Criteria.From = mailboxString(rule.Conditions.FromAddresses[0])
+	}
+	if len(rule.Conditions.SentToAddresses) > 0 {
+		out.Criteria.To = mailboxString(rule.Conditions.SentToAddresses[0])
+	}
+	if target := strings.TrimSpace(out.Action.MoveTo); target != "" {
+		if p.client != nil {
+			target = p.folderDisplayName(ctx, target)
+			out.Action.MoveTo = target
+		}
+		if strings.EqualFold(target, exchangeEWSDisplayFolderName(p.cfg.ArchiveFolder)) || strings.EqualFold(target, p.cfg.ArchiveFolder) {
+			out.Action.Archive = true
+		}
+	}
+	return out
+}
+
+func (p *ExchangeEWSMailProvider) serverFilterToRule(ctx context.Context, filter ServerFilter) (ews.Rule, error) {
+	rule := ews.Rule{
+		ID:       strings.TrimSpace(filter.ID),
+		Name:     strings.TrimSpace(filter.Name),
+		Enabled:  filter.Enabled,
+		Priority: 1,
+		Conditions: ews.RuleConditions{
+			ContainsSubjectStrings: compactMessageIDs([]string{filter.Criteria.Subject}),
+			ContainsSenderStrings:  compactMessageIDs([]string{filter.Criteria.From}),
+		},
+		Actions: ews.RuleActions{
+			Delete:               filter.Action.Trash,
+			MarkAsRead:           filter.Action.MarkRead,
+			RedirectToRecipients: stringsToMailboxes(filter.Action.ForwardTo),
+		},
+	}
+	if to := strings.TrimSpace(filter.Criteria.To); to != "" {
+		rule.Conditions.SentToAddresses = []ews.Mailbox{{Email: to}}
+	}
+	moveTo := strings.TrimSpace(filter.Action.MoveTo)
+	if filter.Action.Archive && moveTo == "" {
+		moveTo = p.cfg.ArchiveFolder
+	}
+	if moveTo != "" {
+		folderID, err := p.resolveFolderRef(ctx, moveTo)
+		if err != nil {
+			return ews.Rule{}, err
+		}
+		rule.Actions.MoveToFolderID = folderID
+	}
+	return rule, nil
+}
+
+func (p *ExchangeEWSMailProvider) folderDisplayName(ctx context.Context, folderID string) string {
+	clean := strings.TrimSpace(folderID)
+	if clean == "" {
+		return ""
+	}
+	folders, err := p.client.ListFolders(ctx)
+	if err != nil {
+		return clean
+	}
+	for _, folder := range folders {
+		if strings.EqualFold(strings.TrimSpace(folder.ID), clean) {
+			return exchangeEWSDisplayFolderName(folder.Name)
+		}
+	}
+	switch strings.ToLower(clean) {
+	case "inbox":
+		return "Posteingang"
+	case "deleteditems":
+		return "Gelöschte Elemente"
+	case "junkemail":
+		return "Junk-E-Mail"
+	case "sentitems":
+		return "Gesendete Elemente"
+	default:
+		return clean
+	}
+}
+
+func mailboxString(mailbox ews.Mailbox) string {
+	if clean := strings.TrimSpace(mailbox.Email); clean != "" {
+		return clean
+	}
+	return strings.TrimSpace(mailbox.Name)
+}
+
+func mailboxesToStrings(values []ews.Mailbox) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if clean := mailboxString(value); clean != "" {
+			out = append(out, clean)
+		}
+	}
+	return out
+}
+
+func stringsToMailboxes(values []string) []ews.Mailbox {
+	out := make([]ews.Mailbox, 0, len(values))
+	for _, value := range values {
+		clean := strings.TrimSpace(value)
+		if clean == "" {
+			continue
+		}
+		out = append(out, ews.Mailbox{Email: clean})
 	}
 	return out
 }

@@ -51,6 +51,8 @@ type GmailClient struct {
 var _ EmailProvider = (*GmailClient)(nil)
 var _ MessageActionProvider = (*GmailClient)(nil)
 var _ MessagePageProvider = (*GmailClient)(nil)
+var _ NamedLabelProvider = (*GmailClient)(nil)
+var _ ServerFilterProvider = (*GmailClient)(nil)
 
 // NewGmail creates a new Gmail client.
 func NewGmail() (*GmailClient, error) {
@@ -491,6 +493,102 @@ func (c *GmailClient) Trash(ctx context.Context, messageIDs []string) (int, erro
 	return succeeded, nil
 }
 
+func (c *GmailClient) ApplyNamedLabel(ctx context.Context, messageIDs []string, label string, archive bool) (int, error) {
+	labelID, err := c.ensureUserLabel(ctx, label)
+	if err != nil {
+		return 0, err
+	}
+	remove := []string(nil)
+	if archive {
+		remove = []string{"INBOX"}
+	}
+	return c.ModifyLabels(ctx, messageIDs, []string{labelID}, remove)
+}
+
+func (c *GmailClient) ServerFilterCapabilities() ServerFilterCapabilities {
+	return ServerFilterCapabilities{
+		Provider:          c.ProviderName(),
+		SupportsList:      true,
+		SupportsUpsert:    true,
+		SupportsDelete:    true,
+		SupportsArchive:   true,
+		SupportsTrash:     false,
+		SupportsMoveTo:    true,
+		SupportsMarkRead:  true,
+		SupportsForward:   true,
+		SupportsAddLabels: true,
+		SupportsQuery:     true,
+	}
+}
+
+func (c *GmailClient) ListServerFilters(ctx context.Context) ([]ServerFilter, error) {
+	service, err := c.getService(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.rateLimiter.Acquire("settings.filters.list")
+	result, err := service.Users.Settings.Filters.List("me").Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list gmail filters: %w", err)
+	}
+	labels, err := c.ListLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	labelByID := make(map[string]string, len(labels))
+	for _, label := range labels {
+		labelByID[strings.TrimSpace(label.ID)] = strings.TrimSpace(label.Name)
+	}
+	out := make([]ServerFilter, 0, len(result.Filter))
+	for _, filter := range result.Filter {
+		out = append(out, gmailFilterToServerFilter(filter, labelByID))
+	}
+	return out, nil
+}
+
+func (c *GmailClient) UpsertServerFilter(ctx context.Context, filter ServerFilter) (ServerFilter, error) {
+	service, err := c.getService(ctx)
+	if err != nil {
+		return ServerFilter{}, err
+	}
+	payload, err := c.serverFilterToGmailFilter(ctx, filter)
+	if err != nil {
+		return ServerFilter{}, err
+	}
+	if strings.TrimSpace(filter.ID) != "" {
+		c.rateLimiter.Acquire("settings.filters.delete")
+		if err := service.Users.Settings.Filters.Delete("me", strings.TrimSpace(filter.ID)).Context(ctx).Do(); err != nil {
+			return ServerFilter{}, fmt.Errorf("failed to delete gmail filter %s: %w", filter.ID, err)
+		}
+	}
+	c.rateLimiter.Acquire("settings.filters.create")
+	created, err := service.Users.Settings.Filters.Create("me", payload).Context(ctx).Do()
+	if err != nil {
+		return ServerFilter{}, fmt.Errorf("failed to create gmail filter: %w", err)
+	}
+	labels, err := c.ListLabels(ctx)
+	if err != nil {
+		return ServerFilter{}, err
+	}
+	labelByID := make(map[string]string, len(labels))
+	for _, label := range labels {
+		labelByID[strings.TrimSpace(label.ID)] = strings.TrimSpace(label.Name)
+	}
+	return gmailFilterToServerFilter(created, labelByID), nil
+}
+
+func (c *GmailClient) DeleteServerFilter(ctx context.Context, id string) error {
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("gmail filter id is required")
+	}
+	service, err := c.getService(ctx)
+	if err != nil {
+		return err
+	}
+	c.rateLimiter.Acquire("settings.filters.delete")
+	return service.Users.Settings.Filters.Delete("me", strings.TrimSpace(id)).Context(ctx).Do()
+}
+
 // Delete permanently deletes messages.
 func (c *GmailClient) Delete(ctx context.Context, messageIDs []string) (int, error) {
 	if len(messageIDs) == 0 {
@@ -550,6 +648,186 @@ func (c *GmailClient) ProviderName() string {
 // Close releases any resources held by the client.
 func (c *GmailClient) Close() error {
 	return nil
+}
+
+func (c *GmailClient) ensureUserLabel(ctx context.Context, name string) (string, error) {
+	clean := strings.TrimSpace(name)
+	if clean == "" {
+		return "", fmt.Errorf("gmail label name is required")
+	}
+	labels, err := c.ListLabels(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, label := range labels {
+		if strings.EqualFold(strings.TrimSpace(label.Name), clean) {
+			return strings.TrimSpace(label.ID), nil
+		}
+	}
+	service, err := c.getService(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.rateLimiter.Acquire("labels.create")
+	created, err := service.Users.Labels.Create("me", &gmail.Label{
+		Name:                  clean,
+		LabelListVisibility:   "labelShow",
+		MessageListVisibility: "show",
+	}).Context(ctx).Do()
+	if err != nil {
+		return "", fmt.Errorf("failed to create gmail label %q: %w", clean, err)
+	}
+	return strings.TrimSpace(created.Id), nil
+}
+
+func gmailFilterToServerFilter(filter *gmail.Filter, labelByID map[string]string) ServerFilter {
+	if filter == nil {
+		return ServerFilter{}
+	}
+	out := ServerFilter{
+		ID:      strings.TrimSpace(filter.Id),
+		Name:    "gmail-filter",
+		Enabled: true,
+	}
+	if filter.Criteria != nil {
+		out.Criteria = ServerFilterCriteria{
+			From:         strings.TrimSpace(filter.Criteria.From),
+			To:           strings.TrimSpace(filter.Criteria.To),
+			Subject:      strings.TrimSpace(filter.Criteria.Subject),
+			Query:        strings.TrimSpace(filter.Criteria.Query),
+			NegatedQuery: strings.TrimSpace(filter.Criteria.NegatedQuery),
+		}
+		if filter.Criteria.HasAttachment {
+			value := true
+			out.Criteria.HasAttachment = &value
+		}
+	}
+	if filter.Action != nil {
+		addLabels := make([]string, 0, len(filter.Action.AddLabelIds))
+		removeLabels := make([]string, 0, len(filter.Action.RemoveLabelIds))
+		for _, id := range filter.Action.AddLabelIds {
+			addLabels = append(addLabels, lookupLabelName(labelByID, id))
+		}
+		for _, id := range filter.Action.RemoveLabelIds {
+			removeLabels = append(removeLabels, lookupLabelName(labelByID, id))
+		}
+		out.Action = ServerFilterAction{
+			MarkRead:     slicesContainsFold(removeLabels, "UNREAD"),
+			Archive:      slicesContainsFold(removeLabels, "INBOX"),
+			ForwardTo:    compactStrings([]string{strings.TrimSpace(filter.Action.Forward)}),
+			AddLabels:    compactStrings(addLabels),
+			RemoveLabels: compactStrings(removeLabels),
+		}
+		if moveTarget := firstUserLabelName(out.Action.AddLabels); moveTarget != "" && out.Action.Archive {
+			out.Action.MoveTo = moveTarget
+		}
+	}
+	return out
+}
+
+func (c *GmailClient) serverFilterToGmailFilter(ctx context.Context, filter ServerFilter) (*gmail.Filter, error) {
+	result := &gmail.Filter{
+		Criteria: &gmail.FilterCriteria{
+			From:         strings.TrimSpace(filter.Criteria.From),
+			To:           strings.TrimSpace(filter.Criteria.To),
+			Subject:      strings.TrimSpace(filter.Criteria.Subject),
+			Query:        strings.TrimSpace(filter.Criteria.Query),
+			NegatedQuery: strings.TrimSpace(filter.Criteria.NegatedQuery),
+		},
+		Action: &gmail.FilterAction{},
+	}
+	if filter.Criteria.HasAttachment != nil {
+		result.Criteria.HasAttachment = *filter.Criteria.HasAttachment
+	}
+	addIDs := make([]string, 0, len(filter.Action.AddLabels)+1)
+	removeIDs := make([]string, 0, len(filter.Action.RemoveLabels)+2)
+	if filter.Action.Archive || strings.TrimSpace(filter.Action.MoveTo) != "" {
+		removeIDs = append(removeIDs, "INBOX")
+	}
+	if filter.Action.MarkRead {
+		removeIDs = append(removeIDs, "UNREAD")
+	}
+	for _, label := range filter.Action.AddLabels {
+		labelID, err := c.ensureUserLabel(ctx, label)
+		if err != nil {
+			return nil, err
+		}
+		addIDs = append(addIDs, labelID)
+	}
+	for _, label := range filter.Action.RemoveLabels {
+		if strings.EqualFold(strings.TrimSpace(label), "inbox") || strings.EqualFold(strings.TrimSpace(label), "unread") {
+			removeIDs = append(removeIDs, strings.ToUpper(strings.TrimSpace(label)))
+			continue
+		}
+		labelID, err := c.ensureUserLabel(ctx, label)
+		if err != nil {
+			return nil, err
+		}
+		removeIDs = append(removeIDs, labelID)
+	}
+	if moveTarget := strings.TrimSpace(filter.Action.MoveTo); moveTarget != "" {
+		labelID, err := c.ensureUserLabel(ctx, moveTarget)
+		if err != nil {
+			return nil, err
+		}
+		addIDs = append(addIDs, labelID)
+	}
+	result.Action.AddLabelIds = compactStrings(addIDs)
+	result.Action.RemoveLabelIds = compactStrings(removeIDs)
+	if len(filter.Action.ForwardTo) > 0 {
+		result.Action.Forward = strings.TrimSpace(filter.Action.ForwardTo[0])
+	}
+	if filter.Action.Trash {
+		return nil, fmt.Errorf("gmail server filters do not support trash safely")
+	}
+	return result, nil
+}
+
+func lookupLabelName(labelByID map[string]string, id string) string {
+	if name := strings.TrimSpace(labelByID[strings.TrimSpace(id)]); name != "" {
+		return name
+	}
+	return strings.TrimSpace(id)
+}
+
+func firstUserLabelName(values []string) string {
+	for _, value := range values {
+		clean := strings.TrimSpace(value)
+		switch strings.ToUpper(clean) {
+		case "", "INBOX", "UNREAD":
+			continue
+		default:
+			return clean
+		}
+	}
+	return ""
+}
+
+func slicesContainsFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
+
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		clean := strings.TrimSpace(value)
+		if clean == "" {
+			continue
+		}
+		key := strings.ToLower(clean)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
 }
 
 func parseGmailMessage(msg *gmail.Message) *providerdata.EmailMessage {
