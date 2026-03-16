@@ -52,6 +52,29 @@ func TestOpenAIClassifierParsesStructuredJSON(t *testing.T) {
 	}
 }
 
+func TestOpenAIClassifierParsesThinkingPreamble(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{\"choices\":[{\"message\":{\"content\":\"</think>\\n\\n{\\\"action\\\":\\\"cc\\\",\\\"confidence\\\":0.81,\\\"reason\\\":\\\"newsletter\\\",\\\"signals\\\":[\\\"fyi\\\"]}\"}}]}"))
+	}))
+	defer server.Close()
+
+	classifier := OpenAIClassifier{
+		BaseURL: server.URL,
+		Model:   "qwen3.5-9b",
+	}
+	decision, err := classifier.Classify(context.Background(), Message{ID: "m2", Subject: "FYI"})
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if decision.Action != ActionCC {
+		t.Fatalf("Action = %q, want %q", decision.Action, ActionCC)
+	}
+	if decision.Confidence != 0.81 {
+		t.Fatalf("Confidence = %v, want 0.81", decision.Confidence)
+	}
+}
+
 func TestOpenAIClassifierReturnsHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad gateway", http.StatusBadGateway)

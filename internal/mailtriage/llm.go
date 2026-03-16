@@ -106,7 +106,7 @@ func (c OpenAIClassifier) Classify(ctx context.Context, message Message) (Decisi
 	if len(payload.Choices) == 0 {
 		return Decision{}, nil
 	}
-	content := strings.TrimSpace(stripCodeFence(payload.Choices[0].Message.Content))
+	content := strings.TrimSpace(stripThinkingPreamble(stripCodeFence(payload.Choices[0].Message.Content)))
 	if content == "" {
 		return Decision{}, nil
 	}
@@ -171,4 +171,20 @@ func stripCodeFence(raw string) string {
 		lines = lines[:len(lines)-1]
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func stripThinkingPreamble(raw string) string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" {
+		return clean
+	}
+	if strings.HasPrefix(clean, "<think>") {
+		if idx := strings.Index(clean, "</think>"); idx >= 0 {
+			clean = clean[idx+len("</think>"):]
+		}
+	}
+	if strings.HasPrefix(clean, "</think>") {
+		clean = clean[len("</think>"):]
+	}
+	return strings.TrimSpace(clean)
 }
