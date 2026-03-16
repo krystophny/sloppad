@@ -349,7 +349,11 @@ func (p *ExchangeEWSMailProvider) Close() error {
 
 func (p *ExchangeEWSMailProvider) searchFolders(ctx context.Context, opts SearchOptions) ([]string, error) {
 	if strings.TrimSpace(opts.Folder) != "" {
-		return []string{strings.TrimSpace(opts.Folder)}, nil
+		ref, err := p.resolveFolderRef(ctx, strings.TrimSpace(opts.Folder))
+		if err != nil {
+			return nil, err
+		}
+		return []string{ref}, nil
 	}
 	folders, err := p.client.ListFolders(ctx)
 	if err != nil {
@@ -367,12 +371,43 @@ func (p *ExchangeEWSMailProvider) searchFolders(ctx context.Context, opts Search
 		if !opts.IncludeSpamTrash && exchangeEWSSpamOrTrash(name) {
 			continue
 		}
-		out = append(out, name)
+		if strings.TrimSpace(folder.ID) != "" {
+			out = append(out, strings.TrimSpace(folder.ID))
+		}
 	}
 	if len(out) == 0 {
 		out = append(out, "inbox")
 	}
 	return out, nil
+}
+
+func (p *ExchangeEWSMailProvider) resolveFolderRef(ctx context.Context, folder string) (string, error) {
+	clean := strings.TrimSpace(folder)
+	if clean == "" {
+		return "inbox", nil
+	}
+	switch strings.ToLower(clean) {
+	case "inbox", "posteingang":
+		return "inbox", nil
+	case "drafts", "entwürfe", "entwuerfe":
+		return "drafts", nil
+	case "sent", "sentitems", "gesendete elemente":
+		return "sentitems", nil
+	case "trash", "deleteditems", "gelöschte elemente", "geloschte elemente":
+		return "deleteditems", nil
+	case "junk", "spam", "junkemail", "junk-e-mail":
+		return "junkemail", nil
+	case "archive":
+		return p.resolveArchiveFolderID(ctx)
+	}
+	folderInfo, err := p.client.FindFolderByName(ctx, clean)
+	if err != nil {
+		return "", err
+	}
+	if folderInfo != nil && strings.TrimSpace(folderInfo.ID) != "" {
+		return strings.TrimSpace(folderInfo.ID), nil
+	}
+	return clean, nil
 }
 
 func (p *ExchangeEWSMailProvider) normalizeDraftInput(input DraftInput, requireRecipients bool) (DraftInput, error) {
