@@ -181,3 +181,56 @@ func TestClientGetMessagesSanitizesIllegalXMLCharacterReferences(t *testing.T) {
 		t.Fatalf("Body = %q, want %q", messages[0].Body, "Body text")
 	}
 }
+
+func TestClientMoveItemsReturnsResolvedIDs(t *testing.T) {
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		data, _ := io.ReadAll(r.Body)
+		body = string(data)
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:MoveItemResponse>
+      <m:ResponseMessages>
+        <m:MoveItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:Message><t:ItemId Id="m1-new" ChangeKey="ck1" /></t:Message>
+          </m:Items>
+        </m:MoveItemResponseMessage>
+        <m:MoveItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:Message><t:ItemId Id="m2-new" ChangeKey="ck2" /></t:Message>
+          </m:Items>
+        </m:MoveItemResponseMessage>
+      </m:ResponseMessages>
+    </m:MoveItemResponse>
+  </soap:Body>
+</soap:Envelope>`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		Endpoint: server.URL,
+		Username: "ert",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	defer client.Close()
+
+	ids, err := client.MoveItems(t.Context(), []string{"m1", "m2"}, "deleteditems")
+	if err != nil {
+		t.Fatalf("MoveItems() error: %v", err)
+	}
+	if strings.Join(ids, ",") != "m1-new,m2-new" {
+		t.Fatalf("resolved ids = %v, want [m1-new m2-new]", ids)
+	}
+	if !strings.Contains(body, `<t:DistinguishedFolderId Id="deleteditems" />`) {
+		t.Fatalf("MoveItem body missing deleteditems folder: %s", body)
+	}
+}

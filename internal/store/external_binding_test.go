@@ -238,6 +238,71 @@ func TestExternalBindingStoreListsMissingContainerRef(t *testing.T) {
 	}
 }
 
+func TestApplyExternalBindingReconcileUpdatesRewritesRemoteIDAndState(t *testing.T) {
+	s := newTestStore(t)
+
+	account, err := s.CreateExternalAccount(SphereWork, ExternalProviderExchangeEWS, "TU Graz", map[string]any{
+		"endpoint": "https://exchange.tugraz.at/EWS/Exchange.asmx",
+		"username": "ert",
+	})
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	item, err := s.CreateItem("Follow up", ItemOptions{})
+	if err != nil {
+		t.Fatalf("CreateItem() error: %v", err)
+	}
+	title := "Mail"
+	artifact, err := s.CreateArtifact(ArtifactKindEmail, nil, nil, &title, nil)
+	if err != nil {
+		t.Fatalf("CreateArtifact() error: %v", err)
+	}
+	containerRef := "Posteingang"
+	if _, err := s.UpsertExternalBinding(ExternalBinding{
+		AccountID:    account.ID,
+		Provider:     ExternalProviderExchangeEWS,
+		ObjectType:   "email",
+		RemoteID:     "msg-1",
+		ItemID:       &item.ID,
+		ArtifactID:   &artifact.ID,
+		ContainerRef: &containerRef,
+	}); err != nil {
+		t.Fatalf("UpsertExternalBinding() error: %v", err)
+	}
+
+	trashRef := "Gelöschte Elemente"
+	doneState := ItemStateDone
+	if err := s.ApplyExternalBindingReconcileUpdates(account.ID, ExternalProviderExchangeEWS, []ExternalBindingReconcileUpdate{
+		{
+			ObjectType:        "email",
+			OldRemoteID:       "msg-1",
+			NewRemoteID:       "msg-1-trash",
+			ContainerRef:      &trashRef,
+			FollowUpItemState: &doneState,
+		},
+	}); err != nil {
+		t.Fatalf("ApplyExternalBindingReconcileUpdates() error: %v", err)
+	}
+
+	if _, err := s.GetBindingByRemote(account.ID, ExternalProviderExchangeEWS, "email", "msg-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("old GetBindingByRemote() error = %v, want sql.ErrNoRows", err)
+	}
+	binding, err := s.GetBindingByRemote(account.ID, ExternalProviderExchangeEWS, "email", "msg-1-trash")
+	if err != nil {
+		t.Fatalf("GetBindingByRemote(new) error: %v", err)
+	}
+	if binding.ContainerRef == nil || *binding.ContainerRef != trashRef {
+		t.Fatalf("binding container_ref = %v, want %q", binding.ContainerRef, trashRef)
+	}
+	updatedItem, err := s.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem() error: %v", err)
+	}
+	if updatedItem.State != ItemStateDone {
+		t.Fatalf("item state = %q, want %q", updatedItem.State, ItemStateDone)
+	}
+}
+
 func TestExternalBindingStoreRejectsInvalidInput(t *testing.T) {
 	s := newTestStore(t)
 

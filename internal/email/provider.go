@@ -22,6 +22,27 @@ type EmailProvider interface {
 	Close() error
 }
 
+type ActionResolution struct {
+	OriginalMessageID string `json:"original_message_id"`
+	ResolvedMessageID string `json:"resolved_message_id"`
+}
+
+type ResolvedArchiveProvider interface {
+	ArchiveResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error)
+}
+
+type ResolvedMoveToInboxProvider interface {
+	MoveToInboxResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error)
+}
+
+type ResolvedTrashProvider interface {
+	TrashResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error)
+}
+
+type ResolvedNamedFolderProvider interface {
+	MoveToFolderResolved(ctx context.Context, messageIDs []string, folder string) ([]ActionResolution, error)
+}
+
 type MessagePage struct {
 	IDs           []string
 	NextPageToken string

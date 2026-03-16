@@ -263,58 +263,98 @@ func mailSearchOptionsFromRequest(r *http.Request) (email.SearchOptions, string,
 	return opts, strings.TrimSpace(query.Get("page_token")), nil
 }
 
-func applyMailAction(ctx context.Context, account store.ExternalAccount, provider email.EmailProvider, action string, messageIDs []string, folder, label string, archive *bool) (int, error) {
+type mailActionApplyResult struct {
+	Count       int
+	Resolutions []email.ActionResolution
+}
+
+func applyMailAction(ctx context.Context, account store.ExternalAccount, provider email.EmailProvider, action string, messageIDs []string, folder, label string, archive *bool) (mailActionApplyResult, error) {
 	switch action {
 	case "mark_read":
-		return provider.MarkRead(ctx, messageIDs)
+		count, err := provider.MarkRead(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "mark_unread":
-		return provider.MarkUnread(ctx, messageIDs)
+		count, err := provider.MarkUnread(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "archive":
-		return provider.Archive(ctx, messageIDs)
+		if resolvedProvider, ok := provider.(email.ResolvedArchiveProvider); ok {
+			resolutions, err := resolvedProvider.ArchiveResolved(ctx, messageIDs)
+			return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+		}
+		count, err := provider.Archive(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "move_to_inbox":
-		return provider.MoveToInbox(ctx, messageIDs)
+		if resolvedProvider, ok := provider.(email.ResolvedMoveToInboxProvider); ok {
+			resolutions, err := resolvedProvider.MoveToInboxResolved(ctx, messageIDs)
+			return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+		}
+		count, err := provider.MoveToInbox(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "trash":
-		return provider.Trash(ctx, messageIDs)
+		if resolvedProvider, ok := provider.(email.ResolvedTrashProvider); ok {
+			resolutions, err := resolvedProvider.TrashResolved(ctx, messageIDs)
+			return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+		}
+		count, err := provider.Trash(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "delete":
-		return provider.Delete(ctx, messageIDs)
+		count, err := provider.Delete(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	case "move_to_folder":
 		folderProvider, ok := provider.(email.NamedFolderProvider)
 		if !ok {
-			return 0, errBadRequest("move_to_folder is not supported for this account")
+			return mailActionApplyResult{}, errBadRequest("move_to_folder is not supported for this account")
 		}
 		if strings.TrimSpace(folder) == "" {
-			return 0, errBadRequest("folder is required")
+			return mailActionApplyResult{}, errBadRequest("folder is required")
 		}
-		return folderProvider.MoveToFolder(ctx, messageIDs, folder)
+		if resolvedProvider, ok := provider.(email.ResolvedNamedFolderProvider); ok {
+			resolutions, err := resolvedProvider.MoveToFolderResolved(ctx, messageIDs, folder)
+			return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+		}
+		count, err := folderProvider.MoveToFolder(ctx, messageIDs, folder)
+		return mailActionApplyResult{Count: count}, err
 	case "apply_label":
 		labelProvider, ok := provider.(email.NamedLabelProvider)
 		if !ok {
-			return 0, errBadRequest("apply_label is not supported for this account")
+			return mailActionApplyResult{}, errBadRequest("apply_label is not supported for this account")
 		}
 		if strings.TrimSpace(label) == "" {
-			return 0, errBadRequest("label is required")
+			return mailActionApplyResult{}, errBadRequest("label is required")
 		}
 		archiveValue := false
 		if archive != nil {
 			archiveValue = *archive
 		}
-		return labelProvider.ApplyNamedLabel(ctx, messageIDs, label, archiveValue)
+		count, err := labelProvider.ApplyNamedLabel(ctx, messageIDs, label, archiveValue)
+		return mailActionApplyResult{Count: count}, err
 	case "archive_label":
 		if strings.TrimSpace(label) == "" {
-			return 0, errBadRequest("label is required")
+			return mailActionApplyResult{}, errBadRequest("label is required")
 		}
 		if folderProvider, ok := provider.(email.NamedFolderProvider); ok {
 			target := label
 			if account.Provider == store.ExternalProviderExchangeEWS {
 				target = "Archive/" + label
 			}
-			return folderProvider.MoveToFolder(ctx, messageIDs, target)
+			if resolvedProvider, ok := provider.(email.ResolvedNamedFolderProvider); ok {
+				resolutions, err := resolvedProvider.MoveToFolderResolved(ctx, messageIDs, target)
+				return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+			}
+			count, err := folderProvider.MoveToFolder(ctx, messageIDs, target)
+			return mailActionApplyResult{Count: count}, err
 		}
 		if labelProvider, ok := provider.(email.NamedLabelProvider); ok {
-			return labelProvider.ApplyNamedLabel(ctx, messageIDs, label, true)
+			count, err := labelProvider.ApplyNamedLabel(ctx, messageIDs, label, true)
+			return mailActionApplyResult{Count: count}, err
 		}
-		return provider.Archive(ctx, messageIDs)
+		if resolvedProvider, ok := provider.(email.ResolvedArchiveProvider); ok {
+			resolutions, err := resolvedProvider.ArchiveResolved(ctx, messageIDs)
+			return mailActionApplyResult{Count: len(resolutions), Resolutions: resolutions}, err
+		}
+		count, err := provider.Archive(ctx, messageIDs)
+		return mailActionApplyResult{Count: count}, err
 	default:
-		return 0, errBadRequest("unsupported action")
+		return mailActionApplyResult{}, errBadRequest("unsupported action")
 	}
 }

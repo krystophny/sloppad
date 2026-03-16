@@ -437,14 +437,17 @@ func (c *Client) UpdateInboxRules(ctx context.Context, operations []RuleOperatio
 	return c.call(ctx, "UpdateInboxRules", body, &resp)
 }
 
-func (c *Client) MoveItems(ctx context.Context, ids []string, folderID string) error {
+func (c *Client) MoveItems(ctx context.Context, ids []string, folderID string) ([]string, error) {
 	ids = compactStrings(ids)
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	body := `<m:MoveItem><m:ToFolderId>` + folderIDXML(folderID) + `</m:ToFolderId><m:ItemIds>` + itemIDsXML(ids) + `</m:ItemIds></m:MoveItem>`
-	var resp simpleResponseEnvelope
-	return c.call(ctx, "MoveItem", body, &resp)
+	var resp moveItemEnvelope
+	if err := c.call(ctx, "MoveItem", body, &resp); err != nil {
+		return nil, err
+	}
+	return resp.ResolvedItemIDs(), nil
 }
 
 func (c *Client) DeleteItems(ctx context.Context, ids []string, hardDelete bool) error {
@@ -918,6 +921,8 @@ func responseCode(target any) string {
 		return typed.Body.GetStreamingEventsResponse.ResponseMessages.Message.ResponseCode
 	case *createItemEnvelope:
 		return typed.Body.CreateItemResponse.ResponseMessages.Message.ResponseCode
+	case *moveItemEnvelope:
+		return typed.Body.MoveItemResponse.ResponseMessages.FirstCode()
 	case *updateInboxRulesEnvelope:
 		return typed.Body.UpdateInboxRulesResponse.ResponseCode
 	default:
@@ -956,6 +961,51 @@ type createItemEnvelope struct {
 			} `xml:"ResponseMessages"`
 		} `xml:"CreateItemResponse"`
 	} `xml:"Body"`
+}
+
+type moveItemEnvelope struct {
+	Body struct {
+		MoveItemResponse struct {
+			ResponseMessages moveItemResponseMessages `xml:"ResponseMessages"`
+		} `xml:"MoveItemResponse"`
+	} `xml:"Body"`
+}
+
+func (e *moveItemEnvelope) ResolvedItemIDs() []string {
+	if e == nil {
+		return nil
+	}
+	return e.Body.MoveItemResponse.ResponseMessages.ResolvedItemIDs()
+}
+
+type moveItemResponseMessages struct {
+	Items []struct {
+		ResponseCode string `xml:"ResponseCode"`
+		Items        struct {
+			Values []itemXML `xml:",any"`
+		} `xml:"Items"`
+	} `xml:",any"`
+}
+
+func (m moveItemResponseMessages) FirstCode() string {
+	for _, item := range m.Items {
+		if clean := strings.TrimSpace(item.ResponseCode); clean != "" {
+			return clean
+		}
+	}
+	return ""
+}
+
+func (m moveItemResponseMessages) ResolvedItemIDs() []string {
+	var ids []string
+	for _, item := range m.Items {
+		for _, value := range item.Items.Values {
+			if id := strings.TrimSpace(value.ItemID.ID); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
 }
 
 type updateResponseMessages struct {

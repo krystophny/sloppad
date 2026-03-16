@@ -76,7 +76,7 @@ func (a *App) executeMailAction(ctx context.Context, account store.ExternalAccou
 		logs = append(logs, logEntry)
 	}
 
-	count, err := applyMailAction(ctx, account, provider, action, messageIDs, strings.TrimSpace(cmd.Folder), strings.TrimSpace(cmd.Label), cmd.Archive)
+	applied, err := applyMailAction(ctx, account, provider, action, messageIDs, strings.TrimSpace(cmd.Folder), strings.TrimSpace(cmd.Label), cmd.Archive)
 	if err != nil {
 		for _, logEntry := range logs {
 			_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogFailed, "", err.Error())
@@ -84,17 +84,30 @@ func (a *App) executeMailAction(ctx context.Context, account store.ExternalAccou
 		return mailActionExecutionResult{Logs: logs}, err
 	}
 
-	if err := a.forceMailActionReconcile(ctx, account, messageIDs); err != nil {
+	if err := a.applyMailActionResolutions(account, action, targetFolder, applied.Resolutions); err != nil {
 		for _, logEntry := range logs {
 			_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogReconcileFailed, "", err.Error())
 		}
-		return mailActionExecutionResult{Succeeded: count, Logs: logs}, fmt.Errorf("mail action applied remotely but reconcile failed: %w", err)
+		return mailActionExecutionResult{Succeeded: applied.Count, Logs: logs}, fmt.Errorf("mail action applied remotely but local binding update failed: %w", err)
 	}
 
-	for _, logEntry := range logs {
-		_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogApplied, "", "")
+	reconcileIDs := mergeMailActionReconcileIDs(messageIDs, applied.Resolutions)
+	if err := a.forceMailActionReconcile(ctx, account, reconcileIDs); err != nil {
+		for _, logEntry := range logs {
+			_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogReconcileFailed, "", err.Error())
+		}
+		return mailActionExecutionResult{Succeeded: applied.Count, Logs: logs}, fmt.Errorf("mail action applied remotely but reconcile failed: %w", err)
 	}
-	return mailActionExecutionResult{Succeeded: count, Logs: logs}, nil
+
+	resolvedByMessageID := make(map[string]string, len(applied.Resolutions))
+	for _, resolution := range applied.Resolutions {
+		resolvedByMessageID[strings.TrimSpace(resolution.OriginalMessageID)] = strings.TrimSpace(resolution.ResolvedMessageID)
+	}
+	for _, logEntry := range logs {
+		resolvedID := resolvedByMessageID[strings.TrimSpace(logEntry.MessageID)]
+		_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogApplied, resolvedID, "")
+	}
+	return mailActionExecutionResult{Succeeded: applied.Count, Logs: logs}, nil
 }
 
 func (a *App) forceMailActionReconcile(ctx context.Context, account store.ExternalAccount, messageIDs []string) error {
@@ -110,6 +123,56 @@ func (a *App) forceMailActionReconcile(ctx context.Context, account store.Extern
 	}
 	_, err := a.syncEmailAccount(ctx, account)
 	return err
+}
+
+func (a *App) applyMailActionResolutions(account store.ExternalAccount, action, targetFolder string, resolutions []email.ActionResolution) error {
+	if a == nil || a.store == nil || len(resolutions) == 0 {
+		return nil
+	}
+	var (
+		containerRef *string
+		itemState    *string
+	)
+	if strings.TrimSpace(targetFolder) != "" {
+		containerRef = &targetFolder
+	}
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "move_to_inbox":
+		state := store.ItemStateInbox
+		itemState = &state
+	case "archive", "archive_label", "trash", "delete", "move_to_folder":
+		state := store.ItemStateDone
+		itemState = &state
+	}
+	updates := make([]store.ExternalBindingReconcileUpdate, 0, len(resolutions))
+	for _, resolution := range resolutions {
+		updates = append(updates, store.ExternalBindingReconcileUpdate{
+			ObjectType:        emailBindingObjectType,
+			OldRemoteID:       resolution.OriginalMessageID,
+			NewRemoteID:       resolution.ResolvedMessageID,
+			ContainerRef:      containerRef,
+			FollowUpItemState: itemState,
+		})
+	}
+	return a.store.ApplyExternalBindingReconcileUpdates(account.ID, account.Provider, updates)
+}
+
+func mergeMailActionReconcileIDs(messageIDs []string, resolutions []email.ActionResolution) []string {
+	ids := make(map[string]struct{}, len(messageIDs)+len(resolutions))
+	for _, id := range messageIDs {
+		if clean := strings.TrimSpace(id); clean != "" {
+			ids[clean] = struct{}{}
+		}
+	}
+	for _, resolution := range resolutions {
+		if clean := strings.TrimSpace(resolution.OriginalMessageID); clean != "" {
+			ids[clean] = struct{}{}
+		}
+		if clean := strings.TrimSpace(resolution.ResolvedMessageID); clean != "" {
+			ids[clean] = struct{}{}
+		}
+	}
+	return sortedEmailMessageIDs(ids)
 }
 
 func mailActionTargetFolder(account store.ExternalAccount, action, folder, label string) string {

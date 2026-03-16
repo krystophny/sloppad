@@ -266,52 +266,88 @@ func (p *ExchangeEWSMailProvider) MarkUnread(ctx context.Context, messageIDs []s
 }
 
 func (p *ExchangeEWSMailProvider) Archive(ctx context.Context, messageIDs []string) (int, error) {
+	resolutions, err := p.ArchiveResolved(ctx, messageIDs)
+	if err != nil {
+		return 0, err
+	}
+	return len(resolutions), nil
+}
+
+func (p *ExchangeEWSMailProvider) ArchiveResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error) {
 	ids := compactMessageIDs(messageIDs)
 	folderID, err := p.resolveArchiveFolderID(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if folderID == "" {
-		return 0, fmt.Errorf("exchange ews archive folder is not configured")
+		return nil, fmt.Errorf("exchange ews archive folder is not configured")
 	}
-	if err := p.client.MoveItems(ctx, ids, folderID); err != nil {
-		return 0, err
+	resolved, err := p.client.MoveItems(ctx, ids, folderID)
+	if err != nil {
+		return nil, err
 	}
-	return len(ids), nil
+	return actionResolutions(ids, resolved), nil
 }
 
 func (p *ExchangeEWSMailProvider) MoveToInbox(ctx context.Context, messageIDs []string) (int, error) {
-	ids := compactMessageIDs(messageIDs)
-	if err := p.client.MoveItems(ctx, ids, "inbox"); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
-}
-
-func (p *ExchangeEWSMailProvider) Trash(ctx context.Context, messageIDs []string) (int, error) {
-	ids := compactMessageIDs(messageIDs)
-	if err := p.client.DeleteItems(ctx, ids, false); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
-}
-
-func (p *ExchangeEWSMailProvider) MoveToFolder(ctx context.Context, messageIDs []string, folder string) (int, error) {
-	ids := compactMessageIDs(messageIDs)
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	folderID, err := p.resolveFolderRef(ctx, folder)
+	resolutions, err := p.MoveToInboxResolved(ctx, messageIDs)
 	if err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(folderID) == "" {
-		return 0, fmt.Errorf("exchange ews folder %q not found", strings.TrimSpace(folder))
+	return len(resolutions), nil
+}
+
+func (p *ExchangeEWSMailProvider) MoveToInboxResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error) {
+	ids := compactMessageIDs(messageIDs)
+	resolved, err := p.client.MoveItems(ctx, ids, "inbox")
+	if err != nil {
+		return nil, err
 	}
-	if err := p.client.MoveItems(ctx, ids, folderID); err != nil {
+	return actionResolutions(ids, resolved), nil
+}
+
+func (p *ExchangeEWSMailProvider) Trash(ctx context.Context, messageIDs []string) (int, error) {
+	resolutions, err := p.TrashResolved(ctx, messageIDs)
+	if err != nil {
 		return 0, err
 	}
-	return len(ids), nil
+	return len(resolutions), nil
+}
+
+func (p *ExchangeEWSMailProvider) TrashResolved(ctx context.Context, messageIDs []string) ([]ActionResolution, error) {
+	ids := compactMessageIDs(messageIDs)
+	resolved, err := p.client.MoveItems(ctx, ids, "deleteditems")
+	if err != nil {
+		return nil, err
+	}
+	return actionResolutions(ids, resolved), nil
+}
+
+func (p *ExchangeEWSMailProvider) MoveToFolder(ctx context.Context, messageIDs []string, folder string) (int, error) {
+	resolutions, err := p.MoveToFolderResolved(ctx, messageIDs, folder)
+	if err != nil {
+		return 0, err
+	}
+	return len(resolutions), nil
+}
+
+func (p *ExchangeEWSMailProvider) MoveToFolderResolved(ctx context.Context, messageIDs []string, folder string) ([]ActionResolution, error) {
+	ids := compactMessageIDs(messageIDs)
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	folderID, err := p.resolveFolderRef(ctx, folder)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(folderID) == "" {
+		return nil, fmt.Errorf("exchange ews folder %q not found", strings.TrimSpace(folder))
+	}
+	resolved, err := p.client.MoveItems(ctx, ids, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return actionResolutions(ids, resolved), nil
 }
 
 func (p *ExchangeEWSMailProvider) ServerFilterCapabilities() ServerFilterCapabilities {
@@ -766,6 +802,27 @@ func exchangeEWSSpamOrTrash(name string) bool {
 	default:
 		return false
 	}
+}
+
+func actionResolutions(originalIDs, resolvedIDs []string) []ActionResolution {
+	ids := compactMessageIDs(originalIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]ActionResolution, 0, len(ids))
+	for index, original := range ids {
+		resolved := original
+		if index < len(resolvedIDs) {
+			if clean := strings.TrimSpace(resolvedIDs[index]); clean != "" {
+				resolved = clean
+			}
+		}
+		out = append(out, ActionResolution{
+			OriginalMessageID: original,
+			ResolvedMessageID: resolved,
+		})
+	}
+	return out
 }
 
 func exchangeEWSDisplayFolderName(name string) string {

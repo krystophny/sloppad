@@ -318,6 +318,60 @@ func TestExchangeEWSListMessagesPageUsesPagingOffsets(t *testing.T) {
 	}
 }
 
+func TestExchangeEWSTrashResolvedUsesMoveToDeletedItems(t *testing.T) {
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		data, _ := io.ReadAll(r.Body)
+		body = string(data)
+		action := strings.Trim(r.Header.Get("SOAPAction"), `"`)
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		if !strings.HasSuffix(action, "/MoveItem") {
+			t.Fatalf("unexpected SOAP action %q", action)
+		}
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:MoveItemResponse>
+      <m:ResponseMessages>
+        <m:MoveItemResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Items>
+            <t:Message><t:ItemId Id="trash-1" ChangeKey="ck1" /></t:Message>
+          </m:Items>
+        </m:MoveItemResponseMessage>
+      </m:ResponseMessages>
+    </m:MoveItemResponse>
+  </soap:Body>
+</soap:Envelope>`)
+	}))
+	defer server.Close()
+
+	provider, err := NewExchangeEWSMailProvider(ExchangeEWSConfig{
+		Endpoint: server.URL,
+		Username: "ert",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewExchangeEWSMailProvider() error: %v", err)
+	}
+	defer provider.Close()
+
+	resolutions, err := provider.TrashResolved(t.Context(), []string{"msg-1"})
+	if err != nil {
+		t.Fatalf("TrashResolved() error: %v", err)
+	}
+	if len(resolutions) != 1 {
+		t.Fatalf("len(resolutions) = %d, want 1", len(resolutions))
+	}
+	if resolutions[0].ResolvedMessageID != "trash-1" {
+		t.Fatalf("resolved id = %q, want trash-1", resolutions[0].ResolvedMessageID)
+	}
+	if !strings.Contains(body, `<t:DistinguishedFolderId Id="deleteditems" />`) {
+		t.Fatalf("MoveItem body missing deleteditems folder: %s", body)
+	}
+}
+
 func TestExchangeEWSGetMessagesSkipsMissingItemsOnBatchFallback(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
