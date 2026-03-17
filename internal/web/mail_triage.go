@@ -57,6 +57,10 @@ func (a *App) handleMailTriagePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	var req mailTriagePreviewRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -77,7 +81,7 @@ func (a *App) handleMailTriagePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	messages, err := a.loadMailTriageMessages(r.Context(), account, provider, req)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	engine := mailtriage.Engine{
@@ -116,6 +120,10 @@ func (a *App) handleMailTriageApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	var req mailTriageApplyRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -135,6 +143,10 @@ func (a *App) handleMailServerFiltersList(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	filterProvider, ok := provider.(email.ServerFilterProvider)
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, "server filters are not supported for this account")
@@ -142,7 +154,7 @@ func (a *App) handleMailServerFiltersList(w http.ResponseWriter, r *http.Request
 	}
 	filters, err := filterProvider.ListServerFilters(r.Context())
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
@@ -156,12 +168,16 @@ func (a *App) handleMailServerFilterUpsert(w http.ResponseWriter, r *http.Reques
 	if !a.requireAuth(w, r) {
 		return
 	}
-	_, provider, err := a.emailProviderForRoute(r.Context(), r)
+	account, provider, err := a.emailProviderForRoute(r.Context(), r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	filterProvider, ok := provider.(email.ServerFilterProvider)
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, "server filters are not supported for this account")
@@ -178,7 +194,7 @@ func (a *App) handleMailServerFilterUpsert(w http.ResponseWriter, r *http.Reques
 	}
 	filter, err := filterProvider.UpsertServerFilter(r.Context(), req.Filter)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{"filter": filter})
@@ -188,12 +204,16 @@ func (a *App) handleMailServerFilterDelete(w http.ResponseWriter, r *http.Reques
 	if !a.requireAuth(w, r) {
 		return
 	}
-	_, provider, err := a.emailProviderForRoute(r.Context(), r)
+	account, provider, err := a.emailProviderForRoute(r.Context(), r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	filterProvider, ok := provider.(email.ServerFilterProvider)
 	if !ok {
 		writeAPIError(w, http.StatusBadRequest, "server filters are not supported for this account")
@@ -205,7 +225,7 @@ func (a *App) handleMailServerFilterDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := filterProvider.DeleteServerFilter(r.Context(), filterID); err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	writeNoContent(w)

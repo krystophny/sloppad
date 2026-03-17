@@ -122,6 +122,7 @@ type App struct {
 	reviewDispatches        *reviewDispatchTracker
 	projectAttention        *projectAttentionTracker
 	emailRefreshes          *emailRefreshQueue
+	mailBackoffs            *mailBackoffTracker
 	tunnels                 *tunnelRegistry
 	chatAppSessions         map[string]*appserver.Session
 	pendingConfirmations    map[string]*pendingActionConfirmation
@@ -315,6 +316,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		reviewDispatches:        newReviewDispatchTracker(),
 		projectAttention:        newProjectAttentionTracker(),
 		emailRefreshes:          newEmailRefreshQueue(),
+		mailBackoffs:            newMailBackoffTracker(),
 		tunnels:                 newTunnelRegistry(),
 		chatAppSessions:         map[string]*appserver.Session{},
 		pendingConfirmations:    map[string]*pendingActionConfirmation{},

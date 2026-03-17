@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientUpdateInboxRulesBuildsOperations(t *testing.T) {
@@ -232,5 +233,58 @@ func TestClientMoveItemsReturnsResolvedIDs(t *testing.T) {
 	}
 	if !strings.Contains(body, `<t:DistinguishedFolderId Id="deleteditems" />`) {
 		t.Fatalf("MoveItem body missing deleteditems folder: %s", body)
+	}
+}
+
+func TestClientCallParsesServerBusyBackoffFault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body>
+    <s:Fault>
+      <faultcode xmlns:a="http://schemas.microsoft.com/exchange/services/2006/types">a:ErrorServerBusy</faultcode>
+      <faultstring xml:lang="de-AT">The server cannot service this request right now. Try again later.</faultstring>
+      <detail>
+        <e:ResponseCode xmlns:e="http://schemas.microsoft.com/exchange/services/2006/errors">ErrorServerBusy</e:ResponseCode>
+        <e:Message xmlns:e="http://schemas.microsoft.com/exchange/services/2006/errors">The server cannot service this request right now. Try again later.</e:Message>
+        <t:MessageXml xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <t:Value Name="BackOffMilliseconds">12345</t:Value>
+        </t:MessageXml>
+      </detail>
+    </s:Fault>
+  </s:Body>
+</s:Envelope>`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		Endpoint: server.URL,
+		Username: "ert",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	defer client.Close()
+
+	err = client.UpdateInboxRules(t.Context(), nil)
+	if err == nil {
+		t.Fatalf("UpdateInboxRules() error = nil, want server busy error")
+	}
+	var backoffErr *BackoffError
+	if !strings.Contains(err.Error(), "retry after") {
+		t.Fatalf("error = %v, want retry-after message", err)
+	}
+	if got := err; got != nil {
+		var ok bool
+		backoffErr, ok = got.(*BackoffError)
+		if !ok {
+			t.Fatalf("error type = %T, want *BackoffError", err)
+		}
+	}
+	if backoffErr.Backoff != 12345*time.Millisecond {
+		t.Fatalf("Backoff = %v, want %v", backoffErr.Backoff, 12345*time.Millisecond)
 	}
 }

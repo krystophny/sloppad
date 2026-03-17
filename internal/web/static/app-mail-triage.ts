@@ -185,6 +185,28 @@ async function loadCurrentMailTriageMessage() {
   return false;
 }
 
+async function advanceMailTriageAfterDecision() {
+  const expectedNextID = String(currentMailTriageQueueEntry(state.mailTriage.index)?.id || '').trim();
+  if (expectedNextID && state.mailTriage.prefetchedMessageID === expectedNextID && state.mailTriage.prefetchedMessage) {
+    state.mailTriage.currentMessage = state.mailTriage.prefetchedMessage;
+    state.mailTriage.prefetchedMessage = null;
+    state.mailTriage.prefetchedMessageID = '';
+    rerenderMailTriage();
+    queueNextPrefetch();
+    return true;
+  }
+  state.mailTriage.loading = true;
+  rerenderMailTriage();
+  try {
+    const loaded = await loadCurrentMailTriageMessage();
+    state.mailTriage.loading = false;
+    rerenderMailTriage();
+    return loaded;
+  } finally {
+    state.mailTriage.loading = false;
+  }
+}
+
 async function loadMailTriageQueue(accountID, folder, filterText, limit) {
   const reviewsPayload = await mailTriageFetchJSON(`external-accounts/${encodeURIComponent(String(accountID))}/mail-triage/manual/reviews?limit=1&folder=${encodeURIComponent(folder)}`);
   const reviewedMessageIDs = new Set(
@@ -210,6 +232,9 @@ async function loadMailTriageQueue(accountID, folder, filterText, limit) {
       const entry = summarizeMailTriageQueueMessage(message);
       if (!entry.id || reviewedMessageIDs.has(entry.id) || queuedMessageIDs.has(entry.id)) {
         continue;
+      }
+      if (String(message?.BodyText || '').trim() || String(message?.BodyHTML || '').trim()) {
+        mailTriageMessageCache.set(entry.id, Promise.resolve(message));
       }
       queue.push(entry);
       queuedMessageIDs.add(entry.id);
@@ -386,7 +411,7 @@ export async function submitMailTriageDecision(action) {
     state.mailTriage.currentMessage = null;
     state.mailTriage.submitting = false;
     showStatus(`${normalized} saved`);
-    return loadCurrentMailTriageMessage();
+    return advanceMailTriageAfterDecision();
   } catch (err) {
     state.mailTriage.submitting = false;
     rerenderMailTriage();
@@ -525,7 +550,6 @@ export function renderMailTriageArtifact(root, event) {
     resetMailTriageState();
     applyCanvasArtifactEvent({ kind: 'clear_canvas' });
   });
-  header.appendChild(closeButton);
 
   const undoButton = document.createElement('button');
   undoButton.type = 'button';
@@ -535,7 +559,11 @@ export function renderMailTriageArtifact(root, event) {
   undoButton.addEventListener('click', () => {
     void undoLastMailTriageDecision();
   });
-  header.appendChild(undoButton);
+  const headerActions = document.createElement('div');
+  headerActions.className = 'mail-triage-header-actions';
+  headerActions.appendChild(undoButton);
+  headerActions.appendChild(closeButton);
+  header.appendChild(headerActions);
   shell.appendChild(header);
 
   const body = document.createElement('div');

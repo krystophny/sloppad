@@ -102,6 +102,10 @@ func (a *App) handleMailTriageManualReviewCreate(w http.ResponseWriter, r *http.
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 
 	var req mailTriageManualReviewRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -120,7 +124,7 @@ func (a *App) handleMailTriageManualReviewCreate(w http.ResponseWriter, r *http.
 	}
 	message, err := provider.GetMessage(r.Context(), messageID, "full")
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 
@@ -153,7 +157,7 @@ func (a *App) handleMailTriageManualReviewCreate(w http.ResponseWriter, r *http.
 		}
 	}
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 
@@ -189,6 +193,10 @@ func (a *App) handleMailTriageManualReviewUndo(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 
 	reviewID, err := parseURLInt64Param(r, "review_id")
 	if err != nil {
@@ -206,7 +214,7 @@ func (a *App) handleMailTriageManualReviewUndo(w http.ResponseWriter, r *http.Re
 	}
 	message, succeeded, err := undoMailTriageReviewWithStore(r.Context(), a.store, account, provider, review)
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	if err := a.store.DeleteMailTriageReview(review.ID); err != nil {

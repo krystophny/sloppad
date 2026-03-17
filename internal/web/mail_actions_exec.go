@@ -3,7 +3,9 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/krystophny/tabura/internal/email"
 	"github.com/krystophny/tabura/internal/providerdata"
@@ -92,6 +94,18 @@ func (a *App) executeMailAction(ctx context.Context, account store.ExternalAccou
 	}
 
 	reconcileIDs := mergeMailActionReconcileIDs(messageIDs, applied.Resolutions)
+	if shouldDeferMailActionReconcile(action, messageIDs, applied.Resolutions) {
+		resolvedByMessageID := make(map[string]string, len(applied.Resolutions))
+		for _, resolution := range applied.Resolutions {
+			resolvedByMessageID[strings.TrimSpace(resolution.OriginalMessageID)] = strings.TrimSpace(resolution.ResolvedMessageID)
+		}
+		for _, logEntry := range logs {
+			resolvedID := resolvedByMessageID[strings.TrimSpace(logEntry.MessageID)]
+			_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogApplied, resolvedID, "")
+		}
+		a.startDeferredMailActionReconcile(account, reconcileIDs, logs)
+		return mailActionExecutionResult{Succeeded: applied.Count, Logs: logs}, nil
+	}
 	if err := a.forceMailActionReconcile(ctx, account, reconcileIDs); err != nil {
 		for _, logEntry := range logs {
 			_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogReconcileFailed, "", err.Error())
@@ -110,18 +124,75 @@ func (a *App) executeMailAction(ctx context.Context, account store.ExternalAccou
 	return mailActionExecutionResult{Succeeded: applied.Count, Logs: logs}, nil
 }
 
+func shouldDeferMailActionReconcile(action string, messageIDs []string, resolutions []email.ActionResolution) bool {
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case "archive", "archive_label", "trash", "move_to_folder", "move_to_inbox":
+	default:
+		return false
+	}
+	if len(messageIDs) == 0 || len(resolutions) == 0 {
+		return false
+	}
+	resolvedByOriginal := make(map[string]string, len(resolutions))
+	for _, resolution := range resolutions {
+		originalID := strings.TrimSpace(resolution.OriginalMessageID)
+		resolvedID := strings.TrimSpace(resolution.ResolvedMessageID)
+		if originalID == "" || resolvedID == "" {
+			return false
+		}
+		resolvedByOriginal[originalID] = resolvedID
+	}
+	for _, messageID := range messageIDs {
+		if strings.TrimSpace(resolvedByOriginal[strings.TrimSpace(messageID)]) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *App) startDeferredMailActionReconcile(account store.ExternalAccount, messageIDs []string, logs []store.MailActionLog) {
+	if a == nil || len(messageIDs) == 0 {
+		return
+	}
+	a.workerWG.Add(1)
+	go func() {
+		defer a.workerWG.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		if err := a.forceMailActionReconcile(ctx, account, messageIDs); err != nil {
+			if backoffErr := a.noteMailProviderError(account, err); backoffErr != nil {
+				log.Printf("mail action reconcile deferred by exchange backoff account=%d provider=%s retry_after=%s", account.ID, account.Provider, backoffErr.Backoff.Round(time.Second))
+				return
+			}
+			log.Printf("mail action reconcile failed account=%d provider=%s err=%v", account.ID, account.Provider, err)
+			for _, logEntry := range logs {
+				_ = a.store.UpdateMailActionLogResult(logEntry.ID, store.MailActionLogReconcileFailed, "", err.Error())
+			}
+		}
+	}()
+}
+
 func (a *App) forceMailActionReconcile(ctx context.Context, account store.ExternalAccount, messageIDs []string) error {
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		return err
+	}
 	if a != nil && a.emailRefreshes != nil {
 		a.emailRefreshes.add(account.ID, messageIDs...)
 	}
 	if a != nil && a.syncMailAccountNow != nil {
 		_, err := a.syncMailAccountNow(ctx, account)
+		if backoffErr := a.noteMailProviderError(account, err); backoffErr != nil {
+			return backoffErr
+		}
 		return err
 	}
 	if a == nil {
 		return nil
 	}
 	_, err := a.syncEmailAccount(ctx, account)
+	if backoffErr := a.noteMailProviderError(account, err); backoffErr != nil {
+		return backoffErr
+	}
 	return err
 }
 

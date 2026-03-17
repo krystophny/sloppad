@@ -42,6 +42,54 @@ type Client struct {
 	streamingHTTPClient *http.Client
 }
 
+type BackoffError struct {
+	Operation    string
+	ResponseCode string
+	Message      string
+	Backoff      time.Duration
+}
+
+func (e *BackoffError) Error() string {
+	if e == nil {
+		return ""
+	}
+	parts := []string{"exchange server busy"}
+	if clean := strings.TrimSpace(e.Operation); clean != "" {
+		parts = append(parts, "during "+clean)
+	}
+	if e.Backoff > 0 {
+		parts = append(parts, "retry after "+e.Backoff.Round(time.Second).String())
+	}
+	if clean := strings.TrimSpace(e.Message); clean != "" {
+		parts = append(parts, clean)
+	}
+	return strings.Join(parts, ": ")
+}
+
+type SOAPFaultError struct {
+	Operation    string
+	StatusCode   int
+	FaultCode    string
+	ResponseCode string
+	Message      string
+}
+
+func (e *SOAPFaultError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if clean := strings.TrimSpace(e.Message); clean != "" {
+		return clean
+	}
+	if clean := strings.TrimSpace(e.ResponseCode); clean != "" {
+		return "exchange error: " + clean
+	}
+	if clean := strings.TrimSpace(e.FaultCode); clean != "" {
+		return "exchange fault: " + clean
+	}
+	return "exchange soap fault"
+}
+
 type FolderKind string
 
 const (
@@ -577,13 +625,13 @@ func (c *Client) callWithHTTPClient(ctx context.Context, client *http.Client, so
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("ews http %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	if bytes.Contains(data, []byte("<s:Fault")) || bytes.Contains(data, []byte("<Fault>")) {
-		return fmt.Errorf("ews soap fault: %s", strings.TrimSpace(string(data)))
-	}
 	sanitized, _ := sanitizeXML10Document(data)
+	if faultErr := parseSOAPFaultError(soapAction, resp.StatusCode, sanitized); faultErr != nil {
+		return faultErr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("ews http %d: %s", resp.StatusCode, strings.TrimSpace(string(sanitized)))
+	}
 	if err := xml.Unmarshal(sanitized, target); err != nil {
 		return fmt.Errorf("decode ews %s response: %w", soapAction, err)
 	}
@@ -591,6 +639,77 @@ func (c *Client) callWithHTTPClient(ctx context.Context, client *http.Client, so
 		return fmt.Errorf("ews %s: %s", soapAction, rc)
 	}
 	return nil
+}
+
+type soapFaultEnvelope struct {
+	Body struct {
+		Fault struct {
+			FaultCode   string `xml:"faultcode"`
+			FaultString string `xml:"faultstring"`
+			Detail      struct {
+				ResponseCode string `xml:"ResponseCode"`
+				Message      string `xml:"Message"`
+				MessageXML   struct {
+					Values []soapFaultMessageXMLValue `xml:"Value"`
+				} `xml:"MessageXml"`
+			} `xml:"detail"`
+		} `xml:"Fault"`
+	} `xml:"Body"`
+}
+
+type soapFaultMessageXMLValue struct {
+	Name  string `xml:"Name,attr"`
+	Value string `xml:",chardata"`
+}
+
+func parseSOAPFaultError(operation string, statusCode int, data []byte) error {
+	if !bytes.Contains(data, []byte("<Fault")) && !bytes.Contains(data, []byte(":Fault")) {
+		return nil
+	}
+	var env soapFaultEnvelope
+	if err := xml.Unmarshal(data, &env); err != nil {
+		return &SOAPFaultError{
+			Operation:  operation,
+			StatusCode: statusCode,
+			Message:    strings.TrimSpace(string(data)),
+		}
+	}
+	fault := env.Body.Fault
+	message := strings.TrimSpace(fault.Detail.Message)
+	if message == "" {
+		message = strings.TrimSpace(fault.FaultString)
+	}
+	responseCode := strings.TrimSpace(fault.Detail.ResponseCode)
+	if strings.EqualFold(responseCode, "ErrorServerBusy") {
+		backoff := parseSOAPFaultBackoff(fault.Detail.MessageXML.Values)
+		return &BackoffError{
+			Operation:    operation,
+			ResponseCode: responseCode,
+			Message:      message,
+			Backoff:      backoff,
+		}
+	}
+	return &SOAPFaultError{
+		Operation:    operation,
+		StatusCode:   statusCode,
+		FaultCode:    strings.TrimSpace(fault.FaultCode),
+		ResponseCode: responseCode,
+		Message:      message,
+	}
+}
+
+func parseSOAPFaultBackoff(values []soapFaultMessageXMLValue) time.Duration {
+	for _, value := range values {
+		if !strings.EqualFold(strings.TrimSpace(value.Name), "BackOffMilliseconds") {
+			continue
+		}
+		ms, err := strconv.Atoi(strings.TrimSpace(value.Value))
+		if err != nil || ms <= 0 {
+			return 0
+		}
+		return time.Duration(ms) * time.Millisecond
+	}
+	return 0
 }
 
 func sanitizeXML10Document(data []byte) ([]byte, int) {

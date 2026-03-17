@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/krystophny/tabura/internal/email"
+	"github.com/krystophny/tabura/internal/ews"
 	"github.com/krystophny/tabura/internal/providerdata"
 	"github.com/krystophny/tabura/internal/store"
 )
@@ -28,6 +30,11 @@ type fakeMailProvider struct {
 	lastFolder  string
 	lastLabel   string
 	lastArchive bool
+	listErr     error
+	getErr      error
+	listCalls   int
+	pageErr     error
+	pageCalls   int
 }
 
 func (p *fakeMailProvider) ListLabels(context.Context) ([]providerdata.Label, error) {
@@ -36,16 +43,27 @@ func (p *fakeMailProvider) ListLabels(context.Context) ([]providerdata.Label, er
 
 func (p *fakeMailProvider) ListMessages(_ context.Context, opts email.SearchOptions) ([]string, error) {
 	p.lastOpts = opts
+	p.listCalls++
+	if p.listErr != nil {
+		return nil, p.listErr
+	}
 	return append([]string(nil), p.listIDs...), nil
 }
 
 func (p *fakeMailProvider) ListMessagesPage(_ context.Context, opts email.SearchOptions, pageToken string) (email.MessagePage, error) {
 	p.lastOpts = opts
 	p.lastPage = pageToken
+	p.pageCalls++
+	if p.pageErr != nil {
+		return email.MessagePage{}, p.pageErr
+	}
 	return email.MessagePage{IDs: append([]string(nil), p.pageIDs...), NextPageToken: p.nextPage}, nil
 }
 
 func (p *fakeMailProvider) GetMessage(_ context.Context, messageID, _ string) (*providerdata.EmailMessage, error) {
+	if p.getErr != nil {
+		return nil, p.getErr
+	}
 	return p.messages[messageID], nil
 }
 
@@ -250,6 +268,41 @@ func TestMailAPIListsMessagesUsesPagingFromFirstPage(t *testing.T) {
 	}
 }
 
+func TestMailAPIListsMessagesReturnsFriendlyBackoffError(t *testing.T) {
+	app := newAuthedTestApp(t)
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", map[string]any{})
+	if err != nil {
+		t.Fatalf("CreateExternalAccount: %v", err)
+	}
+	provider := &fakeMailProvider{
+		pageErr: &ews.BackoffError{
+			Operation:    "FindItem",
+			ResponseCode: "ErrorServerBusy",
+			Message:      "The server cannot service this request right now. Try again later.",
+			Backoff:      2 * time.Minute,
+		},
+	}
+	app.newEmailProvider = func(context.Context, store.ExternalAccount) (email.EmailProvider, error) {
+		return provider, nil
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/messages", nil)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "retry after 2m0s") {
+		t.Fatalf("body = %s, want retry-after message", rr.Body.String())
+	}
+
+	rr = doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/messages", nil)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if provider.pageCalls != 1 {
+		t.Fatalf("provider page calls = %d, want 1", provider.pageCalls)
+	}
+}
+
 func TestMailAPIActionArchiveLabelUsesExchangeArchiveFolder(t *testing.T) {
 	app := newAuthedTestApp(t)
 	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", map[string]any{})
@@ -277,7 +330,7 @@ func TestMailAPIActionArchiveLabelUsesExchangeArchiveFolder(t *testing.T) {
 	}
 }
 
-func TestMailAPIActionLogsAndForcesReconcile(t *testing.T) {
+func TestMailAPIActionLogsResolvedMovesReturnBeforeBackgroundReconcile(t *testing.T) {
 	app := newAuthedTestApp(t)
 	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", map[string]any{})
 	if err != nil {
@@ -294,23 +347,47 @@ func TestMailAPIActionLogsAndForcesReconcile(t *testing.T) {
 		},
 	}
 	syncCalls := 0
+	reconcileStarted := make(chan struct{}, 1)
+	reconcileRelease := make(chan struct{})
 	app.newEmailProvider = func(context.Context, store.ExternalAccount) (email.EmailProvider, error) {
 		return provider, nil
 	}
 	app.syncMailAccountNow = func(context.Context, store.ExternalAccount) (int, error) {
 		syncCalls++
+		select {
+		case reconcileStarted <- struct{}{}:
+		default:
+		}
+		<-reconcileRelease
 		return 1, nil
 	}
 
-	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/actions", map[string]any{
-		"action":      "trash",
-		"message_ids": []string{"m1"},
-	})
+	resultCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		resultCh <- doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/actions", map[string]any{
+			"action":      "trash",
+			"message_ids": []string{"m1"},
+		})
+	}()
+
+	var rr *httptest.ResponseRecorder
+	select {
+	case rr = <-resultCh:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("mail action request blocked on reconcile")
+	}
+	close(reconcileRelease)
+
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
 	}
 	if provider.lastAction != "trash" {
 		t.Fatalf("lastAction = %q, want trash", provider.lastAction)
+	}
+	select {
+	case <-reconcileStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background reconcile did not start")
 	}
 	if syncCalls != 1 {
 		t.Fatalf("syncCalls = %d, want 1", syncCalls)
@@ -371,14 +448,10 @@ func TestMailAPIActionRewritesExchangeBindingToResolvedID(t *testing.T) {
 			},
 		},
 	}
-	syncCalls := 0
 	app.newEmailProvider = func(context.Context, store.ExternalAccount) (email.EmailProvider, error) {
 		return provider, nil
 	}
-	app.syncMailAccountNow = func(context.Context, store.ExternalAccount) (int, error) {
-		syncCalls++
-		return 1, nil
-	}
+	app.syncMailAccountNow = func(context.Context, store.ExternalAccount) (int, error) { return 1, nil }
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/actions", map[string]any{
 		"action":      "trash",
@@ -386,9 +459,6 @@ func TestMailAPIActionRewritesExchangeBindingToResolvedID(t *testing.T) {
 	})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
-	}
-	if syncCalls != 1 {
-		t.Fatalf("syncCalls = %d, want 1", syncCalls)
 	}
 	if _, err := app.store.GetBindingByRemote(account.ID, store.ExternalProviderExchangeEWS, "email", "m1"); err == nil {
 		t.Fatal("old binding still exists")

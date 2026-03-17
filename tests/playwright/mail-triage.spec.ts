@@ -164,6 +164,112 @@ test('manual mail triage advances through messages and records review actions', 
   await expect(page.locator('#canvas-text')).toContainText('Manual triage complete for this batch.');
 });
 
+test('manual mail triage reuses queue-loaded message bodies for immediate next mail rendering', async ({ page }) => {
+  const reviewBodies: Array<Record<string, unknown>> = [];
+  let messageGetCalls = 0;
+
+  await page.route('**/api/mail/accounts', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          accounts: [
+            { id: 2, sphere: 'work', provider: 'exchange_ews', label: 'TU Graz Exchange', account_name: 'TU Graz Exchange' },
+          ],
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail/messages?*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          messages: [
+            {
+              ID: 'm1',
+              Subject: 'First cached mail',
+              Sender: 'alice@example.com',
+              Labels: ['Posteingang'],
+              Snippet: 'First cached snippet',
+              BodyText: 'First cached body',
+              Date: '2026-03-16T10:00:00Z',
+            },
+            {
+              ID: 'm2',
+              Subject: 'Second cached mail',
+              Sender: 'bob@example.com',
+              Labels: ['Posteingang'],
+              Snippet: 'Second cached snippet',
+              BodyText: 'Second cached body',
+              Date: '2026-03-16T09:00:00Z',
+            },
+          ],
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail/messages/*', async (route) => {
+    messageGetCalls += 1;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: false,
+        error: 'message detail fetch should not be needed in this flow',
+      }),
+      status: 500,
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail-triage/manual/reviews*', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          data: {
+            reviews: [],
+            count: 0,
+            reviewed_message_ids: [],
+            distilled: { review_count: 0, policy_summary: [], examples: [] },
+          },
+        }),
+      });
+      return;
+    }
+    reviewBodies.push(JSON.parse(route.request().postData() || '{}'));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          review: { id: reviewBodies.length },
+          succeeded: 1,
+        },
+      }),
+    });
+  });
+
+  await waitReady(page);
+
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/app-mail-triage.js');
+    await mod.openInboxMailTriage();
+  });
+
+  await expect(page.locator('#canvas-text')).toContainText('First cached body');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => reviewBodies.length).toBe(1);
+
+  await expect(page.locator('#canvas-text')).toContainText('Second cached mail');
+  await expect(page.locator('#canvas-text')).toContainText('Second cached body');
+  expect(messageGetCalls).toBe(0);
+});
+
 test('manual mail triage continues past a fully reviewed first page', async ({ page }) => {
   await page.route('**/api/mail/accounts', async (route) => {
     await route.fulfill({
@@ -506,5 +612,115 @@ test('manual mail triage can undo the last applied review', async ({ page }) => 
     message_id: 'm1-restored',
     folder: 'Posteingang',
     action: 'cc',
+  });
+});
+
+test('manual mail triage fits mobile viewport and buttons stay tappable', async ({ page }) => {
+  const reviewBodies: Array<Record<string, unknown>> = [];
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  await page.route('**/api/mail/accounts', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          accounts: [
+            { id: 2, sphere: 'work', provider: 'exchange_ews', label: 'TU Graz Exchange', account_name: 'TU Graz Exchange' },
+          ],
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail/messages?*', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          messages: [
+            { ID: 'm1', Subject: 'Mobile triage mail', Sender: 'alice@example.com', Labels: ['Posteingang'], Date: '2026-03-16T10:00:00Z' },
+          ],
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail/messages/m1', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          message: {
+            ID: 'm1',
+            Subject: 'Mobile triage mail',
+            Sender: 'alice@example.com',
+            Labels: ['Posteingang'],
+            Snippet: 'Compact mobile snippet',
+            BodyText: Array.from({ length: 24 }, (_, i) => `line ${i + 1}`).join('\n'),
+            Date: '2026-03-16T10:00:00Z',
+          },
+        },
+      }),
+    });
+  });
+
+  await page.route('**/api/external-accounts/2/mail-triage/manual/reviews*', async (route) => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          data: {
+            reviews: [],
+            count: 0,
+            reviewed_message_ids: [],
+            distilled: { review_count: 0, policy_summary: [], examples: [] },
+          },
+        }),
+      });
+      return;
+    }
+    reviewBodies.push(JSON.parse(route.request().postData() || '{}'));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        data: {
+          review: { id: 1 },
+          succeeded: 1,
+        },
+      }),
+    });
+  });
+
+  await waitReady(page);
+
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/app-mail-triage.js');
+    await mod.openInboxMailTriage();
+  });
+
+  const actions = page.locator('.mail-triage-actions');
+
+  await expect(page.locator('#canvas-text')).toContainText('Mobile triage mail');
+  await expect(actions).toHaveCount(1);
+  await expect(page.locator('.mail-triage-action')).toHaveCount(4);
+
+  await page.evaluate(() => {
+    const button = document.querySelector('.mail-triage-action-trash');
+    if (!(button instanceof HTMLButtonElement)) {
+      throw new Error('trash action button missing');
+    }
+    button.click();
+  });
+
+  await expect.poll(() => reviewBodies.length).toBe(1);
+  expect(reviewBodies[0]).toMatchObject({
+    message_id: 'm1',
+    folder: 'Posteingang',
+    action: 'trash',
   });
 });

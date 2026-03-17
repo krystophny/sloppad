@@ -60,9 +60,13 @@ func (a *App) handleMailLabelList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	labels, err := provider.ListLabels(r.Context())
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
@@ -82,6 +86,10 @@ func (a *App) handleMailMessageList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	opts, pageToken, err := mailSearchOptionsFromRequest(r)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
@@ -89,16 +97,16 @@ func (a *App) handleMailMessageList(w http.ResponseWriter, r *http.Request) {
 	}
 	ids, nextPageToken, err := a.mailMessageIDsForRequest(r.Context(), provider, opts, pageToken)
 	if err != nil {
-		status := http.StatusBadRequest
-		if !isMailAPIRequestError(err) {
-			status = http.StatusBadGateway
+		if isMailAPIRequestError(err) {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
 		}
-		writeAPIError(w, status, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	messages, err := provider.GetMessages(r.Context(), ids, "full")
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	sort.Slice(messages, func(i, j int) bool {
@@ -123,6 +131,10 @@ func (a *App) handleMailMessageGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	messageID := strings.TrimSpace(chi.URLParam(r, "message_id"))
 	if messageID == "" {
 		writeAPIError(w, http.StatusBadRequest, "message_id is required")
@@ -130,7 +142,7 @@ func (a *App) handleMailMessageGet(w http.ResponseWriter, r *http.Request) {
 	}
 	message, err := provider.GetMessage(r.Context(), messageID, "full")
 	if err != nil {
-		writeAPIError(w, http.StatusBadGateway, err.Error())
+		a.writeMailProviderError(w, account, err)
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
@@ -149,6 +161,10 @@ func (a *App) handleMailAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	var req mailActionRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
@@ -174,7 +190,8 @@ func (a *App) handleMailAction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := http.StatusBadRequest
 		if !isMailAPIRequestError(err) {
-			status = http.StatusBadGateway
+			a.writeMailProviderError(w, account, err)
+			return
 		}
 		writeAPIError(w, status, err.Error())
 		return
