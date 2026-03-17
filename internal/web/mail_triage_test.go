@@ -10,21 +10,22 @@ import (
 	"time"
 
 	"github.com/krystophny/tabura/internal/email"
+	"github.com/krystophny/tabura/internal/mailtriage"
 	"github.com/krystophny/tabura/internal/providerdata"
 	"github.com/krystophny/tabura/internal/store"
 )
 
 type fakeMailTriageProvider struct {
-	messageIDs    []string
+	messageIDs         []string
 	messageIDsByFolder map[string][]string
-	messages      map[string]*providerdata.EmailMessage
-	filters       []email.ServerFilter
-	movedFolders  []string
-	appliedLabels []string
-	trashed       []string
-	archived      []string
-	inboxed       []string
-	lastListOpts  email.SearchOptions
+	messages           map[string]*providerdata.EmailMessage
+	filters            []email.ServerFilter
+	movedFolders       []string
+	appliedLabels      []string
+	trashed            []string
+	archived           []string
+	inboxed            []string
+	lastListOpts       email.SearchOptions
 }
 
 func (f *fakeMailTriageProvider) ListLabels(context.Context) ([]providerdata.Label, error) {
@@ -291,5 +292,135 @@ func TestMailServerFiltersGenericAPIUsesProviderAbstraction(t *testing.T) {
 	if len(provider.filters) != 1 || provider.filters[0].Name != "Lists" {
 		encoded, _ := json.Marshal(provider.filters)
 		t.Fatalf("filters = %s, want Lists", encoded)
+	}
+}
+
+func TestMailTriageReportExposesDeterministicRulesAndWarnings(t *testing.T) {
+	app := newAuthedTestApp(t)
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", nil)
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	inputs := []store.MailTriageReviewInput{
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "1", Folder: "Posteingang", Subject: "Qodo 1", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "2", Folder: "Posteingang", Subject: "Qodo 2", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "3", Folder: "Posteingang", Subject: "Qodo 3", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "4", Folder: "Posteingang", Subject: "Qodo 4", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "5", Folder: "Posteingang", Subject: "Action", Sender: "Alice <alice@example.com>", Action: "inbox"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "6", Folder: "Posteingang", Subject: "FYI", Sender: "Alice <alice@example.com>", Action: "cc"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "7", Folder: "Posteingang", Subject: "Action 2", Sender: "Alice <alice@example.com>", Action: "inbox"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "8", Folder: "Posteingang", Subject: "FYI 2", Sender: "Alice <alice@example.com>", Action: "cc"},
+	}
+	for _, input := range inputs {
+		if _, err := app.store.CreateMailTriageReview(input); err != nil {
+			t.Fatalf("CreateMailTriageReview() error: %v", err)
+		}
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/external-accounts/"+itoa(account.ID)+"/mail-triage/report", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET report status = %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeJSONDataResponse(t, rr)
+	report, ok := data["report"].(map[string]any)
+	if !ok {
+		t.Fatalf("report payload = %#v", data["report"])
+	}
+	rules, ok := report["deterministic_rules"].([]any)
+	if !ok || len(rules) == 0 {
+		t.Fatalf("deterministic_rules payload = %#v", report["deterministic_rules"])
+	}
+	warnings, ok := data["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("warnings payload = %#v", data["warnings"])
+	}
+}
+
+func TestMailTriageEvaluateUsesHybridClassifierOnReviewCorpus(t *testing.T) {
+	app := newAuthedTestApp(t)
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", nil)
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	inputs := []store.MailTriageReviewInput{
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "1", Folder: "Posteingang", Subject: "Need action", Sender: "Boss <boss@example.com>", Action: "inbox"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "2", Folder: "Posteingang", Subject: "Qodo 1", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "3", Folder: "Posteingang", Subject: "Qodo 2", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "4", Folder: "Posteingang", Subject: "Qodo 3", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "5", Folder: "Posteingang", Subject: "Qodo 4", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+	}
+	for _, input := range inputs {
+		if _, err := app.store.CreateMailTriageReview(input); err != nil {
+			t.Fatalf("CreateMailTriageReview() error: %v", err)
+		}
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/external-accounts/"+itoa(account.ID)+"/mail-triage/evaluate", map[string]any{})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST evaluate status = %d: %s", rr.Code, rr.Body.String())
+	}
+	data := decodeJSONDataResponse(t, rr)
+	confusion, ok := data["confusion"].(map[string]any)
+	if !ok {
+		t.Fatalf("confusion payload = %#v", data["confusion"])
+	}
+	trashRow, ok := confusion["trash"].(map[string]any)
+	if !ok {
+		t.Fatalf("trash confusion row = %#v", confusion["trash"])
+	}
+	if got := int(trashRow["trash"].(float64)); got == 0 {
+		t.Fatalf("trash->trash confusion count = %d, want > 0", got)
+	}
+}
+
+func TestRecommendedMailTriageServerFiltersSynthesizesConservativeRules(t *testing.T) {
+	training := mailtriage.DistillReviewedExamples([]mailtriage.ReviewedExample{
+		{Sender: "Qodo <community@qodo.ai>", Subject: "Qodo 1", Folder: "Posteingang", Action: "trash"},
+		{Sender: "Qodo <community@qodo.ai>", Subject: "Qodo 2", Folder: "Posteingang", Action: "trash"},
+		{Sender: "Qodo <community@qodo.ai>", Subject: "Qodo 3", Folder: "Posteingang", Action: "trash"},
+		{Sender: "Qodo <community@qodo.ai>", Subject: "Qodo 4", Folder: "Posteingang", Action: "trash"},
+		{Sender: "ITER Communications <newsline@iter.org>", Subject: "ITER 1", Folder: "Posteingang", Action: "cc"},
+		{Sender: "ITER Communications <newsline@iter.org>", Subject: "ITER 2", Folder: "Posteingang", Action: "cc"},
+		{Sender: "ITER Communications <newsline@iter.org>", Subject: "ITER 3", Folder: "Posteingang", Action: "cc"},
+		{Sender: "ITER Communications <newsline@iter.org>", Subject: "ITER 4", Folder: "Posteingang", Action: "cc"},
+	})
+	reviews := []store.MailTriageReview{
+		{Sender: "system@online.tugraz.at", Subject: "TUGRAZonline: zur LV-Evaluierung vorgesehene Lehrveranstaltung", Action: "trash"},
+		{Sender: "system@online.tugraz.at", Subject: "TUGRAZonline: zur LV-Evaluierung vorgesehene Lehrveranstaltung", Action: "trash"},
+	}
+	filters := recommendedMailTriageServerFilters(store.ExternalProviderExchangeEWS, reviews, training)
+	if len(filters) < 3 {
+		t.Fatalf("len(filters) = %d, want >= 3", len(filters))
+	}
+}
+
+func TestMailTriageArmAppliesSynthesizedServerFilters(t *testing.T) {
+	app := newAuthedTestApp(t)
+	provider := &fakeMailTriageProvider{}
+	app.newEmailProvider = func(context.Context, store.ExternalAccount) (email.EmailProvider, error) {
+		return provider, nil
+	}
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", nil)
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	inputs := []store.MailTriageReviewInput{
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "1", Folder: "Posteingang", Subject: "Qodo 1", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "2", Folder: "Posteingang", Subject: "Qodo 2", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "3", Folder: "Posteingang", Subject: "Qodo 3", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+		{AccountID: account.ID, Provider: account.Provider, MessageID: "4", Folder: "Posteingang", Subject: "Qodo 4", Sender: "Qodo <community@qodo.ai>", Action: "trash"},
+	}
+	for _, input := range inputs {
+		if _, err := app.store.CreateMailTriageReview(input); err != nil {
+			t.Fatalf("CreateMailTriageReview() error: %v", err)
+		}
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/external-accounts/"+itoa(account.ID)+"/mail-triage/arm", map[string]any{"apply": true})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST arm status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(provider.filters) == 0 {
+		t.Fatal("expected provider filters to be upserted")
 	}
 }

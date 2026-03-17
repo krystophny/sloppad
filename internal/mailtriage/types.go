@@ -47,6 +47,9 @@ type Message struct {
 	ReviewCount    int       `json:"review_count,omitempty"`
 	PolicySummary  []string  `json:"policy_summary,omitempty"`
 	Examples       []Example `json:"examples,omitempty"`
+	LocalHints     []string  `json:"local_hints,omitempty"`
+	ProtectedTopic bool      `json:"protected_topic,omitempty"`
+	AgeDays        int       `json:"age_days,omitempty"`
 }
 
 type Example struct {
@@ -64,18 +67,55 @@ type ReviewedExample struct {
 }
 
 type DistilledTraining struct {
-	ReviewCount   int       `json:"review_count,omitempty"`
-	PolicySummary []string  `json:"policy_summary,omitempty"`
-	Examples      []Example `json:"examples,omitempty"`
+	ReviewCount        int                 `json:"review_count,omitempty"`
+	PolicySummary      []string            `json:"policy_summary,omitempty"`
+	Examples           []Example           `json:"examples,omitempty"`
+	DeterministicRules []DeterministicRule `json:"deterministic_rules,omitempty"`
+	Warnings           []string            `json:"warnings,omitempty"`
+	Report             TrainingReport      `json:"report,omitempty"`
+	Model              *TrainingModel      `json:"-"`
+}
+
+type FactorScores struct {
+	Spam           float64 `json:"spam,omitempty"`
+	ActionRequired float64 `json:"action_required,omitempty"`
+	Skim           float64 `json:"skim,omitempty"`
+	Reference      float64 `json:"reference,omitempty"`
+	Staleness      float64 `json:"staleness,omitempty"`
+}
+
+type DeterministicRule struct {
+	Scope   string  `json:"scope,omitempty"`
+	Key     string  `json:"key,omitempty"`
+	Action  Action  `json:"action,omitempty"`
+	Support int     `json:"support,omitempty"`
+	Purity  float64 `json:"purity,omitempty"`
+	Reason  string  `json:"reason,omitempty"`
+}
+
+type InconsistentPattern struct {
+	Scope   string   `json:"scope,omitempty"`
+	Key     string   `json:"key,omitempty"`
+	Count   int      `json:"count,omitempty"`
+	Actions []string `json:"actions,omitempty"`
+}
+
+type TrainingReport struct {
+	ReviewCount          int                   `json:"review_count,omitempty"`
+	ActionCounts         map[string]int        `json:"action_counts,omitempty"`
+	DeterministicRules   []DeterministicRule   `json:"deterministic_rules,omitempty"`
+	InconsistentPatterns []InconsistentPattern `json:"inconsistent_patterns,omitempty"`
+	ProtectedTopics      []string              `json:"protected_topics,omitempty"`
 }
 
 type Decision struct {
-	Action       Action   `json:"action"`
-	ArchiveLabel string   `json:"archive_label,omitempty"`
-	Confidence   float64  `json:"confidence"`
-	Reason       string   `json:"reason,omitempty"`
-	Signals      []string `json:"signals,omitempty"`
-	Model        string   `json:"model,omitempty"`
+	Action       Action       `json:"action"`
+	ArchiveLabel string       `json:"archive_label,omitempty"`
+	Confidence   float64      `json:"confidence"`
+	Reason       string       `json:"reason,omitempty"`
+	Signals      []string     `json:"signals,omitempty"`
+	Model        string       `json:"model,omitempty"`
+	Factors      FactorScores `json:"factors,omitempty"`
 }
 
 type Policy struct {

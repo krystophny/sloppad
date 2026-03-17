@@ -35,6 +35,7 @@ Rules:
 - Prefer archive instead of cc when the mail should be kept only as reference and does not merit a skimmed read.
 - If a message is already in junk/spam but is still research-adjacent (for example journals, conferences, plasma physics, acoustics, machine learning, physics), prefer archive over trash unless it is obviously scammy.
 - Compare the message against the distilled manual policy before choosing an action.
+- Treat any provided local factor hints as probabilistic evidence, not as absolute truth.
 - Confidence is 0.0 to 1.0.
 - Keep reason and signals short.`
 
@@ -173,6 +174,18 @@ func buildUserPrompt(message Message) string {
 		for _, line := range message.PolicySummary {
 			fmt.Fprintf(&b, "- %s\n", strings.TrimSpace(line))
 		}
+	}
+	if len(message.LocalHints) > 0 {
+		fmt.Fprintf(&b, "Local factor hints:\n")
+		for _, line := range message.LocalHints {
+			fmt.Fprintf(&b, "- %s\n", strings.TrimSpace(line))
+		}
+	}
+	if message.ProtectedTopic {
+		fmt.Fprintf(&b, "Protected topic: true\n")
+	}
+	if message.AgeDays > 0 {
+		fmt.Fprintf(&b, "Age days: %d\n", message.AgeDays)
 	}
 	if len(message.Examples) > 0 {
 		fmt.Fprintf(&b, "Representative reviewed examples:\n")

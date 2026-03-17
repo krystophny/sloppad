@@ -127,6 +127,13 @@ func normalizeDecision(decision Decision) Decision {
 	decision.ArchiveLabel = strings.TrimSpace(decision.ArchiveLabel)
 	decision.Model = strings.TrimSpace(decision.Model)
 	decision.Signals = dedupeStrings(trimmedStrings(decision.Signals))
+	decision.Factors = FactorScores{
+		Spam:           clamp01(decision.Factors.Spam),
+		ActionRequired: clamp01(decision.Factors.ActionRequired),
+		Skim:           clamp01(decision.Factors.Skim),
+		Reference:      clamp01(decision.Factors.Reference),
+		Staleness:      clamp01(decision.Factors.Staleness),
+	}
 	return decision
 }
 

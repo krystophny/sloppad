@@ -24,8 +24,11 @@ func DistillReviewedExamples(reviews []ReviewedExample) DistilledTraining {
 	if len(clean) == 0 {
 		return DistilledTraining{}
 	}
+	report := BuildTrainingReport(clean)
 	training := DistilledTraining{
-		ReviewCount: len(clean),
+		ReviewCount:        len(clean),
+		DeterministicRules: append([]DeterministicRule(nil), report.DeterministicRules...),
+		Report:             report,
 	}
 	actionCounts := make(map[string]int, 4)
 	folderCounts := make(map[string]map[string]int)
@@ -52,8 +55,14 @@ func DistillReviewedExamples(reviews []ReviewedExample) DistilledTraining {
 	training.PolicySummary = append(training.PolicySummary, summarizeRules("Folder", collectDominantRules(folderCounts, 3, 0.75), 2)...)
 	training.PolicySummary = append(training.PolicySummary, summarizeRules("Sender", collectDominantRules(senderCounts, 2, 0.85), 3)...)
 	training.PolicySummary = append(training.PolicySummary, summarizeRules("Domain", collectDominantRules(domainCounts, 3, 0.90), 2)...)
+	if len(report.InconsistentPatterns) > 0 {
+		for _, pattern := range report.InconsistentPatterns[:min(2, len(report.InconsistentPatterns))] {
+			training.Warnings = append(training.Warnings, fmt.Sprintf("Inconsistent sender: %s has mixed outcomes (%s)", pattern.Key, strings.Join(pattern.Actions, ", ")))
+		}
+	}
 	training.PolicySummary = boundedNonEmptyLines(training.PolicySummary, maxPolicySummaryLines)
 	training.Examples = representativeExamples(clean, maxTrainingExamples)
+	training.Model = trainModel(clean, report.DeterministicRules)
 	return training
 }
 

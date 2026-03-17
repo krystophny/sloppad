@@ -89,6 +89,7 @@ func (a *App) handleMailTriageManualReviewsList(w http.ResponseWriter, r *http.R
 		"folder":               folder,
 		"reviewed_message_ids": reviewedMessageIDs,
 		"distilled":            mailtriage.DistillReviewedExamples(input),
+		"report":               mailtriage.BuildTrainingReport(input),
 	})
 }
 

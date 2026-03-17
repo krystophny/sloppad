@@ -117,6 +117,9 @@ func TestBuildUserPromptIncludesDistilledManualPolicy(t *testing.T) {
 				Subject: "Win a prize",
 			},
 		},
+		LocalHints:     []string{"spam=0.91", "staleness=0.88"},
+		ProtectedTopic: true,
+		AgeDays:        42,
 	})
 	if !strings.Contains(prompt, "Manual review corpus size: 37") {
 		t.Fatalf("prompt missing review corpus size: %q", prompt)
@@ -141,6 +144,15 @@ func TestBuildUserPromptIncludesDistilledManualPolicy(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "action=trash; folder=Junk-E-Mail; from=spam@example.com; subject=Win a prize") {
 		t.Fatalf("prompt missing example detail: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Local factor hints:") {
+		t.Fatalf("prompt missing local factor hints: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Protected topic: true") {
+		t.Fatalf("prompt missing protected topic: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Age days: 42") {
+		t.Fatalf("prompt missing age days: %q", prompt)
 	}
 }
 
