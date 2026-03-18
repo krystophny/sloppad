@@ -47,6 +47,9 @@ var intentPromptSystemCommands = []string{
 	"shell",
 	"open_file_canvas",
 	"show_calendar",
+	"create_calendar_event",
+	"update_calendar_event",
+	"delete_calendar_event",
 	"show_briefing",
 	"sync_sources",
 	"map_todoist_project",
@@ -130,6 +133,10 @@ Use canonical_action for artifact/item work and do not emit legacy artifact inte
 Composite operations must be expressed as a canonical action plus parameters or as a multi-step system-command plan.
 For current-information requests (weather, web search, news, prices, schedules, latest/current updates), use {"kind":"dialogue"} and MUST NOT use shell.
 For shell-like requests use {"kind":"system_command","action":"shell","command":"..."}.
+For calendar scheduling requests use {"kind":"system_command","action":"create_calendar_event","summary":"...","start":"<RFC3339 or local datetime>"} and include end, duration_minutes, calendar_id, location, description, or attendees when the user provides them. German examples: "Termin anlegen", "neuer Termin", "trag ein", "mach einen Termin".
+To update an existing calendar event use {"kind":"system_command","action":"update_calendar_event","event_id":"...","summary":"new title","start":"...","description":"..."}. Include only the fields that change. The event_id comes from a previously shown calendar view. German examples: "verschiebe den Termin auf 17 Uhr", "ändere den Titel", "füge eine Beschreibung hinzu".
+To delete a calendar event use {"kind":"system_command","action":"delete_calendar_event","event_id":"..."}. German: "lösche den Termin", "Termin absagen".
+For showing the calendar use show_calendar with view=day|week|agenda|availability and optional date. German: "Was für Termine habe ich heute/morgen/diese Woche?", "Welche Slots sind frei?".
 For open/show/display file requests, end with {"action":"open_file_canvas","path":"..."} inside an actions plan.
 If exact path is uncertain, use multi-step {"actions":[...]}: shell search first, then open_file_canvas with path="$last_shell_path".
 For track_item include visible_after or count when relevant.

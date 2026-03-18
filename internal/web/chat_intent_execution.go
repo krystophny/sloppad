@@ -546,6 +546,12 @@ func (a *App) executeSystemAction(sessionID string, session store.ChatSession, a
 		}, nil
 	case "show_calendar":
 		return a.executeCalendarAction(session, action)
+	case "create_calendar_event":
+		return a.executeCalendarCreateAction(session, action)
+	case "update_calendar_event":
+		return a.executeCalendarUpdateAction(session, action)
+	case "delete_calendar_event":
+		return a.executeCalendarDeleteAction(session, action)
 	case "show_briefing":
 		return a.executeBriefingAction(session, action)
 	case "print_item":

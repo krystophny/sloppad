@@ -38,6 +38,8 @@ type googleCalendarClient interface {
 	ListCalendars(ctx context.Context) ([]providerdata.Calendar, error)
 	GetEvents(ctx context.Context, opts tabcalendar.GetEventsOptions) ([]providerdata.Event, error)
 	CreateEvent(ctx context.Context, opts tabcalendar.CreateEventOptions) (providerdata.Event, error)
+	UpdateEvent(ctx context.Context, opts tabcalendar.UpdateEventOptions) (providerdata.Event, error)
+	DeleteEvent(ctx context.Context, calendarID, eventID string) error
 }
 
 type icsCalendarClient interface {
@@ -323,6 +325,71 @@ func (a *App) executeCalendarCreateAction(session store.ChatSession, action *Sys
 	}, nil
 }
 
+func (a *App) executeCalendarUpdateAction(session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
+	if a == nil || action == nil {
+		return "", nil, fmt.Errorf("calendar update action is required")
+	}
+	eventID := strings.TrimSpace(systemActionStringParam(action.Params, "event_id"))
+	if eventID == "" {
+		return "", nil, fmt.Errorf("event_id is required to update a calendar event")
+	}
+	calendarID := strings.TrimSpace(systemActionStringParam(action.Params, "calendar_id"))
+	if a.newGoogleCalendarClient == nil {
+		return "", nil, fmt.Errorf("google calendar client is unavailable")
+	}
+	client, err := a.newGoogleCalendarClient(context.Background())
+	if err != nil {
+		return "", nil, err
+	}
+	opts := tabcalendar.UpdateEventOptions{
+		CalendarID:  calendarID,
+		EventID:     eventID,
+		Summary:     strings.TrimSpace(firstNonEmptyCalendarValue(systemActionStringParam(action.Params, "summary"), systemActionStringParam(action.Params, "title"))),
+		Description: strings.TrimSpace(systemActionStringParam(action.Params, "description")),
+		Location:    strings.TrimSpace(systemActionStringParam(action.Params, "location")),
+		Attendees:   calendarStringListParam(action.Params, "attendees"),
+	}
+	if startStr := strings.TrimSpace(systemActionStringParam(action.Params, "start")); startStr != "" {
+		opts.Start = parseCalendarInputTimeOrZero(startStr)
+	}
+	if endStr := strings.TrimSpace(systemActionStringParam(action.Params, "end")); endStr != "" {
+		opts.End = parseCalendarInputTimeOrZero(endStr)
+	}
+	event, err := client.UpdateEvent(context.Background(), opts)
+	if err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("Updated calendar event %q.", event.Summary), map[string]interface{}{
+		"type":  "update_calendar_event",
+		"event": calendarEventPayload(event, "", ""),
+	}, nil
+}
+
+func (a *App) executeCalendarDeleteAction(session store.ChatSession, action *SystemAction) (string, map[string]interface{}, error) {
+	if a == nil || action == nil {
+		return "", nil, fmt.Errorf("calendar delete action is required")
+	}
+	eventID := strings.TrimSpace(systemActionStringParam(action.Params, "event_id"))
+	if eventID == "" {
+		return "", nil, fmt.Errorf("event_id is required to delete a calendar event")
+	}
+	calendarID := strings.TrimSpace(systemActionStringParam(action.Params, "calendar_id"))
+	if a.newGoogleCalendarClient == nil {
+		return "", nil, fmt.Errorf("google calendar client is unavailable")
+	}
+	client, err := a.newGoogleCalendarClient(context.Background())
+	if err != nil {
+		return "", nil, err
+	}
+	if err := client.DeleteEvent(context.Background(), calendarID, eventID); err != nil {
+		return "", nil, err
+	}
+	return "Deleted the calendar event.", map[string]interface{}{
+		"type":     "delete_calendar_event",
+		"event_id": eventID,
+	}, nil
+}
+
 func (a *App) parseCalendarCreateRequest(action *SystemAction) (calendarCreateRequest, error) {
 	req := calendarCreateRequest{
 		CalendarID:  strings.TrimSpace(systemActionStringParam(action.Params, "calendar_id")),
@@ -484,6 +551,11 @@ func parseCalendarInputTime(raw string) (time.Time, error) {
 		}
 	}
 	return time.Time{}, fmt.Errorf("invalid time")
+}
+
+func parseCalendarInputTimeOrZero(raw string) time.Time {
+	t, _ := parseCalendarInputTime(raw)
+	return t
 }
 
 func calendarTimeLooksDateOnly(raw string) bool {
