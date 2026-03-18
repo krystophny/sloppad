@@ -393,7 +393,7 @@ export function applyRuntimePreferences(runtime) {
   state.interaction.tool = normalizeInteractionTool(runtime?.tool || 'pointer');
   state.interaction.toolPinned = false;
   state.interaction.conversation = interactionConversationMode();
-  state.activeSphere = normalizeActiveSphere(runtime?.active_sphere || state.activeSphere || readPersistedActiveSphere());
+  state.activeSphere = normalizeActiveSphere(readPersistedActiveSphere() || runtime?.active_sphere || state.activeSphere);
   persistActiveSpherePreference(state.activeSphere);
   syncInteractionBodyState();
   renderEdgeTopProjects();
@@ -424,7 +424,7 @@ export async function updateRuntimePreferences(patch) {
     state.interaction.toolPinned = true;
   }
   state.interaction.conversation = interactionConversationMode();
-  state.activeSphere = normalizeActiveSphere(payload?.active_sphere || state.activeSphere || readPersistedActiveSphere());
+  state.activeSphere = normalizeActiveSphere(readPersistedActiveSphere() || payload?.active_sphere || state.activeSphere);
   persistActiveSpherePreference(state.activeSphere);
   applyTurnRuntimePreferences(payload);
   syncInteractionBodyState();

@@ -138,11 +138,8 @@ export async function setActiveSphere(nextSphere) {
   try {
     await updateRuntimePreferences({ active_sphere: sphere });
     await ensureVisibleActiveProject();
-    if (state.prReviewDrawerOpen && state.fileSidebarMode === 'items') {
-      await loadItemSidebarView(state.itemSidebarView);
-    } else {
-      await refreshItemSidebarCounts().catch(() => false);
-    }
+    await loadItemSidebarView(state.itemSidebarView);
+    await refreshItemSidebarCounts().catch(() => false);
     showStatus(`${sphere} sphere on`);
     return true;
   } catch (err) {
