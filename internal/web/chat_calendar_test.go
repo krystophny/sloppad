@@ -15,8 +15,9 @@ import (
 )
 
 type stubGoogleCalendarReader struct {
-	calendars []providerdata.Calendar
-	events    map[string][]providerdata.Event
+	calendars  []providerdata.Calendar
+	events     map[string][]providerdata.Event
+	lastCreate calendar.CreateEventOptions
 }
 
 func (s *stubGoogleCalendarReader) ListCalendars(context.Context) ([]providerdata.Calendar, error) {
@@ -25,6 +26,22 @@ func (s *stubGoogleCalendarReader) ListCalendars(context.Context) ([]providerdat
 
 func (s *stubGoogleCalendarReader) GetEvents(_ context.Context, opts calendar.GetEventsOptions) ([]providerdata.Event, error) {
 	return append([]providerdata.Event(nil), s.events[opts.CalendarID]...), nil
+}
+
+func (s *stubGoogleCalendarReader) CreateEvent(_ context.Context, opts calendar.CreateEventOptions) (providerdata.Event, error) {
+	s.lastCreate = opts
+	return providerdata.Event{
+		ID:          "evt-created",
+		CalendarID:  opts.CalendarID,
+		Summary:     opts.Summary,
+		Description: opts.Description,
+		Location:    opts.Location,
+		Start:       opts.Start,
+		End:         opts.End,
+		AllDay:      opts.AllDay,
+		Attendees:   append([]string(nil), opts.Attendees...),
+		Status:      "confirmed",
+	}, nil
 }
 
 type stubICSCalendarReader struct{}
@@ -76,12 +93,29 @@ func TestParseInlineCalendarIntent(t *testing.T) {
 	}
 }
 
+func TestParseInlineCalendarCreateIntent(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 9, 0, 0, 0, time.UTC)
+	action := parseInlineCalendarIntent("Bitte mach einen Termin in meinem Kalender für 20.04. um 16 Uhr Masterprüfung David Obermeier.", now)
+	if action == nil {
+		t.Fatal("expected calendar create action")
+	}
+	if action.Action != "create_calendar_event" {
+		t.Fatalf("action = %q, want create_calendar_event", action.Action)
+	}
+	if got := strings.TrimSpace(systemActionStringParam(action.Params, "summary")); got != "Masterprüfung David Obermeier." {
+		t.Fatalf("summary = %q", got)
+	}
+	if got := strings.TrimSpace(systemActionStringParam(action.Params, "start")); !strings.HasPrefix(got, "2026-04-20T16:00:00") {
+		t.Fatalf("start = %q", got)
+	}
+}
+
 func TestClassifyAndExecuteSystemActionShowCalendarRendersSphereAwareArtifact(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.intentLLMURL = ""
 	now := time.Date(2026, time.March, 9, 8, 0, 0, 0, time.UTC)
 	app.calendarNow = func() time.Time { return now }
-	app.newICSCalendarReader = func() (icsCalendarReader, error) { return stubICSCalendarReader{}, nil }
+	app.newICSCalendarClient = func() (icsCalendarClient, error) { return stubICSCalendarReader{}, nil }
 
 	project, err := app.ensureDefaultWorkspace()
 	if err != nil {
@@ -143,7 +177,7 @@ func TestClassifyAndExecuteSystemActionShowCalendarRendersSphereAwareArtifact(t 
 		t.Fatalf("CreateItem(private due): %v", err)
 	}
 
-	app.newGoogleCalendarReader = func(context.Context) (googleCalendarReader, error) {
+	app.newGoogleCalendarClient = func(context.Context) (googleCalendarClient, error) {
 		return &stubGoogleCalendarReader{
 			calendars: []providerdata.Calendar{
 				{ID: "work", Name: "Work Calendar"},
@@ -244,7 +278,7 @@ func TestClassifyAndExecuteSystemActionCalendarAvailabilityUsesAllBusyBlocks(t *
 	app.intentLLMURL = ""
 	now := time.Date(2026, time.March, 9, 8, 0, 0, 0, time.UTC)
 	app.calendarNow = func() time.Time { return now }
-	app.newICSCalendarReader = func() (icsCalendarReader, error) { return stubICSCalendarReader{}, nil }
+	app.newICSCalendarClient = func() (icsCalendarClient, error) { return stubICSCalendarReader{}, nil }
 	if err := app.store.SetActiveSphere(store.SphereWork); err != nil {
 		t.Fatalf("SetActiveSphere(work): %v", err)
 	}
@@ -254,7 +288,7 @@ func TestClassifyAndExecuteSystemActionCalendarAvailabilityUsesAllBusyBlocks(t *
 	if _, err := app.store.CreateExternalAccount(store.SpherePrivate, store.ExternalProviderGoogleCalendar, "Family", map[string]any{}); err != nil {
 		t.Fatalf("CreateExternalAccount(private calendar): %v", err)
 	}
-	app.newGoogleCalendarReader = func(context.Context) (googleCalendarReader, error) {
+	app.newGoogleCalendarClient = func(context.Context) (googleCalendarClient, error) {
 		return &stubGoogleCalendarReader{
 			calendars: []providerdata.Calendar{
 				{ID: "work", Name: "Work Calendar"},
@@ -320,5 +354,62 @@ func TestClassifyAndExecuteSystemActionCalendarAvailabilityUsesAllBusyBlocks(t *
 	}
 	if showCalls != 1 {
 		t.Fatalf("canvas_artifact_show calls = %d, want 1", showCalls)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionCreateCalendarEventUsesSphereCalendar(t *testing.T) {
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+	now := time.Date(2026, time.March, 18, 9, 0, 0, 0, time.UTC)
+	app.calendarNow = func() time.Time { return now }
+	if err := app.store.SetActiveSphere(store.SpherePrivate); err != nil {
+		t.Fatalf("SetActiveSphere(private): %v", err)
+	}
+	if _, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderGoogleCalendar, "Work Calendar", map[string]any{}); err != nil {
+		t.Fatalf("CreateExternalAccount(work calendar): %v", err)
+	}
+	if _, err := app.store.CreateExternalAccount(store.SpherePrivate, store.ExternalProviderGoogleCalendar, "Family", map[string]any{}); err != nil {
+		t.Fatalf("CreateExternalAccount(private calendar): %v", err)
+	}
+	reader := &stubGoogleCalendarReader{
+		calendars: []providerdata.Calendar{
+			{ID: "work", Name: "Work Calendar"},
+			{ID: "family", Name: "Family"},
+		},
+	}
+	app.newGoogleCalendarClient = func(context.Context) (googleCalendarClient, error) {
+		return reader, nil
+	}
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensureDefaultWorkspace: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Bitte mach einen Termin in meinem Kalender für 20.04. um 16 Uhr Masterprüfung David Obermeier.")
+	if !handled {
+		t.Fatal("expected create calendar event to be handled")
+	}
+	if !strings.Contains(message, "Created calendar event") {
+		t.Fatalf("message = %q", message)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("payload count = %d, want 1", len(payloads))
+	}
+	if got := strFromAny(payloads[0]["type"]); got != "create_calendar_event" {
+		t.Fatalf("payload type = %q", got)
+	}
+	if reader.lastCreate.CalendarID != "family" {
+		t.Fatalf("calendar id = %q, want family", reader.lastCreate.CalendarID)
+	}
+	if reader.lastCreate.Summary != "Masterprüfung David Obermeier." {
+		t.Fatalf("summary = %q", reader.lastCreate.Summary)
+	}
+	if got := reader.lastCreate.Start.In(time.Local).Format("2006-01-02 15:04"); got != "2026-04-20 16:00" {
+		t.Fatalf("start = %q", got)
 	}
 }

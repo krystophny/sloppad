@@ -39,7 +39,7 @@ func TestClassifyAndExecuteSystemActionShowBriefingRendersArtifact(t *testing.T)
 	app.intentLLMURL = ""
 	now := time.Date(2026, time.March, 9, 8, 0, 0, 0, time.UTC)
 	app.calendarNow = func() time.Time { return now }
-	app.newICSCalendarReader = func() (icsCalendarReader, error) { return stubICSCalendarReader{}, nil }
+	app.newICSCalendarClient = func() (icsCalendarClient, error) { return stubICSCalendarReader{}, nil }
 
 	project, err := app.ensureDefaultWorkspace()
 	if err != nil {
@@ -120,7 +120,7 @@ func TestClassifyAndExecuteSystemActionShowBriefingRendersArtifact(t *testing.T)
 		t.Fatalf("CreateItem(due this week): %v", err)
 	}
 
-	app.newGoogleCalendarReader = func(context.Context) (googleCalendarReader, error) {
+	app.newGoogleCalendarClient = func(context.Context) (googleCalendarClient, error) {
 		return &stubGoogleCalendarReader{
 			calendars: []providerdata.Calendar{
 				{ID: "work", Name: "Work Calendar"},

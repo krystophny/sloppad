@@ -91,8 +91,8 @@ type App struct {
 
 	appServerClient         *appserver.Client
 	calendarNow             func() time.Time
-	newGoogleCalendarReader func(context.Context) (googleCalendarReader, error)
-	newICSCalendarReader    func() (icsCalendarReader, error)
+	newGoogleCalendarClient func(context.Context) (googleCalendarClient, error)
+	newICSCalendarClient    func() (icsCalendarClient, error)
 	newEmailSyncProvider    func(context.Context, store.ExternalAccount) (emailSyncProvider, error)
 	newEmailProvider        func(context.Context, store.ExternalAccount) (email.EmailProvider, error)
 	syncMailAccountNow      func(context.Context, store.ExternalAccount) (int, error)
@@ -295,10 +295,10 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		sourcePush:                    nil,
 		appServerClient:               appServerClient,
 		calendarNow:                   time.Now,
-		newGoogleCalendarReader: func(ctx context.Context) (googleCalendarReader, error) {
+		newGoogleCalendarClient: func(ctx context.Context) (googleCalendarClient, error) {
 			return tabcalendar.New(ctx)
 		},
-		newICSCalendarReader: func() (icsCalendarReader, error) {
+		newICSCalendarClient: func() (icsCalendarClient, error) {
 			return ics.New()
 		},
 		upgrader:                websocket.Upgrader{CheckOrigin: checkWSOrigin},

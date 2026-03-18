@@ -65,6 +65,12 @@ func run(args []string) int {
 		return cmdUpdate(args[1:])
 	case "ptt-daemon":
 		return cmdPTTDaemon(args[1:])
+	case "google-auth":
+		if err := cmdGoogleAuth(); err != nil {
+			fmt.Fprintf(os.Stderr, "google-auth: %v\n", err)
+			return 1
+		}
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		printHelp()

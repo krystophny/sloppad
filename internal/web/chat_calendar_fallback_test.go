@@ -15,7 +15,7 @@ func TestCollectGoogleCalendarEventsFallsBackToGmailAccount(t *testing.T) {
 		t.Fatalf("CreateExternalAccount(gmail): %v", err)
 	}
 	start := time.Date(2026, time.March, 16, 9, 0, 0, 0, time.UTC)
-	app.newGoogleCalendarReader = func(context.Context) (googleCalendarReader, error) {
+	app.newGoogleCalendarClient = func(context.Context) (googleCalendarClient, error) {
 		return &stubGoogleCalendarReader{
 			calendars: []providerdata.Calendar{{ID: "primary", Name: "Primary"}},
 			events: map[string][]providerdata.Event{
