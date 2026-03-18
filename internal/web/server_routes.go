@@ -20,6 +20,10 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/login", a.handleLogin)
 	r.Post("/api/logout", a.handleLogout)
 
+	// google oauth
+	r.Get("/api/google/auth", a.handleGoogleAuthStart)
+	r.Get("/api/google/callback", a.handleGoogleAuthCallback)
+
 	// runtime
 	r.Get("/api/runtime", a.handleRuntime)
 	r.Patch("/api/runtime/preferences", a.handleRuntimePreferencesUpdate)

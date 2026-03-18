@@ -16,13 +16,14 @@ import (
 const (
 	ScopeGmailModify      = "https://www.googleapis.com/auth/gmail.modify"
 	ScopeContactsReadonly = "https://www.googleapis.com/auth/contacts.readonly"
+	ScopeCalendar         = "https://www.googleapis.com/auth/calendar"
 	ScopeCalendarReadonly = "https://www.googleapis.com/auth/calendar.readonly"
 )
 
 var DefaultScopes = []string{
 	ScopeGmailModify,
 	ScopeContactsReadonly,
-	ScopeCalendarReadonly,
+	ScopeCalendar,
 }
 
 type Session struct {
@@ -102,6 +103,31 @@ func (s *Session) GetAuthURL() string {
 		return ""
 	}
 	return s.config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+}
+
+func (s *Session) GetAuthURLWithRedirect(redirectURI string) string {
+	if s == nil || s.config == nil {
+		return ""
+	}
+	cfg := *s.config
+	cfg.RedirectURL = redirectURI
+	return cfg.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+}
+
+func (s *Session) ExchangeCodeWithRedirect(ctx context.Context, code, redirectURI string) error {
+	if s == nil || s.config == nil {
+		return fmt.Errorf("google auth is not configured")
+	}
+	cfg := *s.config
+	cfg.RedirectURL = redirectURI
+	token, err := cfg.Exchange(ctx, code)
+	if err != nil {
+		return fmt.Errorf("exchange Google auth code: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token = token
+	return s.persistLocked(token)
 }
 
 func (s *Session) ExchangeCode(ctx context.Context, code string) error {
