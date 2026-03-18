@@ -20,9 +20,20 @@ type EmailMessage struct {
 }
 
 type Attachment struct {
+	ID       string
 	Filename string
 	MimeType string
 	Size     int64
+	IsInline bool
+}
+
+type AttachmentData struct {
+	ID       string
+	Filename string
+	MimeType string
+	Size     int64
+	IsInline bool
+	Content  []byte
 }
 
 type Label struct {

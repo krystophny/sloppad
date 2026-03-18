@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ type fakeMailProvider struct {
 	pageIDs     []string
 	nextPage    string
 	messages    map[string]*providerdata.EmailMessage
+	attachment  *providerdata.AttachmentData
 	filters     []email.ServerFilter
 	resolvedIDs map[string]string
 	lastAction  string
@@ -46,6 +48,15 @@ func (p *fakeMailProvider) GetMessages(_ context.Context, messageIDs []string, _
 		out = append(out, p.messages[id])
 	}
 	return out, nil
+}
+
+func (p *fakeMailProvider) GetAttachment(_ context.Context, _, _ string) (*providerdata.AttachmentData, error) {
+	if p.attachment == nil {
+		return nil, nil
+	}
+	copyValue := *p.attachment
+	copyValue.Content = append([]byte(nil), p.attachment.Content...)
+	return &copyValue, nil
 }
 
 func (p *fakeMailProvider) MarkRead(_ context.Context, _ []string) (int, error) {
@@ -150,6 +161,13 @@ func TestMailToolsListReadActAndFilter(t *testing.T) {
 		messages: map[string]*providerdata.EmailMessage{
 			"m1": {ID: "m1", Subject: "Subject", Date: now},
 		},
+		attachment: &providerdata.AttachmentData{
+			ID:       "att-1",
+			Filename: "plan.pdf",
+			MimeType: "application/pdf",
+			Size:     8,
+			Content:  []byte("pdfbytes"),
+		},
 		filters: []email.ServerFilter{{
 			ID:      "f1",
 			Name:    "Known sender",
@@ -191,6 +209,22 @@ func TestMailToolsListReadActAndFilter(t *testing.T) {
 	gotMessage, _ := message["message"].(*providerdata.EmailMessage)
 	if gotMessage == nil || gotMessage.ID != "m1" {
 		t.Fatalf("message = %#v", message["message"])
+	}
+
+	attachment, err := s.callTool("mail_attachment_get", map[string]interface{}{
+		"account_id":    account.ID,
+		"message_id":    "m1",
+		"attachment_id": "att-1",
+	})
+	if err != nil {
+		t.Fatalf("mail_attachment_get failed: %v", err)
+	}
+	gotAttachment, _ := attachment["attachment"].(map[string]interface{})
+	if gotAttachment["id"] != "att-1" {
+		t.Fatalf("attachment id = %#v", gotAttachment["id"])
+	}
+	if gotAttachment["content_base64"] != base64.StdEncoding.EncodeToString([]byte("pdfbytes")) {
+		t.Fatalf("content_base64 = %#v", gotAttachment["content_base64"])
 	}
 
 	acted, err := s.callTool("mail_action", map[string]interface{}{

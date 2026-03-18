@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -123,6 +124,41 @@ func (s *Server) mailMessageGet(args map[string]interface{}) (map[string]interfa
 	return map[string]interface{}{
 		"account": account,
 		"message": message,
+	}, nil
+}
+
+func (s *Server) mailAttachmentGet(args map[string]interface{}) (map[string]interface{}, error) {
+	account, provider, err := s.mailProviderForTool(args)
+	if err != nil {
+		return nil, err
+	}
+	defer provider.Close()
+	messageID := strings.TrimSpace(strArg(args, "message_id"))
+	if messageID == "" {
+		return nil, fmt.Errorf("message_id is required")
+	}
+	attachmentID := strings.TrimSpace(strArg(args, "attachment_id"))
+	if attachmentID == "" {
+		return nil, fmt.Errorf("attachment_id is required")
+	}
+	attachmentProvider, ok := provider.(email.AttachmentProvider)
+	if !ok {
+		return nil, fmt.Errorf("attachments are not supported for this account")
+	}
+	attachment, err := attachmentProvider.GetAttachment(context.Background(), messageID, attachmentID)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"account": account,
+		"attachment": map[string]interface{}{
+			"id":             strings.TrimSpace(attachment.ID),
+			"filename":       strings.TrimSpace(attachment.Filename),
+			"mime_type":      strings.TrimSpace(attachment.MimeType),
+			"size":           attachment.Size,
+			"is_inline":      attachment.IsInline,
+			"content_base64": base64.StdEncoding.EncodeToString(attachment.Content),
+		},
 	}, nil
 }
 

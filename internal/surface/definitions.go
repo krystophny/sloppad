@@ -517,6 +517,25 @@ var MCPTools = []Tool{
 		},
 	},
 	{
+		Name:        "mail_attachment_get",
+		Description: "Get one mail attachment with base64-encoded content.",
+		Required:    []string{"account_id", "message_id", "attachment_id"},
+		Properties: map[string]ToolProperty{
+			"account_id": {
+				Type:        "integer",
+				Description: "External account id.",
+			},
+			"message_id": {
+				Type:        "string",
+				Description: "Provider message id.",
+			},
+			"attachment_id": {
+				Type:        "string",
+				Description: "Provider attachment id from the message metadata.",
+			},
+		},
+	},
+	{
 		Name:        "mail_action",
 		Description: "Apply one mailbox action to one or more messages.",
 		Required:    []string{"account_id", "action"},

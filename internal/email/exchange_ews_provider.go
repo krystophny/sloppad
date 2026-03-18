@@ -30,6 +30,7 @@ type ExchangeEWSMailProvider struct {
 }
 
 var _ EmailProvider = (*ExchangeEWSMailProvider)(nil)
+var _ AttachmentProvider = (*ExchangeEWSMailProvider)(nil)
 var _ DraftProvider = (*ExchangeEWSMailProvider)(nil)
 var _ MessagePageProvider = (*ExchangeEWSMailProvider)(nil)
 var _ NamedFolderProvider = (*ExchangeEWSMailProvider)(nil)
@@ -262,6 +263,31 @@ func (p *ExchangeEWSMailProvider) GetMessage(ctx context.Context, messageID, for
 	}
 	decoded := decodeExchangeEWSMessage(messages[0], exchangeEWSFolderIndex(folders), format)
 	return &decoded, nil
+}
+
+func (p *ExchangeEWSMailProvider) GetAttachment(ctx context.Context, messageID, attachmentID string) (*providerdata.AttachmentData, error) {
+	if p == nil || p.client == nil {
+		return nil, fmt.Errorf("exchange ews provider is not configured")
+	}
+	if strings.TrimSpace(messageID) == "" {
+		return nil, fmt.Errorf("message_id is required")
+	}
+	cleanAttachmentID := strings.TrimSpace(attachmentID)
+	if cleanAttachmentID == "" {
+		return nil, fmt.Errorf("attachment_id is required")
+	}
+	attachment, err := p.client.GetAttachment(ctx, cleanAttachmentID)
+	if err != nil {
+		return nil, err
+	}
+	return &providerdata.AttachmentData{
+		ID:       attachment.ID,
+		Filename: attachment.Name,
+		MimeType: attachment.ContentType,
+		Size:     attachment.Size,
+		IsInline: attachment.IsInline,
+		Content:  append([]byte(nil), attachment.Content...),
+	}, nil
 }
 
 func (p *ExchangeEWSMailProvider) GetMessages(ctx context.Context, messageIDs []string, format string) ([]*providerdata.EmailMessage, error) {
@@ -1055,9 +1081,11 @@ func decodeExchangeEWSMessage(message ews.Message, folders map[string]ews.Folder
 	attachments := make([]providerdata.Attachment, 0, len(message.Attachments))
 	for _, attachment := range message.Attachments {
 		attachments = append(attachments, providerdata.Attachment{
+			ID:       attachment.ID,
 			Filename: attachment.Name,
 			MimeType: attachment.ContentType,
 			Size:     attachment.Size,
+			IsInline: attachment.IsInline,
 		})
 	}
 	sender := strings.TrimSpace(message.From.Name)

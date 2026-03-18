@@ -22,6 +22,10 @@ type EmailProvider interface {
 	Close() error
 }
 
+type AttachmentProvider interface {
+	GetAttachment(ctx context.Context, messageID, attachmentID string) (*providerdata.AttachmentData, error)
+}
+
 type ActionResolution struct {
 	OriginalMessageID string `json:"original_message_id"`
 	ResolvedMessageID string `json:"resolved_message_id"`

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"mime"
 	"net/http"
 	"sort"
 	"strconv"
@@ -161,6 +162,61 @@ func (a *App) handleMailMessageGet(w http.ResponseWriter, r *http.Request) {
 		"message": message,
 		"format":  format,
 	})
+}
+
+func (a *App) handleMailAttachmentGet(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	account, provider, err := a.emailProviderForRoute(r.Context(), r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	defer provider.Close()
+	if err := a.guardMailAccountBackoff(account); err != nil {
+		writeAPIError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	messageID := strings.TrimSpace(chi.URLParam(r, "message_id"))
+	if messageID == "" {
+		writeAPIError(w, http.StatusBadRequest, "message_id is required")
+		return
+	}
+	attachmentID := strings.TrimSpace(chi.URLParam(r, "attachment_id"))
+	if attachmentID == "" {
+		writeAPIError(w, http.StatusBadRequest, "attachment_id is required")
+		return
+	}
+	attachmentProvider, ok := provider.(email.AttachmentProvider)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "attachments are not supported for this account")
+		return
+	}
+	attachment, err := attachmentProvider.GetAttachment(r.Context(), messageID, attachmentID)
+	if err != nil {
+		a.writeMailProviderError(w, account, err)
+		return
+	}
+	contentType := strings.TrimSpace(attachment.MimeType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	if filename := strings.TrimSpace(attachment.Filename); filename != "" {
+		disposition := "attachment"
+		if attachment.IsInline {
+			disposition = "inline"
+		}
+		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
+	}
+	if attachment.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(attachment.Size, 10))
+	} else {
+		w.Header().Set("Content-Length", strconv.Itoa(len(attachment.Content)))
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(attachment.Content)
 }
 
 func (a *App) handleMailAction(w http.ResponseWriter, r *http.Request) {

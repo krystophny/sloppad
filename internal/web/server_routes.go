@@ -67,6 +67,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/api/external-accounts/{account_id}/mail/labels", a.handleMailLabelList)
 	r.Get("/api/external-accounts/{account_id}/mail/messages", a.handleMailMessageList)
 	r.Get("/api/external-accounts/{account_id}/mail/messages/{message_id}", a.handleMailMessageGet)
+	r.Get("/api/external-accounts/{account_id}/mail/messages/{message_id}/attachments/{attachment_id}", a.handleMailAttachmentGet)
 	r.Post("/api/external-accounts/{account_id}/mail/actions", a.handleMailAction)
 	r.Get("/api/external-accounts/{account_id}/mail-rules", a.handleMailRulesList)
 	r.Post("/api/external-accounts/{account_id}/mail-rules", a.handleMailRuleCreate)

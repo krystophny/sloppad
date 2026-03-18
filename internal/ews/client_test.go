@@ -248,6 +248,66 @@ func TestClientGetMessageSummariesRequestsMetadataShape(t *testing.T) {
 	}
 }
 
+func TestClientGetAttachmentDecodesContent(t *testing.T) {
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		data, _ := io.ReadAll(r.Body)
+		body = string(data)
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:GetAttachmentResponse>
+      <m:ResponseMessages>
+        <m:GetAttachmentResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Attachments>
+            <t:FileAttachment>
+              <t:AttachmentId Id="att-1" />
+              <t:Name>report.txt</t:Name>
+              <t:ContentType>text/plain</t:ContentType>
+              <t:Size>5</t:Size>
+              <t:IsInline>false</t:IsInline>
+              <t:Content>aGVsbG8=</t:Content>
+            </t:FileAttachment>
+          </m:Attachments>
+        </m:GetAttachmentResponseMessage>
+      </m:ResponseMessages>
+    </m:GetAttachmentResponse>
+  </soap:Body>
+</soap:Envelope>`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{
+		Endpoint: server.URL,
+		Username: "ert",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error: %v", err)
+	}
+	defer client.Close()
+
+	attachment, err := client.GetAttachment(t.Context(), "att-1")
+	if err != nil {
+		t.Fatalf("GetAttachment() error: %v", err)
+	}
+	if attachment.ID != "att-1" {
+		t.Fatalf("attachment id = %q, want att-1", attachment.ID)
+	}
+	if attachment.Name != "report.txt" {
+		t.Fatalf("attachment name = %q, want report.txt", attachment.Name)
+	}
+	if string(attachment.Content) != "hello" {
+		t.Fatalf("attachment content = %q, want hello", string(attachment.Content))
+	}
+	if !strings.Contains(body, `<m:GetAttachment>`) || !strings.Contains(body, `<t:AttachmentId Id="att-1" />`) {
+		t.Fatalf("request body missing attachment id: %s", body)
+	}
+}
+
 func TestClientMoveItemsReturnsResolvedIDs(t *testing.T) {
 	var body string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

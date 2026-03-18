@@ -21,6 +21,7 @@ type fakeMailProvider struct {
 	pageIDs     []string
 	nextPage    string
 	messages    map[string]*providerdata.EmailMessage
+	attachment  *providerdata.AttachmentData
 	filters     []email.ServerFilter
 	resolvedIDs map[string]string
 	lastOpts    email.SearchOptions
@@ -76,6 +77,15 @@ func (p *fakeMailProvider) GetMessages(_ context.Context, messageIDs []string, f
 		out = append(out, p.messages[id])
 	}
 	return out, nil
+}
+
+func (p *fakeMailProvider) GetAttachment(_ context.Context, _, _ string) (*providerdata.AttachmentData, error) {
+	if p.attachment == nil {
+		return nil, nil
+	}
+	copyValue := *p.attachment
+	copyValue.Content = append([]byte(nil), p.attachment.Content...)
+	return &copyValue, nil
 }
 
 func (p *fakeMailProvider) MarkRead(_ context.Context, ids []string) (int, error) {
@@ -235,6 +245,43 @@ func TestMailAPIListsMessagesAndGetsMessage(t *testing.T) {
 	message, _ := getData["message"].(map[string]any)
 	if message["ID"] != "m2" {
 		t.Fatalf("message id = %#v", message["ID"])
+	}
+}
+
+func TestMailAPIGetsAttachment(t *testing.T) {
+	app := newAuthedTestApp(t)
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderExchangeEWS, "TU Graz", map[string]any{})
+	if err != nil {
+		t.Fatalf("CreateExternalAccount: %v", err)
+	}
+	provider := &fakeMailProvider{
+		attachment: &providerdata.AttachmentData{
+			ID:       "att-1",
+			Filename: "Datenblatt UNI BJ2025.xlsx",
+			MimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			Size:     10,
+			Content:  []byte("sheetbytes"),
+		},
+	}
+	app.newEmailProvider = func(context.Context, store.ExternalAccount) (email.EmailProvider, error) {
+		return provider, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/external-accounts/"+itoaMail(account.ID)+"/mail/messages/m2/attachments/att-1", nil)
+	req.AddCookie(&http.Cookie{Name: SessionCookie, Value: testAuthToken})
+	rr := httptest.NewRecorder()
+	app.Router().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); !strings.Contains(got, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+		t.Fatalf("content type = %q", got)
+	}
+	if got := rr.Header().Get("Content-Disposition"); !strings.Contains(got, "Datenblatt UNI BJ2025.xlsx") {
+		t.Fatalf("content disposition = %q", got)
+	}
+	if rr.Body.String() != "sheetbytes" {
+		t.Fatalf("body = %q, want sheetbytes", rr.Body.String())
 	}
 }
 

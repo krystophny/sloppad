@@ -144,6 +144,15 @@ type Attachment struct {
 	IsInline    bool
 }
 
+type AttachmentContent struct {
+	ID          string
+	Name        string
+	ContentType string
+	Size        int64
+	IsInline    bool
+	Content     []byte
+}
+
 type Message struct {
 	ID                string
 	ChangeKey         string
@@ -474,6 +483,38 @@ func (c *Client) GetMessages(ctx context.Context, ids []string) ([]Message, erro
 
 func (c *Client) GetMessageSummaries(ctx context.Context, ids []string) ([]Message, error) {
 	return c.getMessages(ctx, ids, false)
+}
+
+func (c *Client) GetAttachment(ctx context.Context, attachmentID string) (AttachmentContent, error) {
+	cleanID := strings.TrimSpace(attachmentID)
+	if cleanID == "" {
+		return AttachmentContent{}, fmt.Errorf("attachment id is required")
+	}
+	var resp getAttachmentEnvelope
+	if err := c.call(ctx, "GetAttachment", getAttachmentBody(cleanID), &resp); err != nil {
+		return AttachmentContent{}, err
+	}
+	files := resp.Body.GetAttachmentResponse.ResponseMessages.Message.Attachments.Files
+	if len(files) == 0 {
+		return AttachmentContent{}, fmt.Errorf("attachment %q not found", cleanID)
+	}
+	raw := files[0]
+	content := []byte{}
+	if encoded := strings.TrimSpace(raw.Content); encoded != "" {
+		decoded, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return AttachmentContent{}, err
+		}
+		content = decoded
+	}
+	return AttachmentContent{
+		ID:          strings.TrimSpace(raw.ID.ID),
+		Name:        strings.TrimSpace(raw.Name),
+		ContentType: strings.TrimSpace(raw.ContentType),
+		Size:        parseInt64(raw.Size),
+		IsInline:    parseBool(raw.IsInline),
+		Content:     content,
+	}, nil
 }
 
 func (c *Client) getMessages(ctx context.Context, ids []string, includeBody bool) ([]Message, error) {
@@ -975,6 +1016,14 @@ func getItemBody(ids []string, includeBody bool) string {
 	return b.String()
 }
 
+func getAttachmentBody(attachmentID string) string {
+	var b strings.Builder
+	b.WriteString(`<m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="`)
+	b.WriteString(xmlEscapeAttr(strings.TrimSpace(attachmentID)))
+	b.WriteString(`" /></m:AttachmentIds></m:GetAttachment>`)
+	return b.String()
+}
+
 func draftMessageXML(message DraftMessage) string {
 	encoded := base64.StdEncoding.EncodeToString(message.MIME)
 	var b strings.Builder
@@ -1405,6 +1454,21 @@ type getItemEnvelope struct {
 	} `xml:"Body"`
 }
 
+type getAttachmentEnvelope struct {
+	Body struct {
+		GetAttachmentResponse struct {
+			ResponseMessages struct {
+				Message struct {
+					ResponseCode string `xml:"ResponseCode"`
+					Attachments  struct {
+						Files []attachmentContentXML `xml:"FileAttachment"`
+					} `xml:"Attachments"`
+				} `xml:"GetAttachmentResponseMessage"`
+			} `xml:"ResponseMessages"`
+		} `xml:"GetAttachmentResponse"`
+	} `xml:"Body"`
+}
+
 type syncFolderItemsEnvelope struct {
 	Body struct {
 		SyncFolderItemsResponse struct {
@@ -1502,6 +1566,17 @@ type attachmentXML struct {
 	} `xml:"AttachmentId"`
 	Name        string `xml:"Name"`
 	ContentType string `xml:"ContentType"`
+	Size        string `xml:"Size"`
+	IsInline    string `xml:"IsInline"`
+}
+
+type attachmentContentXML struct {
+	ID struct {
+		ID string `xml:"Id,attr"`
+	} `xml:"AttachmentId"`
+	Name        string `xml:"Name"`
+	ContentType string `xml:"ContentType"`
+	Content     string `xml:"Content"`
 	Size        string `xml:"Size"`
 	IsInline    string `xml:"IsInline"`
 }

@@ -154,6 +154,68 @@ func TestExchangeEWSDraftLifecycle(t *testing.T) {
 	}
 }
 
+func TestExchangeEWSGetAttachmentMapsContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, _ := io.ReadAll(r.Body)
+		action := strings.Trim(r.Header.Get("SOAPAction"), `"`)
+		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+		if !strings.HasSuffix(action, "/GetAttachment") {
+			t.Fatalf("unexpected SOAP action %q body=%s", action, string(body))
+		}
+		if !strings.Contains(string(body), `AttachmentId Id="att-1"`) {
+			t.Fatalf("GetAttachment body missing attachment id: %s", string(body))
+		}
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <soap:Body>
+    <m:GetAttachmentResponse>
+      <m:ResponseMessages>
+        <m:GetAttachmentResponseMessage ResponseClass="Success">
+          <m:ResponseCode>NoError</m:ResponseCode>
+          <m:Attachments>
+            <t:FileAttachment>
+              <t:AttachmentId Id="att-1" />
+              <t:Name>Datenblatt UNI BJ2025.xlsx</t:Name>
+              <t:ContentType>application/vnd.openxmlformats-officedocument.spreadsheetml.sheet</t:ContentType>
+              <t:Size>10</t:Size>
+              <t:IsInline>false</t:IsInline>
+              <t:Content>c2hlZXRieXRlcw==</t:Content>
+            </t:FileAttachment>
+          </m:Attachments>
+        </m:GetAttachmentResponseMessage>
+      </m:ResponseMessages>
+    </m:GetAttachmentResponse>
+  </soap:Body>
+</soap:Envelope>`)
+	}))
+	defer server.Close()
+
+	provider, err := NewExchangeEWSMailProvider(ExchangeEWSConfig{
+		Endpoint: server.URL,
+		Username: "ert",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("NewExchangeEWSMailProvider() error: %v", err)
+	}
+	defer provider.Close()
+
+	attachment, err := provider.GetAttachment(t.Context(), "msg-1", "att-1")
+	if err != nil {
+		t.Fatalf("GetAttachment() error: %v", err)
+	}
+	if attachment.ID != "att-1" {
+		t.Fatalf("attachment id = %q, want att-1", attachment.ID)
+	}
+	if attachment.Filename != "Datenblatt UNI BJ2025.xlsx" {
+		t.Fatalf("attachment filename = %q", attachment.Filename)
+	}
+	if string(attachment.Content) != "sheetbytes" {
+		t.Fatalf("attachment content = %q, want sheetbytes", string(attachment.Content))
+	}
+}
+
 func TestExchangeEWSDisplayFolderNameNormalizesArchiveDisplay(t *testing.T) {
 	tests := map[string]string{
 		"Archive":               "",
