@@ -9,8 +9,10 @@ Start::
     uvicorn piper_tts_server:app --host 127.0.0.1 --port 8424
 """
 
+import asyncio
 import io
 import os
+import threading
 import wave
 
 from fastapi import FastAPI, Request
@@ -28,6 +30,7 @@ MODELS = {
 
 app = FastAPI()
 _voices: dict = {}
+_voice_locks: dict[str, threading.Lock] = {}
 
 
 def _load_voice(lang: str):
@@ -42,7 +45,9 @@ def _load_voice(lang: str):
 def _get_voice(lang: str):
     if lang not in _voices:
         _voices[lang] = _load_voice(lang)
-    return _voices[lang]
+    if lang not in _voice_locks:
+        _voice_locks[lang] = threading.Lock()
+    return _voices[lang], _voice_locks[lang]
 
 
 @app.on_event("startup")
@@ -70,17 +75,20 @@ async def speech(request: Request):
     voice_key = str(body.get("voice", "en")).strip().lower()
     lang = "de" if voice_key in ("de", "de_de", "german") else "en"
 
-    voice = _get_voice(lang)
+    voice, lock = _get_voice(lang)
 
-    pcm_chunks = []
-    for chunk in voice.synthesize(text):
-        pcm_chunks.append(chunk.audio_int16_bytes)
+    def _synthesize():
+        with lock:
+            pcm_chunks = []
+            for chunk in voice.synthesize(text):
+                pcm_chunks.append(chunk.audio_int16_bytes)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(voice.config.sample_rate)
+            wav.writeframes(b"".join(pcm_chunks))
+        return buf.getvalue()
 
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wav:
-        wav.setnchannels(1)
-        wav.setsampwidth(2)
-        wav.setframerate(voice.config.sample_rate)
-        wav.writeframes(b"".join(pcm_chunks))
-
-    return Response(content=buf.getvalue(), media_type="audio/wav")
+    data = await asyncio.to_thread(_synthesize)
+    return Response(content=data, media_type="audio/wav")
