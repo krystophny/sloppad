@@ -1,6 +1,6 @@
 [Unit]
 Description=Voxtype daemon with STT service for Tabura
-After=graphical-session.target pipewire.service pipewire-pulse.service
+After=pipewire.service pipewire-pulse.service
 
 [Service]
 Type=simple
@@ -13,4 +13,4 @@ Restart=on-failure
 RestartSec=5
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target
