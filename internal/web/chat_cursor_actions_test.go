@@ -48,6 +48,18 @@ func TestParseInlineCursorIntent_ItemAndWorkspaceTargets(t *testing.T) {
 			wantTriage: "waiting",
 		},
 		{
+			name: "item delegate german actor alias",
+			text: "lass gpt das reviewen",
+			cursor: &chatCursorContext{
+				View:      "inbox",
+				ItemID:    42,
+				ItemTitle: "Fix login bug",
+				ItemState: store.ItemStateInbox,
+			},
+			wantAction: "cursor_triage_item",
+			wantTriage: "delegate",
+		},
+		{
 			name: "item back to inbox",
 			text: "move this mail back to the inbox",
 			cursor: &chatCursorContext{
@@ -85,6 +97,9 @@ func TestParseInlineCursorIntent_ItemAndWorkspaceTargets(t *testing.T) {
 			}
 			if tc.wantTriage != "" && systemActionCursorTriage(action.Params) != tc.wantTriage {
 				t.Fatalf("triage_action = %q, want %q", systemActionCursorTriage(action.Params), tc.wantTriage)
+			}
+			if tc.wantTriage == "delegate" && systemActionActorName(action.Params) != "GPT" {
+				t.Fatalf("actor = %q, want GPT", systemActionActorName(action.Params))
 			}
 			if tc.wantPath != "" && systemActionStringParam(action.Params, "path") != tc.wantPath {
 				t.Fatalf("path = %q, want %q", systemActionStringParam(action.Params, "path"), tc.wantPath)

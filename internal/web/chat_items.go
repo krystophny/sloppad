@@ -15,7 +15,6 @@ import (
 
 var (
 	itemTitlePrefixPattern = regexp.MustCompile(`^\s*(?:[#>*-]+|\d+[.)]|(?:\[[ xX]\]))\s*`)
-	itemDelegatePattern    = regexp.MustCompile(`(?i)^(?:delegate|assign|delegiere|übergib|uebergib|übergebe|uebergebe|übertrage|uebertrage)(?:\s+(?:this|it|das))?\s+(?:to|an)\s+(.+?)$`)
 	itemSplitPattern       = regexp.MustCompile(`(?i)^(?:split|teile)\s+(?:this|it|das)\s+(?:into|in)\s+(.+?)\s+(?:items?|aufgaben?)$`)
 	ideaPrefixPattern      = regexp.MustCompile(`(?i)^\s*(?:new\s+idea|idea|i\s+have\s+an\s+idea|capture|idee|einfall|ich\s+habe\s+eine\s+idee)\s*:\s*(.+?)\s*$`)
 	ideaSentencePattern    = regexp.MustCompile(`^.*?[.!?](?:\s|$)`)
@@ -37,20 +36,9 @@ type conversationItemContext struct {
 }
 
 func normalizeItemCommandText(raw string) string {
-	text := strings.ToLower(strings.TrimSpace(raw))
-	replacer := strings.NewReplacer(
-		"’", "'",
-		"‘", "'",
-		"ä", "ae",
-		"ö", "oe",
-		"ü", "ue",
-		"ß", "ss",
-	)
-	text = replacer.Replace(text)
-	text = strings.Trim(text, " \t\r\n.!?,:;\"'")
+	text := normalizeDelegationCommandText(raw)
 	text = strings.TrimPrefix(text, "please ")
 	text = strings.TrimPrefix(text, "bitte ")
-	text = strings.Join(strings.Fields(text), " ")
 	return strings.TrimSpace(text)
 }
 
@@ -102,13 +90,10 @@ func parseInlineItemIntentWithCaptureMode(text string, now time.Time, captureMod
 		}
 	}
 
-	if match := itemDelegatePattern.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
-		actor := cleanActorReference(match[1])
-		if actor != "" {
-			return &SystemAction{
-				Action: canonicalActionDelegateActor,
-				Params: map[string]interface{}{"actor": actor},
-			}
+	if actor := extractInlineDelegateActor(text); actor != "" {
+		return &SystemAction{
+			Action: canonicalActionDelegateActor,
+			Params: map[string]interface{}{"actor": actor},
 		}
 	}
 
@@ -169,17 +154,6 @@ func deriveIdeaTitle(raw string) string {
 		return first
 	}
 	return first + string(runes[1:])
-}
-
-func cleanActorReference(raw string) string {
-	text := strings.TrimSpace(raw)
-	text = strings.Trim(text, " \t\r\n.!?,:;")
-	for _, suffix := range []string{" please", " thanks", " thank you"} {
-		if strings.HasSuffix(strings.ToLower(text), suffix) {
-			text = strings.TrimSpace(text[:len(text)-len(suffix)])
-		}
-	}
-	return strings.TrimSpace(text)
 }
 
 func parseReminderVisibleAfter(text string, now time.Time) (string, bool) {
@@ -332,7 +306,7 @@ func systemActionActorName(params map[string]interface{}) string {
 	for _, key := range []string{"actor", "name", "target"} {
 		value := strings.TrimSpace(fmt.Sprint(params[key]))
 		if value != "" && value != "<nil>" {
-			return value
+			return cleanActorReference(value)
 		}
 	}
 	return ""
@@ -663,36 +637,46 @@ func (a *App) buildConversationItemContext(sessionID string, project store.Works
 }
 
 func (a *App) resolveActorByName(name string) (store.Actor, error) {
-	cleanName := strings.TrimSpace(name)
-	if cleanName == "" {
+	candidates := delegationActorLookupCandidates(name)
+	if len(candidates) == 0 {
 		return store.Actor{}, errors.New("actor name is required")
 	}
 	actors, err := a.store.ListActors()
 	if err != nil {
 		return store.Actor{}, err
 	}
-	var exact []store.Actor
-	var partial []store.Actor
-	for _, actor := range actors {
+	findMatches := func(candidate string) ([]store.Actor, []store.Actor) {
+		exact := make([]store.Actor, 0, 1)
+		partial := make([]store.Actor, 0, 1)
+		for _, actor := range actors {
+			switch {
+			case strings.EqualFold(actor.Name, candidate):
+				exact = append(exact, actor)
+			case strings.Contains(strings.ToLower(actor.Name), strings.ToLower(candidate)):
+				partial = append(partial, actor)
+			}
+		}
+		return exact, partial
+	}
+	for _, candidate := range candidates {
+		exact, _ := findMatches(candidate)
 		switch {
-		case strings.EqualFold(actor.Name, cleanName):
-			exact = append(exact, actor)
-		case strings.Contains(strings.ToLower(actor.Name), strings.ToLower(cleanName)):
-			partial = append(partial, actor)
+		case len(exact) == 1:
+			return exact[0], nil
+		case len(exact) > 1:
+			return store.Actor{}, fmt.Errorf("actor name %q is ambiguous", candidate)
 		}
 	}
-	switch {
-	case len(exact) == 1:
-		return exact[0], nil
-	case len(exact) > 1:
-		return store.Actor{}, fmt.Errorf("actor name %q is ambiguous", cleanName)
-	case len(partial) == 1:
-		return partial[0], nil
-	case len(partial) > 1:
-		return store.Actor{}, fmt.Errorf("actor name %q is ambiguous", cleanName)
-	default:
-		return store.Actor{}, fmt.Errorf("actor %q not found", cleanName)
+	for _, candidate := range candidates {
+		_, partial := findMatches(candidate)
+		switch {
+		case len(partial) == 1:
+			return partial[0], nil
+		case len(partial) > 1:
+			return store.Actor{}, fmt.Errorf("actor name %q is ambiguous", candidate)
+		}
 	}
+	return store.Actor{}, fmt.Errorf("actor %q not found", candidates[0])
 }
 
 func ideaCaptureConfirmation(title string) string {

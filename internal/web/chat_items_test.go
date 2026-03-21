@@ -50,7 +50,18 @@ func TestParseInlineItemIntent(t *testing.T) {
 		{text: "make this an item", wantAction: canonicalActionTrackItem},
 		{text: "Mach das zu einem Item", wantAction: canonicalActionTrackItem},
 		{text: "delegate this to Codex", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
+		{text: "ask gpt to implement this", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "let codex review the code", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
 		{text: "Delegiere das an Codex", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
+		{text: "sag gpt es soll das implementieren", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "gpt soll das machen", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "lass gpt das implementieren", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "bitte gpt darum das zu fixen", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "gpt, mach das", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "frag gpt ob es den code reviewen kann", wantAction: canonicalActionDelegateActor, wantActor: "GPT"},
+		{text: "codex soll das uebernehmen", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
+		{text: "lass codex den PR reviewen", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
+		{text: "sag codex er soll die tests laufen lassen", wantAction: canonicalActionDelegateActor, wantActor: "Codex"},
 		{text: "remind me tomorrow", wantAction: canonicalActionTrackItem, wantWhen: "2026-03-09T09:00:00Z"},
 		{text: "Erinnere mich morgen", wantAction: canonicalActionTrackItem, wantWhen: "2026-03-09T09:00:00Z"},
 		{text: "Erinnere mich am Montag", wantAction: canonicalActionTrackItem, wantWhen: "2026-03-09T09:00:00Z"},
@@ -225,6 +236,70 @@ func TestClassifyAndExecuteSystemActionDelegateItemUsesActorAndCanvasArtifact(t 
 	}
 	if artifact.RefPath == nil || *artifact.RefPath != readmePath {
 		t.Fatalf("artifact ref_path = %v, want %q", artifact.RefPath, readmePath)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionGermanDelegateAliasFallsBackToCodexActor(t *testing.T) {
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	workspace, err := app.store.CreateWorkspace("Default", project.RootPath)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error: %v", err)
+	}
+	actor, err := app.store.CreateActor("Codex", store.ActorKindAgent)
+	if err != nil {
+		t.Fatalf("CreateActor() error: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+	if _, err := app.store.AddChatMessage(session.ID, "assistant", "Review the parser diff", "Review the parser diff", "markdown"); err != nil {
+		t.Fatalf("add assistant message: %v", err)
+	}
+
+	readmePath := filepath.Join(project.RootPath, "README.md")
+	if err := os.WriteFile(readmePath, []byte("# notes\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	mock := &canvasMCPMock{
+		artifactTitle: "README.md",
+		artifactKind:  "text_artifact",
+		artifactText:  "# notes",
+	}
+	server := mock.setupServer(t)
+	defer server.Close()
+	port := serverPort(t, server.Listener.Addr())
+	app.tunnels.setPort(app.canvasSessionIDForWorkspace(project), port)
+
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "sag gpt es soll das reviewen")
+	if !handled {
+		t.Fatal("expected delegate command to be handled")
+	}
+	requireConfirmationRequired(t, message, payloads, "artifact")
+
+	message, payloads, handled = confirmNextAction(t, app, session)
+	if !handled {
+		t.Fatal("expected delegate confirmation to be handled")
+	}
+	if message != `Created waiting item "Review the parser diff" for Codex.` {
+		t.Fatalf("message = %q", message)
+	}
+	if len(payloads) != 1 || strFromAny(payloads[0]["type"]) != "item_created" {
+		t.Fatalf("payloads = %#v", payloads)
+	}
+
+	item := mustFirstItemByState(t, app, store.ItemStateWaiting)
+	if item.ActorID == nil || *item.ActorID != actor.ID {
+		t.Fatalf("actor_id = %v, want %d", item.ActorID, actor.ID)
+	}
+	if item.WorkspaceID == nil || *item.WorkspaceID != workspace.ID {
+		t.Fatalf("workspace_id = %v, want %d", item.WorkspaceID, workspace.ID)
 	}
 }
 

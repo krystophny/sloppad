@@ -146,6 +146,45 @@ func TestClassifyIntentPlanWithLLMCanonicalAction(t *testing.T) {
 	}
 }
 
+func TestClassifyIntentPlanWithLLMCanonicalActionNormalizesActorAlias(t *testing.T) {
+	llm := setupMockIntentLLMServer(
+		t,
+		200,
+		`{"kind":"canonical_action","action":"delegate_actor","actor":"gpt-5.4"}`,
+	)
+	defer llm.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = llm.URL
+
+	actions, err := app.classifyIntentPlanWithLLM(context.Background(), "sag gpt es soll das implementieren")
+	if err != nil {
+		t.Fatalf("classifyIntentPlanWithLLM returned error: %v", err)
+	}
+	if len(actions) != 1 {
+		t.Fatalf("actions length = %d, want 1", len(actions))
+	}
+	if actions[0].Action != "delegate_item" {
+		t.Fatalf("action[0] = %q, want delegate_item", actions[0].Action)
+	}
+	if got := systemActionActorName(actions[0].Params); got != "GPT" {
+		t.Fatalf("actor = %q, want GPT", got)
+	}
+}
+
+func TestBuildIntentLLMSystemPromptIncludesGermanDelegationExamples(t *testing.T) {
+	prompt := buildIntentLLMSystemPrompt()
+	if !strings.Contains(prompt, `action":"delegate_actor"`) {
+		t.Fatalf("prompt missing delegate_actor instruction: %q", prompt)
+	}
+	if !strings.Contains(prompt, `sag gpt es soll den code reviewen`) {
+		t.Fatalf("prompt missing German delegation example: %q", prompt)
+	}
+	if !strings.Contains(prompt, `gpt", "chatgpt", and "gpt-5" variants -> GPT`) {
+		t.Fatalf("prompt missing actor normalization guidance: %q", prompt)
+	}
+}
+
 func TestFirstShellPathFromOutput(t *testing.T) {
 	if got := firstShellPathFromOutput("(no output)\n./README.md\n"); got != "README.md" {
 		t.Fatalf("firstShellPathFromOutput returned %q, want README.md", got)

@@ -30,17 +30,15 @@ func parseInlineCursorIntent(text string, cursor *chatCursorContext) *SystemActi
 
 	if cursor.hasPointedItem() {
 		view := firstNonEmptyCursorText(cursor.View, cursor.ItemState)
-		if match := itemDelegatePattern.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
-			if actor := cleanActorReference(match[1]); actor != "" {
-				return &SystemAction{
-					Action: "cursor_triage_item",
-					Params: map[string]interface{}{
-						"item_id":       cursor.ItemID,
-						"triage_action": "delegate",
-						"actor":         actor,
-						"view":          view,
-					},
-				}
+		if actor := extractInlineDelegateActor(text); actor != "" {
+			return &SystemAction{
+				Action: "cursor_triage_item",
+				Params: map[string]interface{}{
+					"item_id":       cursor.ItemID,
+					"triage_action": "delegate",
+					"actor":         actor,
+					"view":          view,
+				},
 			}
 		}
 		switch normalized {
