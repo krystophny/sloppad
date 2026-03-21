@@ -870,18 +870,35 @@ test.describe('canvas - edge panels', () => {
     const initialClasses = await edgeRight.getAttribute('class');
     expect(initialClasses).not.toContain('edge-pinned');
 
-    // Pin the panel via the right-edge tap button (dispatch click directly
-    // because the hover-triggered panel overlaps the button at z-index 200)
-    await page.evaluate(() => {
-      document.getElementById('edge-right-tap')?.click();
-    });
+    await page.locator('#edge-right-tap').click();
     await page.waitForTimeout(200);
 
-    // Panel should be pinned
     await expect(edgeRight).toHaveClass(/edge-pinned/);
-    // Chat pane input should be visible inside the panel
     const cpInput = page.locator('#chat-pane-input');
     await expect(cpInput).toBeVisible();
+  });
+
+  test('desktop right edge strip moves to the chat boundary and closes the panel on click', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+
+    const edgeRight = page.locator('#edge-right');
+    const edgeRightTap = page.locator('#edge-right-tap');
+
+    await edgeRightTap.click();
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+
+    const panelBox = await edgeRight.boundingBox();
+    const tapBox = await edgeRightTap.boundingBox();
+    const inputBox = await page.locator('#chat-pane-input').boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(tapBox).not.toBeNull();
+    expect(inputBox).not.toBeNull();
+    expect(Math.abs(Number(tapBox?.x || 0) - Number(panelBox?.x || 0))).toBeLessThanOrEqual(1);
+    expect(Number(inputBox?.x || 0)).toBeGreaterThanOrEqual(Number(tapBox?.x || 0) + Number(tapBox?.width || 0) - 1);
+
+    await edgeRightTap.click();
+    await expect(edgeRight).not.toHaveClass(/edge-pinned/);
+    await expect(edgeRight).not.toHaveClass(/edge-active/);
   });
 
   test('touch tap on right edge toggles a full-width chat panel without recording', async ({ page }) => {
