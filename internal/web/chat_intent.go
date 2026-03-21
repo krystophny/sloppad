@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -67,6 +68,8 @@ func (e localTurnEvaluation) fallbackText() string {
 
 const systemActionLastShellPathPlaceholder = "$last_shell_path"
 
+var hotwordIntentLeadPattern = regexp.MustCompile(`(?i)^\s*(?:(?:hey|hi|ok|okay)\b[\s,.:;!?-]*)*(?:alexa|sloppy)\b[\s,.:;!?-]*`)
+
 func extractEmbeddedJSON(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -93,6 +96,18 @@ func extractEmbeddedJSON(raw string) string {
 		}
 	}
 	return ""
+}
+
+func stripHotwordIntentPrefix(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", false
+	}
+	stripped := strings.TrimSpace(hotwordIntentLeadPattern.ReplaceAllString(trimmed, ""))
+	if stripped == trimmed {
+		return trimmed, false
+	}
+	return stripped, true
 }
 
 func repairMalformedCommandQuotes(raw string) string {
@@ -561,15 +576,25 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 	if trimmedText == "" {
 		return localTurnEvaluation{}
 	}
-	intentText := trimmedText
+	intentText, hotwordAddressed := stripHotwordIntentPrefix(trimmedText)
+	if hotwordAddressed && intentText == "" {
+		return localTurnEvaluation{
+			handled: true,
+			payloads: []map[string]interface{}{{
+				"type":              "system_action_suppressed",
+				"reason":            "hotword_only",
+				"suppress_response": true,
+			}},
+		}
+	}
 	livePolicy := a.LivePolicy()
 	assumeAddressed := livePolicy.Config().AssumeAddressed
 	tryExecutePlan := func(actions []*SystemAction, ack string) localTurnEvaluation {
-		enforced := enforceRoutingPolicy(trimmedText, actions)
+		enforced := enforceRoutingPolicy(intentText, actions)
 		if len(enforced) == 0 {
 			return localTurnEvaluation{}
 		}
-		message, payloads, err := a.executeSystemActionPlan(sessionID, session, trimmedText, enforced)
+		message, payloads, err := a.executeSystemActionPlan(sessionID, session, intentText, enforced)
 		if err != nil {
 			return localTurnEvaluation{}
 		}
@@ -582,7 +607,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 	}
 
 	if pending := a.popPendingActionConfirmation(sessionID); pending != nil {
-		if isExplicitDangerConfirm(trimmedText) {
+		if isExplicitDangerConfirm(intentText) {
 			message, payloads, err := a.executeSystemActionPlanUnsafe(sessionID, session, pending.UserText, pending.Actions)
 			if err != nil {
 				return localTurnEvaluation{
@@ -596,7 +621,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 				payloads: payloads,
 			}
 		}
-		if isExplicitDangerDecline(trimmedText) {
+		if isExplicitDangerDecline(intentText) {
 			return localTurnEvaluation{
 				handled:  true,
 				text:     pendingConfirmationCanceledMessage(pending.Kind),
@@ -611,7 +636,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 		now = a.calendarNow().UTC()
 	}
 	pendingAck := ""
-	if looksLikeWorkspaceBusyQuery(trimmedText) {
+	if looksLikeWorkspaceBusyQuery(intentText) {
 		message, err := a.workspaceBusyOverview()
 		if err == nil && strings.TrimSpace(message) != "" {
 			return localTurnEvaluation{
@@ -622,7 +647,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 		}
 	}
 	tryDeterministicPlan := func() (string, []map[string]interface{}, bool) {
-		match := tryDeterministicFastPath(trimmedText, deterministicFastPathContext{
+		match := tryDeterministicFastPath(intentText, deterministicFastPathContext{
 			Now:         now,
 			CaptureMode: captureMode,
 			Cursor:      cursor,
@@ -641,12 +666,12 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 			}
 		}
 	}
-	intentText = a.contextualizeClarificationReplyForSession(sessionID, trimmedText)
+	intentText = a.contextualizeClarificationReplyForSession(sessionID, intentText)
 	if strings.TrimSpace(a.intentLLMURL) != "" {
 		classification, llmErr := a.classifyIntentPlanWithLLMResultForTurn(ctx, sessionID, session, intentText)
 		if llmErr == nil {
 			pendingAck = classification.Ack
-			if addressed, known := resolveIntentAddressedness(livePolicy, intentText, classification.Addressed); known && !addressed {
+			if addressed, known := resolveIntentAddressedness(livePolicy, intentText, classification.Addressed, hotwordAddressed); known && !addressed {
 				return localTurnEvaluation{
 					handled: true,
 					payloads: []map[string]interface{}{{
@@ -689,7 +714,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 			}
 		}
 	}
-	if !assumeAddressed && isCompanionDirectAddress(intentText) {
+	if !assumeAddressed && (hotwordAddressed || isCompanionDirectAddress(intentText)) {
 		if message, payloads, handled := tryDeterministicPlan(); handled {
 			return localTurnEvaluation{
 				handled:  true,
@@ -699,7 +724,7 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 		}
 	}
 
-	if cursor != nil && cursor.hasPointedItem() && looksLikeStandaloneSystemRequest(trimmedText) {
+	if cursor != nil && cursor.hasPointedItem() && looksLikeStandaloneSystemRequest(intentText) {
 		if message, payloads, ok := a.suggestCanonicalActionsForCursorItem(cursor); ok {
 			return localTurnEvaluation{
 				handled:  true,
@@ -711,11 +736,11 @@ func (a *App) evaluateLocalTurn(ctx context.Context, sessionID string, session s
 	return localTurnEvaluation{ack: pendingAck}
 }
 
-func resolveIntentAddressedness(policy LivePolicy, text string, addressed *bool) (bool, bool) {
+func resolveIntentAddressedness(policy LivePolicy, text string, addressed *bool, hotwordAddressed bool) (bool, bool) {
 	if !policy.RequiresExplicitAddress() {
 		return true, true
 	}
-	if isCompanionDirectAddress(text) {
+	if hotwordAddressed || isCompanionDirectAddress(text) {
 		return true, true
 	}
 	if addressed == nil {

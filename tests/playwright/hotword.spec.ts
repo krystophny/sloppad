@@ -165,6 +165,31 @@ test('hotword runtime pins explicit ONNX wasm asset URLs', async ({ page }) => {
   expect(new URL(paths.wasm).pathname).toContain('/static/vad/ort-wasm-simd-threaded.wasm');
 });
 
+test('hotword ring buffer retains four seconds of pre-roll audio', async ({ page }) => {
+  await waitReady(page);
+
+  const ringBuffer = await page.evaluate(async () => {
+    const mod = await import('/internal/web/static/hotword.js');
+    const samples = new Float32Array(70_000);
+    for (let i = 0; i < samples.length; i += 1) {
+      samples[i] = i;
+    }
+    mod.setPreRollAudioForTest(samples);
+    const preRoll = mod.getPreRollAudio();
+    return {
+      capacity: mod.hotwordRingBufferCapacitySamplesForTest(),
+      length: preRoll.length,
+      first: preRoll[0],
+      last: preRoll[preRoll.length - 1],
+    };
+  });
+
+  expect(ringBuffer.capacity).toBe(64_000);
+  expect(ringBuffer.length).toBe(64_000);
+  expect(ringBuffer.first).toBe(6_000);
+  expect(ringBuffer.last).toBe(69_999);
+});
+
 test('hotword plus speech starts recording', async ({ page }) => {
   await waitReady(page);
   await setMeetingMode(page);
@@ -184,6 +209,20 @@ test('hotword plus speech starts recording', async ({ page }) => {
     const log = await getLog(page);
     return log.some((entry) => entry.type === 'recorder' && entry.action === 'start');
   }, { timeout: 5_000 }).toBe(true);
+});
+
+test('hotword pre-roll samples are prepended before STT normalization', async ({ page }) => {
+  await waitReady(page);
+
+  const combined = await page.evaluate(async () => {
+    const mod = await import('/internal/web/static/app-voice.js');
+    return Array.from(mod.buildHotwordCaptureSamples(
+      new Float32Array([0.3, 0.4]),
+      new Float32Array([0.1, 0.2]),
+    )).map((value) => Number(value.toFixed(3)));
+  });
+
+  expect(combined).toEqual([0.1, 0.2, 0.3, 0.4]);
 });
 
 test('hotword capture tolerates initial pause before user speech', async ({ page }) => {
@@ -209,6 +248,27 @@ test('hotword capture tolerates initial pause before user speech', async ({ page
   await page.waitForTimeout(1_000);
   const log = await getLog(page);
   expect(log.some((entry) => entry.type === 'recorder' && entry.action === 'stop')).toBe(false);
+});
+
+test('standalone hotword falls back to pre-roll audio after silence', async ({ page }) => {
+  await waitReady(page);
+  await setMeetingMode(page);
+  await waitForHotwordStart(page);
+  await page.evaluate(async () => {
+    const mod = await import('/internal/web/static/hotword.js');
+    mod.setPreRollAudioForTest(Float32Array.from({ length: 16_000 }, () => 0.2));
+    (window as any).__setSTTTranscribeResponse({ text: 'Alexa' });
+    (window as any).__setVadDbFrames(Array.from({ length: 220 }, () => -80));
+  });
+  await clearLog(page);
+
+  await triggerHotword(page);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    const upload = log.find((entry) => entry.type === 'api_fetch' && entry.action === 'stt_transcribe');
+    return Number(upload?.bytes || 0);
+  }, { timeout: 10_000 }).toBeGreaterThan(32_000);
 });
 
 test('dialogue turn controller finalizes a buffered fragment on timeout', async ({ page }) => {

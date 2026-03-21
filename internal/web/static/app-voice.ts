@@ -249,6 +249,44 @@ function isFirefoxLinux() {
   return ua.includes('firefox') && ua.includes('linux') && !ua.includes('android');
 }
 
+function hasLiveAudioTrack(stream) {
+  if (!stream || typeof stream.getAudioTracks !== 'function') return false;
+  const tracks = stream.getAudioTracks();
+  if (!Array.isArray(tracks) || tracks.length === 0) return false;
+  return tracks.some((track) => String(track?.readyState || '').toLowerCase() === 'live');
+}
+
+function concatFloat32Arrays(head, tail) {
+  const first = head instanceof Float32Array ? head : new Float32Array(0);
+  const second = tail instanceof Float32Array ? tail : new Float32Array(0);
+  if (first.length === 0) return second;
+  if (second.length === 0) return first;
+  const out = new Float32Array(first.length + second.length);
+  out.set(first, 0);
+  out.set(second, first.length);
+  return out;
+}
+
+export function buildHotwordCaptureSamples(speechAudio, preRollAudio = getPreRollAudio()) {
+  return concatFloat32Arrays(preRollAudio, speechAudio);
+}
+
+function buildHotwordVADAudio(speechAudio, preRollAudio = getPreRollAudio()) {
+  const preRoll = preRollAudio instanceof Float32Array ? preRollAudio : new Float32Array(0);
+  const combined = buildHotwordCaptureSamples(speechAudio, preRoll);
+  if (!(combined instanceof Float32Array) || combined.length === 0) {
+    return null;
+  }
+  const normalized = buildNormalizedSpeechWav(combined, 16000);
+  return {
+    blob: normalized.blob,
+    normalization: normalized,
+    durationMs: Math.round((combined.length / 16000) * 1000),
+    preRollSamples: preRoll.length,
+    totalSamples: combined.length,
+  };
+}
+
 let _sttMimeType = '';
 let _sttParts = [];
 let _sttActive = false;
@@ -392,6 +430,24 @@ export function stopChatVoiceMedia(capture) {
 }
 
 function handleVADNoSpeechTimeout(capture) {
+  const triggerSource = normalizeVoiceTriggerSource(capture?.triggerSource);
+  if (triggerSource === VOICE_TRIGGER_SOURCE_HOTWORD) {
+    const hotwordAudio = buildHotwordVADAudio(new Float32Array(0));
+    if (hotwordAudio) {
+      emitDialogueServerDiagnostic('voice_capture_vad_no_speech', {
+        trigger_source: triggerSource,
+        pre_roll_samples: hotwordAudio.preRollSamples,
+        samples: hotwordAudio.totalSamples,
+      });
+      capture._vadAudioBlob = hotwordAudio.blob;
+      capture._vadAudioNormalization = hotwordAudio.normalization;
+      capture._vadAudioDurationMs = hotwordAudio.durationMs;
+      capture._vadAutoStopped = true;
+      stopVADMonitor(capture);
+      void stopVoiceCaptureAndSend();
+      return;
+    }
+  }
   stopVADMonitor(capture);
   state.indicatorSuppressedByCanvasUpdate = false;
   showStatus('no speech detected');
@@ -448,7 +504,7 @@ export async function startSileroVADMonitor(capture) {
       stream: vadStream,
       audioContext: capture._vadAudioContext || undefined,
       redemptionMs: isHotwordCapture ? 1400 : undefined,
-      minSpeechMs: isHotwordCapture ? 400 : undefined,
+      minSpeechMs: isHotwordCapture ? 200 : undefined,
       onSpeechStart() {
         if (!vadState.isRunning || vadState.committed) return;
         emitDialogueServerDiagnostic('voice_capture_vad_speech_start', {
@@ -467,11 +523,19 @@ export async function startSileroVADMonitor(capture) {
       onSpeechEnd(audio) {
         if (!vadState.isRunning || vadState.committed) return;
         vadState.committed = true;
+        const hotwordAudio = isHotwordCapture ? buildHotwordVADAudio(audio) : null;
         emitDialogueServerDiagnostic('voice_capture_vad_speech_end', {
           trigger_source: triggerSource,
           samples: audio instanceof Float32Array ? audio.length : 0,
+          pre_roll_samples: Number(hotwordAudio?.preRollSamples || 0),
+          combined_samples: Number(hotwordAudio?.totalSamples || 0),
         });
-        if (audio instanceof Float32Array && audio.length > 0) {
+        if (hotwordAudio) {
+          capture._vadAudioBlob = hotwordAudio.blob;
+          capture._vadAudioNormalization = hotwordAudio.normalization;
+          capture._vadAudioDurationMs = hotwordAudio.durationMs;
+          capture._vadAutoStopped = true;
+        } else if (audio instanceof Float32Array && audio.length > 0) {
           const normalized = buildNormalizedSpeechWav(audio, 16000);
           capture._vadAudioBlob = normalized.blob;
           capture._vadAudioNormalization = normalized;
@@ -640,7 +704,8 @@ export async function beginVoiceCapture(x, y, anchor, options: Record<string, an
     showStatus('recording...');
   }
   try {
-    const stream = await acquireMicStream();
+    const hotwordStream = triggerSource === VOICE_TRIGGER_SOURCE_HOTWORD ? getHotwordMicStream() : null;
+    const stream = hasLiveAudioTrack(hotwordStream) ? hotwordStream : await acquireMicStream();
     if (state.chatVoiceCapture !== capture) {
       if (vadAudioContext) { try { vadAudioContext.close(); } catch (_) {} }
       return;
