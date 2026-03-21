@@ -282,3 +282,64 @@ func TestRunAssistantTurnDialogueIgnoresAddressedFlag(t *testing.T) {
 		t.Fatalf("payloads = %#v, want toggle_silent payload", payloads)
 	}
 }
+
+func TestClassifyAndExecuteSystemActionForTurnStripsHotwordPrefix(t *testing.T) {
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.chatSessionForWorkspace(project)
+	if err != nil {
+		t.Fatalf("project session: %v", err)
+	}
+
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Hey Alexa, be quiet", nil, "")
+	if !handled {
+		t.Fatal("expected wake-word-prefixed command to be handled")
+	}
+	if message != "Toggled silent mode." {
+		t.Fatalf("message = %q, want %q", message, "Toggled silent mode.")
+	}
+	if len(payloads) != 1 || strFromAny(payloads[0]["type"]) != "toggle_silent" {
+		t.Fatalf("payloads = %#v, want toggle_silent payload", payloads)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionForTurnSuppressesStandaloneHotword(t *testing.T) {
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.chatSessionForWorkspace(project)
+	if err != nil {
+		t.Fatalf("project session: %v", err)
+	}
+
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Alexa", nil, "")
+	if !handled {
+		t.Fatal("expected standalone wake word to be handled locally")
+	}
+	if message != "" {
+		t.Fatalf("message = %q, want empty suppression message", message)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("payloads len = %d, want 1", len(payloads))
+	}
+	if strFromAny(payloads[0]["type"]) != "system_action_suppressed" {
+		t.Fatalf("payload type = %q, want system_action_suppressed", strFromAny(payloads[0]["type"]))
+	}
+	if strFromAny(payloads[0]["reason"]) != "hotword_only" {
+		t.Fatalf("payload reason = %q, want hotword_only", strFromAny(payloads[0]["reason"]))
+	}
+	if suppress, ok := parseOptionalBool(payloads[0]["suppress_response"]); !ok || !suppress {
+		t.Fatalf("payload suppress_response = %#v, want true", payloads[0]["suppress_response"])
+	}
+}

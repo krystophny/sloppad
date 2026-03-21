@@ -35,7 +35,7 @@ const HOTWORD_KEYWORD_FRAMES = 16;
 const HOTWORD_RAW_BUFFER_MAX = HOTWORD_TARGET_SAMPLE_RATE * 10;
 const HOTWORD_MEL_BUFFER_MAX = 10 * 97;
 const HOTWORD_FEATURE_BUFFER_MAX = 120;
-const HOTWORD_RING_BUFFER_SIZE = HOTWORD_TARGET_SAMPLE_RATE * 2;
+const HOTWORD_RING_BUFFER_SIZE = HOTWORD_TARGET_SAMPLE_RATE * 4;
 
 const listeners = new Set<() => void>();
 
@@ -569,6 +569,18 @@ export function getPreRollAudio() {
     out.set(ringBuffer.buffer.subarray(0, len - firstPart), firstPart);
   }
   return out;
+}
+
+export function hotwordRingBufferCapacitySamplesForTest() {
+  return HOTWORD_RING_BUFFER_SIZE;
+}
+
+export function setPreRollAudioForTest(samples) {
+  resetRingBuffer();
+  if (!(samples instanceof Float32Array) || samples.length === 0) {
+    return;
+  }
+  writeRingBuffer(samples);
 }
 
 export function getHotwordMicStream() {
