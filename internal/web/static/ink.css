@@ -3,17 +3,10 @@
   inset: 0;
   width: 100%;
   height: 100%;
+  display: block;
   z-index: 6;
   pointer-events: none;
-  overflow: visible;
-}
-
-.ink-layer path {
-  fill: none;
-  stroke: #111827;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
+  touch-action: none;
 }
 
 .ink-controls {

@@ -355,13 +355,15 @@ export function bindUi() {
         try { canvasViewport.setPointerCapture(ev.pointerId); } catch (_) {}
       }
     }, true);
-    canvasViewport.addEventListener('pointermove', (ev) => {
+    const handleInkPointerMove = (ev) => {
       if (!isInkTool()) return;
       if (state.inkDraft.activePointerId !== ev.pointerId) return;
       if (extendInkStroke(ev)) {
         ev.preventDefault();
       }
-    }, true);
+    };
+    canvasViewport.addEventListener('pointerrawupdate', handleInkPointerMove, true);
+    canvasViewport.addEventListener('pointermove', handleInkPointerMove, true);
     const finishInkPointer = (ev) => {
       if (state.inkDraft.activePointerId !== ev.pointerId) return;
       if (!finalizeInkStroke(ev)) {
