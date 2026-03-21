@@ -49,6 +49,26 @@ func TestEvaluateCompanionDirectedSpeechGate(t *testing.T) {
 		}
 	})
 
+	t.Run("target speaker follow up", func(t *testing.T) {
+		segments := []store.ParticipantSegment{
+			{ID: 10, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 120},
+			{ID: 11, Speaker: "Alice", Text: "Can you send it to the team?", CommittedAt: 130},
+		}
+		gate := evaluateCompanionDirectedSpeechGate(cfg, session, segments, events)
+		if gate.Decision != companionGateDecisionDirect {
+			t.Fatalf("decision = %q, want %q", gate.Decision, companionGateDecisionDirect)
+		}
+		if gate.Reason != "target_speaker_follow_up" {
+			t.Fatalf("reason = %q, want target_speaker_follow_up", gate.Reason)
+		}
+		if gate.TargetSpeaker != "Alice" {
+			t.Fatalf("target_speaker = %q, want Alice", gate.TargetSpeaker)
+		}
+		if !gate.SpeakerMatch {
+			t.Fatal("speaker_matched = false, want true")
+		}
+	})
+
 	t.Run("disabled", func(t *testing.T) {
 		disabled := cfg
 		disabled.DirectedSpeechGateEnabled = false

@@ -212,4 +212,52 @@ test.describe('bug report flow', () => {
     expect(preview?.pixel?.[1]).not.toBe(255);
     expect(preview?.pixel?.[2]).not.toBe(255);
   });
+
+  test('meeting bug report includes participant diagnostics', async ({ page }) => {
+    await waitReady(page);
+
+    await page.evaluate(() => {
+      const app = (window as any)._taburaApp;
+      const state = app?.getState?.();
+      if (state) {
+        state.livePolicy = 'meeting';
+        state.liveSessionMode = 'meeting';
+        state.companionRuntimeState = 'listening';
+        state.companionRuntimeReason = 'participant_started';
+        state.turnPolicyProfile = 'balanced';
+      }
+      (window as any).__participantStatus = {
+        ok: true,
+        active_sessions: 1,
+        active_session_id: 'psess-harness-001',
+        directed_speech_gate: {
+          decision: 'target_speaker_follow_up',
+          reason: 'target_speaker_follow_up',
+          speaker: 'Alice',
+          target_speaker: 'Alice',
+          speaker_matched: true,
+        },
+        interaction_policy: {
+          decision: 'interrupt',
+          reason: 'target_speaker_overlap',
+          speaker: 'Alice',
+          target_speaker: 'Alice',
+          pending_speaker: 'Alice',
+        },
+      };
+    });
+
+    await page.locator('#bug-report-button').click();
+    await page.locator('#bug-report-note').fill('Meeting overlap reproduced.');
+    await page.locator('#bug-report-save').click();
+
+    await expect.poll(async () => {
+      return page.evaluate(() => (window as any).__bugReportRequests.length);
+    }).toBe(1);
+
+    const request = await page.evaluate(() => (window as any).__bugReportRequests[0]);
+    expect(request.meeting_diagnostics?.live_policy).toBe('meeting');
+    expect(request.meeting_diagnostics?.participant_status?.directed_speech_gate?.decision).toBe('target_speaker_follow_up');
+    expect(request.meeting_diagnostics?.participant_status?.interaction_policy?.reason).toBe('target_speaker_overlap');
+  });
 });

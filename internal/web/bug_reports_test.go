@@ -73,6 +73,14 @@ func TestHandleBugReportCreateWritesBundleUnderWorkspaceArtifacts(t *testing.T) 
 			"timezone":             "Europe/Vienna",
 			"hardware_concurrency": float64(8),
 		},
+		"meeting_diagnostics": map[string]any{
+			"live_policy":         "meeting",
+			"turn_policy_profile": "balanced",
+			"participant_status": map[string]any{
+				"directed_speech_gate": map[string]any{"decision": "target_speaker_follow_up"},
+				"interaction_policy":   map[string]any{"decision": "respond"},
+			},
+		},
 		"note":                "The indicator froze after the tap.",
 		"voice_transcript":    "it stops responding after the second tap",
 		"screenshot_data_url": testPNGDataURL,
@@ -125,6 +133,24 @@ func TestHandleBugReportCreateWritesBundleUnderWorkspaceArtifacts(t *testing.T) 
 	}
 	if got := strFromAny(bundle["voice_transcript"]); got != "it stops responding after the second tap" {
 		t.Fatalf("voice_transcript = %q, want transcript to round-trip", got)
+	}
+	meetingDiagnostics, ok := bundle["meeting_diagnostics"].(map[string]any)
+	if !ok {
+		t.Fatalf("meeting_diagnostics = %#v, want object", bundle["meeting_diagnostics"])
+	}
+	if got := strFromAny(meetingDiagnostics["live_policy"]); got != "meeting" {
+		t.Fatalf("meeting_diagnostics.live_policy = %q, want meeting", got)
+	}
+	participantStatus, ok := meetingDiagnostics["participant_status"].(map[string]any)
+	if !ok {
+		t.Fatalf("meeting_diagnostics.participant_status = %#v, want object", meetingDiagnostics["participant_status"])
+	}
+	directedSpeechGate, ok := participantStatus["directed_speech_gate"].(map[string]any)
+	if !ok {
+		t.Fatalf("participant_status.directed_speech_gate = %#v, want object", participantStatus["directed_speech_gate"])
+	}
+	if got := strFromAny(directedSpeechGate["decision"]); got != "target_speaker_follow_up" {
+		t.Fatalf("participant_status.directed_speech_gate.decision = %q, want target_speaker_follow_up", got)
 	}
 	device, ok := bundle["device"].(map[string]any)
 	if !ok {

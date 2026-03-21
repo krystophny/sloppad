@@ -701,6 +701,7 @@ async function snapshotBugReportContext(trigger, runtime) {
   const dialogueDiagnostics = typeof app?.getDialogueDiagnostics === 'function'
     ? app.getDialogueDiagnostics()
     : null;
+  const meetingDiagnostics = await captureMeetingBugReportDiagnostics();
   return {
     trigger,
     timestamp: formatNow(),
@@ -714,9 +715,29 @@ async function snapshotBugReportContext(trigger, runtime) {
     browserLogs: browserLogs.slice(),
     device: await buildDeviceState(),
     dialogueDiagnostics,
+    meetingDiagnostics,
     screenshotDataURL: '',
     strokes: [],
     voiceTranscript: '',
+  };
+}
+
+async function captureMeetingBugReportDiagnostics() {
+  if (safeText(state.livePolicy).toLowerCase() !== 'meeting') return null;
+  let participantStatus = null;
+  try {
+    const resp = await fetch(apiURL('participant/status'));
+    if (resp.ok) {
+      participantStatus = await resp.json();
+    }
+  } catch (_) {}
+  return {
+    live_policy: safeText(state.livePolicy),
+    live_session_mode: safeText(state.liveSessionMode),
+    companion_runtime_state: safeText(state.companionRuntimeState),
+    companion_runtime_reason: safeText(state.companionRuntimeReason),
+    turn_policy_profile: safeText(state.turnPolicyProfile),
+    participant_status: participantStatus,
   };
 }
 
@@ -775,6 +796,7 @@ async function saveBugReport() {
     browser_logs: pendingReport.browserLogs,
     device: pendingReport.device,
     dialogue_diagnostics: pendingReport.dialogueDiagnostics,
+    meeting_diagnostics: pendingReport.meetingDiagnostics,
     note: note instanceof HTMLTextAreaElement ? note.value.trim() : '',
     voice_transcript: pendingReport.voiceTranscript,
     screenshot_data_url: pendingReport.screenshotDataURL,

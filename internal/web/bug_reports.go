@@ -39,6 +39,7 @@ type bugReportRequest struct {
 	BrowserLogs         []string        `json:"browser_logs"`
 	Device              map[string]any  `json:"device"`
 	DialogueDiagnostics json.RawMessage `json:"dialogue_diagnostics"`
+	MeetingDiagnostics  json.RawMessage `json:"meeting_diagnostics"`
 	Note                string          `json:"note"`
 	VoiceTranscript     string          `json:"voice_transcript"`
 	ScreenshotData      string          `json:"screenshot_data_url"`
@@ -61,6 +62,7 @@ type bugReportBundle struct {
 	BrowserLogs         []string        `json:"browser_logs,omitempty"`
 	Device              map[string]any  `json:"device,omitempty"`
 	DialogueDiagnostics json.RawMessage `json:"dialogue_diagnostics,omitempty"`
+	MeetingDiagnostics  json.RawMessage `json:"meeting_diagnostics,omitempty"`
 	Note                string          `json:"note,omitempty"`
 	VoiceTranscript     string          `json:"voice_transcript,omitempty"`
 	ScreenshotPath      string          `json:"screenshot,omitempty"`
@@ -166,6 +168,7 @@ func (a *App) handleBugReportCreate(w http.ResponseWriter, r *http.Request) {
 		BrowserLogs:         cleanBugReportLines(req.BrowserLogs),
 		Device:              req.Device,
 		DialogueDiagnostics: normalizeBugReportRawJSON(req.DialogueDiagnostics),
+		MeetingDiagnostics:  normalizeBugReportRawJSON(req.MeetingDiagnostics),
 		Note:                strings.TrimSpace(req.Note),
 		VoiceTranscript:     strings.TrimSpace(req.VoiceTranscript),
 		ScreenshotPath:      toBugReportRelativePath(workspace.DirPath, screenshotPath),

@@ -20,6 +20,10 @@ type companionDirectedSpeechGate struct {
 	Reason        string `json:"reason"`
 	SessionID     string `json:"session_id,omitempty"`
 	SegmentID     int64  `json:"segment_id,omitempty"`
+	Speaker       string `json:"speaker,omitempty"`
+	TargetSpeaker string `json:"target_speaker,omitempty"`
+	TargetSegment int64  `json:"target_segment_id,omitempty"`
+	SpeakerMatch  bool   `json:"speaker_matched,omitempty"`
 	EvaluatedText string `json:"evaluated_text,omitempty"`
 	EvaluatedAt   int64  `json:"evaluated_at,omitempty"`
 	LastEventType string `json:"last_event_type,omitempty"`
@@ -92,13 +96,21 @@ func evaluateCompanionDirectedSpeechGate(cfg companionConfig, session *store.Par
 		return gate
 	}
 	gate.SegmentID = latest.ID
+	gate.Speaker = normalizeCompanionSpeaker(latest.Speaker)
 	gate.EvaluatedText = strings.TrimSpace(latest.Text)
 	if latest.CommittedAt > 0 {
 		gate.EvaluatedAt = latest.CommittedAt
 	}
+	gate.TargetSpeaker, gate.TargetSegment = companionTargetSpeaker(segments, events)
+	gate.SpeakerMatch = companionSpeakersMatch(gate.Speaker, gate.TargetSpeaker)
 	if isCompanionDirectAddress(latest.Text) {
 		gate.Decision = companionGateDecisionDirect
 		gate.Reason = "assistant_name_mentioned"
+		return gate
+	}
+	if gate.SpeakerMatch && isCompanionRequestWithoutDirectAddress(latest.Text) {
+		gate.Decision = companionGateDecisionDirect
+		gate.Reason = "target_speaker_follow_up"
 		return gate
 	}
 	if isCompanionRequestWithoutDirectAddress(latest.Text) {
@@ -118,6 +130,56 @@ func latestMeaningfulParticipantSegment(segments []store.ParticipantSegment) *st
 		return &segments[i]
 	}
 	return nil
+}
+
+func latestDirectAddressedParticipantSegment(segments []store.ParticipantSegment) *store.ParticipantSegment {
+	for i := len(segments) - 1; i >= 0; i-- {
+		if strings.TrimSpace(segments[i].Text) == "" {
+			continue
+		}
+		if isCompanionDirectAddress(segments[i].Text) {
+			return &segments[i]
+		}
+	}
+	return nil
+}
+
+func participantSegmentByID(segments []store.ParticipantSegment, segmentID int64) *store.ParticipantSegment {
+	if segmentID == 0 {
+		return nil
+	}
+	for i := range segments {
+		if segments[i].ID == segmentID {
+			return &segments[i]
+		}
+	}
+	return nil
+}
+
+func companionTargetSpeaker(segments []store.ParticipantSegment, events []store.ParticipantEvent) (string, int64) {
+	if pendingSegmentID, _ := latestPendingCompanionSegment(events); pendingSegmentID != 0 {
+		if segment := participantSegmentByID(segments, pendingSegmentID); segment != nil {
+			if speaker := normalizeCompanionSpeaker(segment.Speaker); speaker != "" {
+				return speaker, segment.ID
+			}
+		}
+	}
+	if latest := latestDirectAddressedParticipantSegment(segments); latest != nil {
+		if speaker := normalizeCompanionSpeaker(latest.Speaker); speaker != "" {
+			return speaker, latest.ID
+		}
+	}
+	return "", 0
+}
+
+func normalizeCompanionSpeaker(raw string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+}
+
+func companionSpeakersMatch(a, b string) bool {
+	left := normalizeCompanionSpeaker(a)
+	right := normalizeCompanionSpeaker(b)
+	return left != "" && right != "" && strings.EqualFold(left, right)
 }
 
 func isCompanionDirectAddress(raw string) bool {

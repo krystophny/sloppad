@@ -26,9 +26,14 @@ type companionInteractionPolicyState struct {
 	Reason           string `json:"reason"`
 	SessionID        string `json:"session_id,omitempty"`
 	SegmentID        int64  `json:"segment_id,omitempty"`
+	Speaker          string `json:"speaker,omitempty"`
+	TargetSpeaker    string `json:"target_speaker,omitempty"`
+	TargetSegmentID  int64  `json:"target_segment_id,omitempty"`
+	SpeakerMatched   bool   `json:"speaker_matched,omitempty"`
 	EvaluatedText    string `json:"evaluated_text,omitempty"`
 	EvaluatedAt      int64  `json:"evaluated_at,omitempty"`
 	PendingSegmentID int64  `json:"pending_segment_id,omitempty"`
+	PendingSpeaker   string `json:"pending_speaker,omitempty"`
 	PendingSince     int64  `json:"pending_since,omitempty"`
 	CooldownUntil    int64  `json:"cooldown_until,omitempty"`
 }
@@ -136,23 +141,37 @@ func evaluateCompanionInteractionPolicy(cfg companionConfig, session *store.Part
 		return state
 	}
 	state.SegmentID = latest.ID
+	state.Speaker = normalizeCompanionSpeaker(latest.Speaker)
 	state.EvaluatedText = strings.TrimSpace(latest.Text)
 	state.EvaluatedAt = latest.CommittedAt
 	if state.EvaluatedAt == 0 {
 		state.EvaluatedAt = latest.EndTS
 	}
+	state.TargetSpeaker, state.TargetSegmentID = companionTargetSpeaker(segments, events)
+	state.SpeakerMatched = companionSpeakersMatch(state.Speaker, state.TargetSpeaker)
 	pendingSegmentID, pendingSince := latestPendingCompanionSegment(events)
 	state.PendingSegmentID = pendingSegmentID
 	state.PendingSince = pendingSince
+	if pendingSegment := participantSegmentByID(segments, pendingSegmentID); pendingSegment != nil {
+		state.PendingSpeaker = normalizeCompanionSpeaker(pendingSegment.Speaker)
+	}
 	cooldownUntil := latestCompanionCooldownUntil(events)
 	state.CooldownUntil = cooldownUntil
+	directAddress := isCompanionDirectAddress(latest.Text)
+	requestWithoutDirectAddress := isCompanionRequestWithoutDirectAddress(latest.Text)
+	targetSpeakerFollowUp := state.SpeakerMatched && requestWithoutDirectAddress
 
 	if participantSegmentAlreadyTriggered(events, latest.ID) {
 		state.Decision = companionInteractionDecisionAlreadyTriggered
 		state.Reason = "segment_already_triggered"
 		return state
 	}
-	if !isCompanionDirectAddress(latest.Text) {
+	if !directAddress && !targetSpeakerFollowUp {
+		if pendingSegmentID != 0 && pendingSegmentID != latest.ID && requestWithoutDirectAddress && state.PendingSpeaker != "" && state.Speaker != "" && !companionSpeakersMatch(state.PendingSpeaker, state.Speaker) {
+			state.Decision = companionInteractionDecisionSuppressed
+			state.Reason = "overlap_other_speaker"
+			return state
+		}
 		state.Decision = companionInteractionDecisionAwaitingAddress
 		state.Reason = "not_direct_address"
 		return state
@@ -163,8 +182,17 @@ func evaluateCompanionInteractionPolicy(cfg companionConfig, session *store.Part
 		return state
 	}
 	if pendingSegmentID != 0 && pendingSegmentID != latest.ID {
+		if state.PendingSpeaker != "" && state.Speaker != "" && !companionSpeakersMatch(state.PendingSpeaker, state.Speaker) && !directAddress {
+			state.Decision = companionInteractionDecisionSuppressed
+			state.Reason = "overlap_other_speaker"
+			return state
+		}
 		state.Decision = companionInteractionDecisionInterrupt
-		state.Reason = "response_pending"
+		if targetSpeakerFollowUp {
+			state.Reason = "target_speaker_overlap"
+		} else {
+			state.Reason = "response_pending"
+		}
 		return state
 	}
 	if cooldownUntil > 0 && state.EvaluatedAt > 0 && state.EvaluatedAt < cooldownUntil {
@@ -173,7 +201,11 @@ func evaluateCompanionInteractionPolicy(cfg companionConfig, session *store.Part
 		return state
 	}
 	state.Decision = companionInteractionDecisionRespond
-	state.Reason = "direct_address_ready"
+	if targetSpeakerFollowUp {
+		state.Reason = "target_speaker_follow_up_ready"
+	} else {
+		state.Reason = "direct_address_ready"
+	}
 	return state
 }
 

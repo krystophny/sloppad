@@ -250,6 +250,81 @@ func TestCompanionResponseTriggerExecutesAssistantTurn(t *testing.T) {
 	}
 }
 
+func TestCompanionResponseTriggerExecutesTargetSpeakerFollowUp(t *testing.T) {
+	t.Setenv("TABURA_INTENT_LLM_URL", "off")
+	app := newAuthedTestApp(t)
+	app.appServerClient = newCompanionAppServerClient(t, "Companion reply.")
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	cfg := app.loadCompanionConfig(project)
+	cfg.CompanionEnabled = true
+	cfg.DirectedSpeechGateEnabled = true
+	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
+		t.Fatalf("save companion config: %v", err)
+	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
+
+	participantSession, err := app.store.AddParticipantSession(project.WorkspacePath, "{}")
+	if err != nil {
+		t.Fatalf("add participant session: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(participantSession.ID, 0, "session_started", "{}"); err != nil {
+		t.Fatalf("add participant event: %v", err)
+	}
+	first, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   participantSession.ID,
+		StartTS:     100,
+		EndTS:       101,
+		Speaker:     "Alice",
+		Text:        "Tabura, summarize the budget changes.",
+		CommittedAt: 102,
+		Status:      "final",
+	})
+	if err != nil {
+		t.Fatalf("add initial participant segment: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(participantSession.ID, first.ID, "segment_committed", `{"text":"Tabura, summarize the budget changes."}`); err != nil {
+		t.Fatalf("add initial committed event: %v", err)
+	}
+	followUp, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   participantSession.ID,
+		StartTS:     103,
+		EndTS:       104,
+		Speaker:     "Alice",
+		Text:        "Can you include the blocker owners too?",
+		CommittedAt: 105,
+		Status:      "final",
+	})
+	if err != nil {
+		t.Fatalf("add follow-up participant segment: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(participantSession.ID, followUp.ID, "segment_committed", `{"text":"Can you include the blocker owners too?"}`); err != nil {
+		t.Fatalf("add follow-up committed event: %v", err)
+	}
+
+	app.maybeTriggerCompanionResponse(participantSession.ID, followUp)
+
+	chatSession, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("get chat session: %v", err)
+	}
+	waitForAssistantMessage(t, app, chatSession.ID, "Companion reply.")
+
+	messages, err := app.store.ListChatMessages(chatSession.ID, 10)
+	if err != nil {
+		t.Fatalf("list chat messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("chat message count = %d, want 2", len(messages))
+	}
+	if got := strings.TrimSpace(messages[0].ContentPlain); got != "Can you include the blocker owners too?" {
+		t.Fatalf("first message text = %q, want follow-up text", got)
+	}
+}
+
 func TestCompanionResponseTriggerSkipsWhenCompanionDisabled(t *testing.T) {
 	t.Setenv("TABURA_INTENT_LLM_URL", "off")
 	app := newAuthedTestApp(t)

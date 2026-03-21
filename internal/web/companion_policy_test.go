@@ -89,3 +89,58 @@ func TestEvaluateCompanionInteractionPolicyInterruptsPendingResponse(t *testing.
 		t.Fatalf("pending_segment_id = %d, want 1", policy.PendingSegmentID)
 	}
 }
+
+func TestEvaluateCompanionInteractionPolicyAllowsTargetSpeakerFollowUp(t *testing.T) {
+	cfg := defaultCompanionConfig()
+	cfg.CompanionEnabled = true
+	cfg.DirectedSpeechGateEnabled = true
+
+	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
+	segments := []store.ParticipantSegment{
+		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 100},
+		{ID: 2, SessionID: session.ID, Speaker: "Alice", Text: "Can you include the budget appendix?", CommittedAt: 102},
+	}
+
+	policy := evaluateCompanionInteractionPolicy(cfg, session, segments, nil)
+	if policy.Decision != companionInteractionDecisionRespond {
+		t.Fatalf("decision = %q, want %q", policy.Decision, companionInteractionDecisionRespond)
+	}
+	if policy.Reason != "target_speaker_follow_up_ready" {
+		t.Fatalf("reason = %q, want target_speaker_follow_up_ready", policy.Reason)
+	}
+	if policy.TargetSpeaker != "Alice" {
+		t.Fatalf("target_speaker = %q, want Alice", policy.TargetSpeaker)
+	}
+	if !policy.SpeakerMatched {
+		t.Fatal("speaker_matched = false, want true")
+	}
+}
+
+func TestEvaluateCompanionInteractionPolicySuppressesDifferentSpeakerOverlap(t *testing.T) {
+	cfg := defaultCompanionConfig()
+	cfg.CompanionEnabled = true
+	cfg.DirectedSpeechGateEnabled = true
+
+	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
+	segments := []store.ParticipantSegment{
+		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 100},
+		{ID: 2, SessionID: session.ID, Speaker: "Bob", Text: "Can you include the budget appendix?", CommittedAt: 102},
+	}
+	events := []store.ParticipantEvent{
+		{SessionID: session.ID, SegmentID: 1, EventType: "assistant_triggered", CreatedAt: 101},
+	}
+
+	policy := evaluateCompanionInteractionPolicy(cfg, session, segments, events)
+	if policy.Decision != companionInteractionDecisionSuppressed {
+		t.Fatalf("decision = %q, want %q", policy.Decision, companionInteractionDecisionSuppressed)
+	}
+	if policy.Reason != "overlap_other_speaker" {
+		t.Fatalf("reason = %q, want overlap_other_speaker", policy.Reason)
+	}
+	if policy.PendingSpeaker != "Alice" {
+		t.Fatalf("pending_speaker = %q, want Alice", policy.PendingSpeaker)
+	}
+	if policy.Speaker != "Bob" {
+		t.Fatalf("speaker = %q, want Bob", policy.Speaker)
+	}
+}

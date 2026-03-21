@@ -224,6 +224,7 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 		SessionID:   sess.ID,
 		StartTS:     100,
 		EndTS:       101,
+		Speaker:     "Alice",
 		Text:        "Tabura, open the meeting transcript.",
 		CommittedAt: 102,
 		Status:      "final",
@@ -261,10 +262,25 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 	if state.DirectedSpeechGate.EvaluatedText != "Tabura, open the meeting transcript." {
 		t.Fatalf("directed_speech_gate.evaluated_text = %q", state.DirectedSpeechGate.EvaluatedText)
 	}
+	if state.DirectedSpeechGate.Speaker != "Alice" {
+		t.Fatalf("directed_speech_gate.speaker = %q, want Alice", state.DirectedSpeechGate.Speaker)
+	}
+	if state.DirectedSpeechGate.TargetSpeaker != "Alice" {
+		t.Fatalf("directed_speech_gate.target_speaker = %q, want Alice", state.DirectedSpeechGate.TargetSpeaker)
+	}
+	if !state.DirectedSpeechGate.SpeakerMatch {
+		t.Fatal("directed_speech_gate.speaker_matched = false, want true")
+	}
 	if state.InteractionPolicy.Decision != companionInteractionDecisionRespond {
 		t.Fatalf("interaction_policy.decision = %q, want %q", state.InteractionPolicy.Decision, companionInteractionDecisionRespond)
 	}
 	if state.InteractionPolicy.Reason != "direct_address_ready" {
 		t.Fatalf("interaction_policy.reason = %q, want direct_address_ready", state.InteractionPolicy.Reason)
+	}
+	if state.InteractionPolicy.Speaker != "Alice" {
+		t.Fatalf("interaction_policy.speaker = %q, want Alice", state.InteractionPolicy.Speaker)
+	}
+	if state.InteractionPolicy.TargetSpeaker != "Alice" {
+		t.Fatalf("interaction_policy.target_speaker = %q, want Alice", state.InteractionPolicy.TargetSpeaker)
 	}
 }
