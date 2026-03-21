@@ -14,6 +14,16 @@ const isInkTool = (...args) => refs.isInkTool(...args);
 const pdfPageAnchorAtPoint = (...args) => refs.pdfPageAnchorAtPoint(...args);
 const persistPdfInkAnnotation = (...args) => refs.persistPdfInkAnnotation(...args);
 
+const INK_STROKE_COLOR = '#111827';
+const PDF_INK_STROKE_COLOR = '#0f172a';
+const INK_POINT_EPSILON = 0.25;
+const INK_TIME_EPSILON_MS = 0.25;
+const INK_PREDICTION_STEPS = 2;
+const INK_PREDICTION_FRAME_MS = 8;
+
+let delegatedInkPresenter = null;
+let delegatedInkPresenterPromise = null;
+
 export function activeArtifactKindForInk() {
   const activePane = document.querySelector('#canvas-viewport .canvas-pane.is-active');
   if (!(activePane instanceof HTMLElement)) return 'text';
@@ -36,7 +46,7 @@ export function resetInkDraftState() {
 
 export function inkLayerEl() {
   const node = document.getElementById('ink-layer');
-  return node instanceof SVGSVGElement ? node : null;
+  return node instanceof HTMLCanvasElement ? node : null;
 }
 
 export function renderInkControls() {
@@ -62,11 +72,11 @@ export function setPenInkingState(active) {
 }
 
 export function clearInkDraft() {
-  if (state.inkDraft.draftLayer instanceof SVGSVGElement) {
+  if (state.inkDraft.draftLayer instanceof HTMLElement) {
     state.inkDraft.draftLayer.remove();
   }
   const layer = inkLayerEl();
-  if (layer) layer.innerHTML = '';
+  clearCanvasLayer(layer);
   state.inkDraft.strokes = [];
   state.inkDraft.dirty = false;
   resetInkDraftState();
@@ -77,13 +87,15 @@ export function clearInkDraft() {
 export function syncInkLayerSize() {
   const layer = inkLayerEl();
   const viewport = document.getElementById('canvas-viewport');
-  if (!(layer instanceof SVGSVGElement) || !(viewport instanceof HTMLElement)) return;
+  if (!(layer instanceof HTMLCanvasElement) || !(viewport instanceof HTMLElement)) return;
   const rect = viewport.getBoundingClientRect();
   const width = Math.max(1, Math.round(rect.width));
   const height = Math.max(1, Math.round(rect.height));
-  layer.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  layer.setAttribute('width', `${width}`);
-  layer.setAttribute('height', `${height}`);
+  const changed = syncCanvasSize(layer, width, height);
+  if (changed) {
+    redrawMainInkLayer();
+  }
+  void ensureDelegatedInkPresenter(layer);
 }
 
 export function pointForViewportEvent(clientX, clientY) {
@@ -98,10 +110,283 @@ export function pointForViewportEvent(clientX, clientY) {
   };
 }
 
-export function appendInkPointToPath(pathEl, stroke) {
-  if (!(pathEl instanceof SVGPathElement) || !stroke || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
-  const d = stroke.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
-  pathEl.setAttribute('d', d);
+function syncCanvasSize(canvas, width, height) {
+  if (!(canvas instanceof HTMLCanvasElement)) return false;
+  const logicalWidth = Math.max(1, Math.round(width));
+  const logicalHeight = Math.max(1, Math.round(height));
+  const dpr = Math.max(1, Number(window.devicePixelRatio) || 1);
+  const pixelWidth = Math.max(1, Math.round(logicalWidth * dpr));
+  const pixelHeight = Math.max(1, Math.round(logicalHeight * dpr));
+  const changed = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
+  canvas.dataset.logicalWidth = `${logicalWidth}`;
+  canvas.dataset.logicalHeight = `${logicalHeight}`;
+  canvas.dataset.dpr = `${dpr}`;
+  canvas.style.width = `${logicalWidth}px`;
+  canvas.style.height = `${logicalHeight}px`;
+  if (changed) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+  const ctx = getCanvas2DContext(canvas);
+  if (ctx) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  }
+  return changed;
+}
+
+function getCanvasLogicalSize(canvas) {
+  if (!(canvas instanceof HTMLCanvasElement)) return { width: 1, height: 1 };
+  return {
+    width: Math.max(1, Number(canvas.dataset.logicalWidth) || canvas.clientWidth || 1),
+    height: Math.max(1, Number(canvas.dataset.logicalHeight) || canvas.clientHeight || 1),
+  };
+}
+
+function getCanvas2DContext(canvas) {
+  if (!(canvas instanceof HTMLCanvasElement)) return null;
+  let ctx = null;
+  try {
+    ctx = canvas.getContext('2d', { desynchronized: true });
+  } catch (_) {
+    ctx = null;
+  }
+  if (!(ctx instanceof CanvasRenderingContext2D)) {
+    ctx = canvas.getContext('2d');
+  }
+  return ctx instanceof CanvasRenderingContext2D ? ctx : null;
+}
+
+function clearCanvasLayer(canvas) {
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  const ctx = getCanvas2DContext(canvas);
+  if (!ctx) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function buildInkPathData(points) {
+  if (!Array.isArray(points) || points.length === 0) return '';
+  const commands = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${Number(point?.x || 0).toFixed(2)} ${Number(point?.y || 0).toFixed(2)}`);
+  if (points.length === 1) {
+    commands.push(`L ${(Number(points[0]?.x || 0) + 0.01).toFixed(2)} ${Number(points[0]?.y || 0).toFixed(2)}`);
+  }
+  return commands.join(' ');
+}
+
+function strokeWidthForPressure(pressure) {
+  return Math.max(1.5, Number(pressure) > 0 ? 1.8 + Number(pressure) * 2.8 : 2.4);
+}
+
+function normalizePointerTimestamp(pointerEvent) {
+  const value = Number(pointerEvent?.timeStamp);
+  if (Number.isFinite(value) && value >= 0) return Number(value.toFixed(2));
+  return Date.now();
+}
+
+function createInkPoint(x, y, pointerEvent) {
+  return {
+    x: Number(x) || 0,
+    y: Number(y) || 0,
+    pressure: Number(pointerEvent?.pressure) || 0,
+    tilt_x: Number(pointerEvent?.tiltX) || 0,
+    tilt_y: Number(pointerEvent?.tiltY) || 0,
+    roll: Number(pointerEvent?.twist) || 0,
+    timestamp_ms: normalizePointerTimestamp(pointerEvent),
+  };
+}
+
+function collectPointerSamples(pointerEvent) {
+  const samples = [];
+  if (pointerEvent && typeof pointerEvent.getCoalescedEvents === 'function') {
+    try {
+      const coalesced = pointerEvent.getCoalescedEvents();
+      if (Array.isArray(coalesced) && coalesced.length > 0) {
+        samples.push(...coalesced);
+      }
+    } catch (_) {}
+  }
+  samples.push(pointerEvent);
+  return samples.filter(Boolean);
+}
+
+function pointerEventToInkPoint(pointerEvent) {
+  let point = pointForViewportEvent(pointerEvent.clientX, pointerEvent.clientY);
+  if (state.inkDraft.target === 'pdf' && state.inkDraft.pageInner instanceof HTMLElement) {
+    const bounds = state.inkDraft.pageInner.getBoundingClientRect();
+    point = {
+      x: clampPoint(pointerEvent.clientX - bounds.left, state.inkDraft.pageWidth),
+      y: clampPoint(pointerEvent.clientY - bounds.top, state.inkDraft.pageHeight),
+    };
+  }
+  return createInkPoint(point.x, point.y, pointerEvent);
+}
+
+function sameInkPoint(a, b) {
+  if (!a || !b) return false;
+  return Math.abs((Number(a.x) || 0) - (Number(b.x) || 0)) <= INK_POINT_EPSILON
+    && Math.abs((Number(a.y) || 0) - (Number(b.y) || 0)) <= INK_POINT_EPSILON
+    && Math.abs((Number(a.pressure) || 0) - (Number(b.pressure) || 0)) <= 0.01
+    && Math.abs((Number(a.tilt_x) || 0) - (Number(b.tilt_x) || 0)) <= 0.5
+    && Math.abs((Number(a.tilt_y) || 0) - (Number(b.tilt_y) || 0)) <= 0.5
+    && Math.abs((Number(a.roll) || 0) - (Number(b.roll) || 0)) <= 0.5
+    && Math.abs((Number(a.timestamp_ms) || 0) - (Number(b.timestamp_ms) || 0)) <= INK_TIME_EPSILON_MS;
+}
+
+function activeInkStroke() {
+  return state.inkDraft.strokes[state.inkDraft.strokes.length - 1] || null;
+}
+
+function activeInkBounds() {
+  if (state.inkDraft.target === 'pdf') {
+    return {
+      width: Math.max(1, Number(state.inkDraft.pageWidth) || 1),
+      height: Math.max(1, Number(state.inkDraft.pageHeight) || 1),
+    };
+  }
+  return getCanvasLogicalSize(inkLayerEl());
+}
+
+function rebuildStrokePrediction(stroke) {
+  if (!stroke || !Array.isArray(stroke.points)) return;
+  stroke.predicted_points = [];
+  stroke.predicted_count = 0;
+  if (stroke.points.length < 3) return;
+  const [a, b, c] = stroke.points.slice(-3);
+  const dt1 = Math.max(1, (Number(b?.timestamp_ms) || 0) - (Number(a?.timestamp_ms) || 0) || INK_PREDICTION_FRAME_MS);
+  const dt2 = Math.max(1, (Number(c?.timestamp_ms) || 0) - (Number(b?.timestamp_ms) || 0) || INK_PREDICTION_FRAME_MS);
+  const vx1 = ((Number(b?.x) || 0) - (Number(a?.x) || 0)) / dt1;
+  const vy1 = ((Number(b?.y) || 0) - (Number(a?.y) || 0)) / dt1;
+  const vx2 = ((Number(c?.x) || 0) - (Number(b?.x) || 0)) / dt2;
+  const vy2 = ((Number(c?.y) || 0) - (Number(b?.y) || 0)) / dt2;
+  const avgDt = Math.max(1, (dt1 + dt2) / 2);
+  const ax = (vx2 - vx1) / avgDt;
+  const ay = (vy2 - vy1) / avgDt;
+  const step = Math.max(INK_PREDICTION_FRAME_MS, Math.min(20, dt2));
+  const bounds = activeInkBounds();
+  for (let i = 1; i <= INK_PREDICTION_STEPS; i += 1) {
+    const dt = step * i;
+    stroke.predicted_points.push({
+      x: clampPoint((Number(c?.x) || 0) + (vx2 * dt) + (0.5 * ax * dt * dt), bounds.width),
+      y: clampPoint((Number(c?.y) || 0) + (vy2 * dt) + (0.5 * ay * dt * dt), bounds.height),
+      pressure: Number(c?.pressure) || 0,
+      tilt_x: Number(c?.tilt_x) || 0,
+      tilt_y: Number(c?.tilt_y) || 0,
+      roll: Number(c?.roll) || 0,
+      timestamp_ms: Number((Number(c?.timestamp_ms) || 0) + dt),
+      predicted: true,
+    });
+  }
+  stroke.predicted_count = stroke.predicted_points.length;
+}
+
+function appendPointerSamplesToStroke(stroke, pointerEvent) {
+  if (!stroke || !Array.isArray(stroke.points)) return false;
+  let changed = false;
+  for (const sample of collectPointerSamples(pointerEvent)) {
+    const point = pointerEventToInkPoint(sample);
+    const last = stroke.points[stroke.points.length - 1];
+    if (last && sameInkPoint(last, point)) continue;
+    stroke.points.push(point);
+    changed = true;
+  }
+  rebuildStrokePrediction(stroke);
+  return changed;
+}
+
+function drawStrokePath(ctx, points, width, color, alpha = 1) {
+  if (!(ctx instanceof CanvasRenderingContext2D) || !Array.isArray(points) || points.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.lineWidth = Math.max(1.5, Number(width) || 2.4);
+  ctx.moveTo(Number(points[0]?.x) || 0, Number(points[0]?.y) || 0);
+  for (let i = 1; i < points.length; i += 1) {
+    ctx.lineTo(Number(points[i]?.x) || 0, Number(points[i]?.y) || 0);
+  }
+  if (points.length === 1) {
+    ctx.lineTo((Number(points[0]?.x) || 0) + 0.01, Number(points[0]?.y) || 0);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawStroke(ctx, stroke, color) {
+  if (!(ctx instanceof CanvasRenderingContext2D) || !stroke) return;
+  drawStrokePath(ctx, stroke.points, stroke.width, color, 1);
+  const predicted = Array.isArray(stroke.predicted_points) ? stroke.predicted_points : [];
+  if (predicted.length === 0 || !Array.isArray(stroke.points) || stroke.points.length === 0) return;
+  drawStrokePath(ctx, [stroke.points[stroke.points.length - 1], ...predicted], stroke.width, color, 0.35);
+}
+
+function redrawMainInkLayer() {
+  const layer = inkLayerEl();
+  if (!(layer instanceof HTMLCanvasElement)) return;
+  const ctx = getCanvas2DContext(layer);
+  if (!ctx) return;
+  clearCanvasLayer(layer);
+  state.inkDraft.strokes.forEach((stroke) => drawStroke(ctx, stroke, INK_STROKE_COLOR));
+}
+
+function redrawPdfDraftLayer() {
+  const layer = state.inkDraft.draftLayer;
+  if (!(layer instanceof HTMLCanvasElement)) return;
+  const ctx = getCanvas2DContext(layer);
+  if (!ctx) return;
+  clearCanvasLayer(layer);
+  const stroke = activeInkStroke();
+  if (stroke) {
+    drawStroke(ctx, stroke, PDF_INK_STROKE_COLOR);
+  }
+}
+
+function renderActiveInkLayer() {
+  if (state.inkDraft.target === 'pdf') {
+    redrawPdfDraftLayer();
+    return;
+  }
+  redrawMainInkLayer();
+}
+
+function activeMainStrokeWidth() {
+  return Math.max(1.5, Number(activeInkStroke()?.width) || 2.4);
+}
+
+async function ensureDelegatedInkPresenter(canvas) {
+  if (!(canvas instanceof HTMLCanvasElement) || delegatedInkPresenter || delegatedInkPresenterPromise) return;
+  const ink = navigator && (navigator as any).ink;
+  if (!ink || typeof ink.requestPresenter !== 'function') return;
+  delegatedInkPresenterPromise = Promise.resolve()
+    .then(() => ink.requestPresenter({ presentationArea: canvas }))
+    .then((presenter) => {
+      delegatedInkPresenter = presenter || null;
+      canvas.dataset.inkPresenter = delegatedInkPresenter ? 'enabled' : 'unavailable';
+      return delegatedInkPresenter;
+    })
+    .catch(() => {
+      delegatedInkPresenter = null;
+      canvas.dataset.inkPresenter = 'unavailable';
+      return null;
+    })
+    .finally(() => {
+      delegatedInkPresenterPromise = null;
+    });
+  await delegatedInkPresenterPromise;
+}
+
+function updateDelegatedInkPresenter(pointerEvent) {
+  if (!delegatedInkPresenter || typeof delegatedInkPresenter.updateInkTrailStartPoint !== 'function') return;
+  if (state.inkDraft.target === 'pdf') return;
+  try {
+    delegatedInkPresenter.updateInkTrailStartPoint(pointerEvent, {
+      color: INK_STROKE_COLOR,
+      diameter: activeMainStrokeWidth(),
+    });
+  } catch (_) {}
 }
 
 function clampPoint(value, max) {
@@ -210,10 +495,10 @@ function buildInkEventPayload() {
 
   const width = state.inkDraft.target === 'pdf'
     ? Math.max(1, Number(state.inkDraft.pageWidth) || 1)
-    : Math.max(1, Number(inkLayerEl()?.viewBox.baseVal?.width || inkLayerEl()?.getAttribute('width') || 1));
+    : getCanvasLogicalSize(inkLayerEl()).width;
   const height = state.inkDraft.target === 'pdf'
     ? Math.max(1, Number(state.inkDraft.pageHeight) || 1)
-    : Math.max(1, Number(inkLayerEl()?.viewBox.baseVal?.height || inkLayerEl()?.getAttribute('height') || 1));
+    : getCanvasLogicalSize(inkLayerEl()).height;
 
   const snapshotDataURL = state.inkDraft.target === 'pdf'
     ? buildPdfInkSnapshotDataURL()
@@ -248,17 +533,22 @@ function buildInkEventPayload() {
     strokes: strokes.map((stroke) => ({
       pointer_type: stroke.pointer_type,
       width: stroke.width,
+      predicted_count: Number(stroke?.predicted_count) || 0,
       points: (Array.isArray(stroke?.points) ? stroke.points : []).map((point) => ({
         x: point.x,
         y: point.y,
         pressure: point.pressure,
+        tilt_x: point.tilt_x,
+        tilt_y: point.tilt_y,
+        roll: point.roll,
+        timestamp_ms: point.timestamp_ms,
       })),
     })),
   };
 }
 
 function buildPdfInkSnapshotDataURL() {
-  if (!(state.inkDraft.draftLayer instanceof SVGSVGElement)) return '';
+  if (state.inkDraft.target !== 'pdf' || state.inkDraft.strokes.length === 0) return '';
   const width = Math.max(1, Number(state.inkDraft.pageWidth) || 1);
   const height = Math.max(1, Number(state.inkDraft.pageHeight) || 1);
   const canvas = document.createElement('canvas');
@@ -270,7 +560,7 @@ function buildPdfInkSnapshotDataURL() {
   ctx.fillRect(0, 0, width, height);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#111827';
+  ctx.strokeStyle = INK_STROKE_COLOR;
   state.inkDraft.strokes.forEach((stroke) => {
     const points = Array.isArray(stroke?.points) ? stroke.points : [];
     if (points.length === 0) return;
@@ -291,15 +581,13 @@ function buildPdfInkSnapshotDataURL() {
 function ensurePdfInkDraftLayer(pageInner, width, height) {
   if (!(pageInner instanceof HTMLElement)) return null;
   let layer = pageInner.querySelector('.canvas-ink-draft-layer');
-  if (!(layer instanceof SVGSVGElement)) {
-    layer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  if (!(layer instanceof HTMLCanvasElement)) {
+    layer = document.createElement('canvas');
     layer.classList.add('canvas-ink-draft-layer');
     layer.setAttribute('aria-hidden', 'true');
     pageInner.appendChild(layer);
   }
-  layer.setAttribute('viewBox', `0 0 ${Math.max(1, width)} ${Math.max(1, height)}`);
-  layer.setAttribute('width', `${Math.max(1, width)}`);
-  layer.setAttribute('height', `${Math.max(1, height)}`);
+  syncCanvasSize(layer, width, height);
   return layer;
 }
 
@@ -309,24 +597,18 @@ export function beginInkStroke(pointerEvent) {
     : null;
   if (pdfAnchor) {
     const draftLayer = ensurePdfInkDraftLayer(pdfAnchor.pageInner, pdfAnchor.width, pdfAnchor.height);
-    if (!(draftLayer instanceof SVGSVGElement)) return false;
+    if (!(draftLayer instanceof HTMLCanvasElement)) return false;
     const stroke = {
       pointer_type: String(pointerEvent.pointerType || 'pen').trim().toLowerCase() || 'pen',
-      width: Math.max(1.5, Number(pointerEvent.pressure) > 0 ? 1.8 + Number(pointerEvent.pressure) * 2.8 : 2.4),
-      points: [{
-        x: pdfAnchor.xPx,
-        y: pdfAnchor.yPx,
-        pressure: Number(pointerEvent.pressure) || 0,
-      }],
+      width: strokeWidthForPressure(pointerEvent.pressure),
+      points: [createInkPoint(pdfAnchor.xPx, pdfAnchor.yPx, pointerEvent)],
+      predicted_points: [],
+      predicted_count: 0,
     };
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('stroke-width', stroke.width.toFixed(2));
-    appendInkPointToPath(path, stroke);
-    draftLayer.appendChild(path);
     state.inkDraft.strokes = [stroke];
     state.inkDraft.activePointerId = pointerEvent.pointerId;
     state.inkDraft.activePointerType = stroke.pointer_type;
-    state.inkDraft.activePath = path;
+    state.inkDraft.activePath = stroke;
     state.inkDraft.target = 'pdf';
     state.inkDraft.page = pdfAnchor.pageNumber;
     state.inkDraft.pageInner = pdfAnchor.pageInner;
@@ -334,68 +616,58 @@ export function beginInkStroke(pointerEvent) {
     state.inkDraft.pageHeight = pdfAnchor.height;
     state.inkDraft.draftLayer = draftLayer;
     state.inkDraft.dirty = false;
+    redrawPdfDraftLayer();
     renderInkControls();
     return true;
   }
   const layer = inkLayerEl();
-  if (!(layer instanceof SVGSVGElement)) return false;
+  if (!(layer instanceof HTMLCanvasElement)) return false;
   syncInkLayerSize();
   const point = pointForViewportEvent(pointerEvent.clientX, pointerEvent.clientY);
   const stroke = {
     pointer_type: String(pointerEvent.pointerType || 'pen').trim().toLowerCase() || 'pen',
-    width: Math.max(1.5, Number(pointerEvent.pressure) > 0 ? 1.8 + Number(pointerEvent.pressure) * 2.8 : 2.4),
-    points: [{
-      x: point.x,
-      y: point.y,
-      pressure: Number(pointerEvent.pressure) || 0,
-    }],
+    width: strokeWidthForPressure(pointerEvent.pressure),
+    points: [createInkPoint(point.x, point.y, pointerEvent)],
+    predicted_points: [],
+    predicted_count: 0,
   };
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('stroke-width', stroke.width.toFixed(2));
-  appendInkPointToPath(path, stroke);
-  layer.appendChild(path);
   state.inkDraft.strokes.push(stroke);
   state.inkDraft.activePointerId = pointerEvent.pointerId;
   state.inkDraft.activePointerType = stroke.pointer_type;
-  state.inkDraft.activePath = path;
+  state.inkDraft.activePath = stroke;
   state.inkDraft.dirty = true;
+  redrawMainInkLayer();
+  updateDelegatedInkPresenter(pointerEvent);
   renderInkControls();
   return true;
 }
 
 export function extendInkStroke(pointerEvent) {
   if (state.inkDraft.activePointerId !== pointerEvent.pointerId) return false;
-  const stroke = state.inkDraft.strokes[state.inkDraft.strokes.length - 1];
-  const path = state.inkDraft.activePath;
-  if (!stroke || !(path instanceof SVGPathElement)) return false;
-  let point = pointForViewportEvent(pointerEvent.clientX, pointerEvent.clientY);
-  if (state.inkDraft.target === 'pdf' && state.inkDraft.pageInner instanceof HTMLElement) {
-    const bounds = state.inkDraft.pageInner.getBoundingClientRect();
-    point = {
-      x: clampPoint(pointerEvent.clientX - bounds.left, state.inkDraft.pageWidth),
-      y: clampPoint(pointerEvent.clientY - bounds.top, state.inkDraft.pageHeight),
-    };
-  }
-  stroke.points.push({
-    x: point.x,
-    y: point.y,
-    pressure: Number(pointerEvent.pressure) || 0,
-  });
-  appendInkPointToPath(path, stroke);
-  return true;
+  const stroke = activeInkStroke();
+  if (!stroke) return false;
+  const changed = appendPointerSamplesToStroke(stroke, pointerEvent);
+  renderActiveInkLayer();
+  updateDelegatedInkPresenter(pointerEvent);
+  return changed || (Number(stroke.predicted_count) || 0) > 0;
 }
 
 export function finalizeInkStroke(pointerEvent) {
   if (state.inkDraft.activePointerId !== pointerEvent.pointerId) return false;
   extendInkStroke(pointerEvent);
+  const stroke = activeInkStroke();
+  if (stroke) {
+    stroke.predicted_points = [];
+    stroke.predicted_count = 0;
+  }
+  renderActiveInkLayer();
   const livePayload = buildInkEventPayload();
   if (livePayload) {
     sendInkChatEvent(livePayload);
   }
   if (state.inkDraft.target === 'pdf') {
-    const stroke = state.inkDraft.strokes[state.inkDraft.strokes.length - 1];
     persistPdfInkAnnotation(state.inkDraft.page, state.inkDraft.pageWidth, state.inkDraft.pageHeight, stroke);
-    if (state.inkDraft.draftLayer instanceof SVGSVGElement) {
+    if (state.inkDraft.draftLayer instanceof HTMLElement) {
       state.inkDraft.draftLayer.remove();
     }
     state.inkDraft.strokes = [];
@@ -411,20 +683,22 @@ export function finalizeInkStroke(pointerEvent) {
 
 export function buildInkSVGMarkup() {
   const layer = inkLayerEl();
-  if (!(layer instanceof SVGSVGElement)) return '';
+  if (!(layer instanceof HTMLCanvasElement)) return '';
   syncInkLayerSize();
-  const viewBox = layer.getAttribute('viewBox') || '0 0 1 1';
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${layer.innerHTML}</svg>`;
+  const { width, height } = getCanvasLogicalSize(layer);
+  const paths = state.inkDraft.strokes.map((stroke) => {
+    const d = buildInkPathData(stroke?.points);
+    if (!d) return '';
+    return `<path fill="none" stroke="${INK_STROKE_COLOR}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" stroke-width="${Math.max(1.5, Number(stroke?.width) || 2.4).toFixed(2)}" d="${d}" />`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${paths}</svg>`;
 }
 
 export function buildInkPNGBase64() {
   syncInkLayerSize();
   const layer = inkLayerEl();
-  if (!(layer instanceof SVGSVGElement)) return '';
-  const viewBox = String(layer.getAttribute('viewBox') || '').trim();
-  const parts = viewBox.split(/\s+/).map((part) => Number(part));
-  const width = Math.max(1, Math.round(parts[2] || Number(layer.getAttribute('width')) || 1));
-  const height = Math.max(1, Math.round(parts[3] || Number(layer.getAttribute('height')) || 1));
+  if (!(layer instanceof HTMLCanvasElement)) return '';
+  const { width, height } = getCanvasLogicalSize(layer);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -434,7 +708,7 @@ export function buildInkPNGBase64() {
   ctx.fillRect(0, 0, width, height);
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  ctx.strokeStyle = '#111827';
+  ctx.strokeStyle = INK_STROKE_COLOR;
   for (const stroke of state.inkDraft.strokes) {
     const points = Array.isArray(stroke?.points) ? stroke.points : [];
     if (points.length === 0) continue;
@@ -468,10 +742,15 @@ export async function submitInkDraft() {
       strokes: state.inkDraft.strokes.map((stroke) => ({
         pointer_type: stroke.pointer_type,
         width: stroke.width,
+        predicted_count: Number(stroke?.predicted_count) || 0,
         points: stroke.points.map((point) => ({
           x: point.x,
           y: point.y,
           pressure: point.pressure,
+          tilt_x: point.tilt_x,
+          tilt_y: point.tilt_y,
+          roll: point.roll,
+          timestamp_ms: point.timestamp_ms,
         })),
       })),
       svg: buildInkSVGMarkup(),

@@ -1,6 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
 type HarnessLogEntry = { type: string; action?: string; text?: string; [key: string]: unknown };
+type PenPoint = {
+  x: number;
+  y: number;
+  pressure?: number;
+  tiltX?: number;
+  tiltY?: number;
+  twist?: number;
+  timeStamp?: number;
+};
 
 async function getLog(page: Page): Promise<HarnessLogEntry[]> {
   return page.evaluate(() => (window as any).__harnessLog.slice());
@@ -142,19 +151,28 @@ async function dispatchTouchSwipe(page: Page, startX: number, startY: number, en
   }, { startX, startY, endX, endY });
 }
 
-async function dispatchPenStroke(page: Page, points: Array<{ x: number; y: number; pressure?: number }>) {
+async function dispatchPenStroke(page: Page, points: PenPoint[]) {
   await page.evaluate((rawPoints) => {
     const viewport = document.getElementById('canvas-viewport');
     if (!(viewport instanceof HTMLElement) || !Array.isArray(rawPoints) || rawPoints.length === 0) return;
-    const mk = (type: string, point: any) => new PointerEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      pointerId: 41,
-      pointerType: 'pen',
-      pressure: Number(point.pressure ?? 0.6),
-      clientX: Number(point.x),
-      clientY: Number(point.y),
-    });
+    const mk = (type: string, point: any) => {
+      const ev = new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 41,
+        pointerType: 'pen',
+        pressure: Number(point.pressure ?? 0.6),
+        tiltX: Number(point.tiltX ?? 0),
+        tiltY: Number(point.tiltY ?? 0),
+        twist: Number(point.twist ?? 0),
+        clientX: Number(point.x),
+        clientY: Number(point.y),
+      });
+      if (Number.isFinite(Number(point.timeStamp))) {
+        Object.defineProperty(ev, 'timeStamp', { value: Number(point.timeStamp) });
+      }
+      return ev;
+    };
     viewport.dispatchEvent(mk('pointerdown', rawPoints[0]));
     for (let i = 1; i < rawPoints.length; i += 1) {
       viewport.dispatchEvent(mk('pointermove', rawPoints[i]));
@@ -252,6 +270,80 @@ test.describe('canvas - tabula rasa', () => {
     await expect(page.locator('#ink-controls')).toBeHidden();
   });
 
+  test('pen preview uses canvas rendering, raw updates, and coalesced samples', async ({ page }) => {
+    await setInteractionTool(page, 'ink');
+
+    const preview = await page.evaluate(() => {
+      const viewport = document.getElementById('canvas-viewport');
+      const layer = document.getElementById('ink-layer');
+      if (!(viewport instanceof HTMLElement) || !(layer instanceof HTMLCanvasElement)) {
+        throw new Error('missing ink layer');
+      }
+      const mk = (type: string, point: any) => {
+        const ev = new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId: 41,
+          pointerType: 'pen',
+          pressure: Number(point.pressure ?? 0.6),
+          tiltX: Number(point.tiltX ?? 0),
+          tiltY: Number(point.tiltY ?? 0),
+          twist: Number(point.twist ?? 0),
+          clientX: Number(point.x),
+          clientY: Number(point.y),
+        });
+        if (Number.isFinite(Number(point.timeStamp))) {
+          Object.defineProperty(ev, 'timeStamp', { value: Number(point.timeStamp) });
+        }
+        return ev;
+      };
+
+      viewport.dispatchEvent(mk('pointerdown', {
+        x: 220, y: 220, pressure: 0.45, tiltX: 10, tiltY: -6, twist: 12, timeStamp: 10,
+      }));
+
+      const coalesced = [
+        mk('pointermove', { x: 236, y: 232, pressure: 0.5, tiltX: 16, tiltY: -4, twist: 18, timeStamp: 18 }),
+        mk('pointermove', { x: 252, y: 244, pressure: 0.58, tiltX: 20, tiltY: -3, twist: 24, timeStamp: 26 }),
+      ];
+      const raw = mk('pointerrawupdate', {
+        x: 270, y: 258, pressure: 0.66, tiltX: 24, tiltY: -1, twist: 30, timeStamp: 34,
+      });
+      Object.defineProperty(raw, 'getCoalescedEvents', { value: () => coalesced });
+      viewport.dispatchEvent(raw);
+
+      const app = (window as any)._taburaApp;
+      const stroke = app?.getState?.().inkDraft?.strokes?.[0];
+      const predictedCount = Number(stroke?.predicted_count || 0);
+      const points = Array.isArray(stroke?.points) ? stroke.points : [];
+      const ctx = layer.getContext('2d');
+      const dpr = Math.max(1, Number(window.devicePixelRatio) || 1);
+      const sampleX = Math.max(0, Math.round(210 * dpr));
+      const sampleY = Math.max(0, Math.round(210 * dpr));
+      const sampleW = Math.max(1, Math.round(90 * dpr));
+      const sampleH = Math.max(1, Math.round(90 * dpr));
+      const pixels = ctx?.getImageData(sampleX, sampleY, sampleW, sampleH).data || [];
+      let paintedAlpha = 0;
+      for (let i = 3; i < pixels.length; i += 4) {
+        paintedAlpha += Number(pixels[i] || 0);
+      }
+      return {
+        layerTag: layer.tagName,
+        pointCount: points.length,
+        predictedCount,
+        lastPoint: points[points.length - 1] || null,
+        paintedAlpha,
+      };
+    });
+
+    expect(preview.layerTag).toBe('CANVAS');
+    expect(preview.pointCount).toBeGreaterThanOrEqual(4);
+    expect(preview.predictedCount).toBeGreaterThan(0);
+    expect(Number(preview.lastPoint?.tilt_x || 0)).toBe(24);
+    expect(Number(preview.lastPoint?.roll || 0)).toBe(30);
+    expect(Number(preview.paintedAlpha || 0)).toBeGreaterThan(0);
+  });
+
   test('right-click opens text input at position', async ({ page }) => {
     await page.mouse.click(300, 300, { button: 'right' });
     await page.waitForTimeout(100);
@@ -276,9 +368,9 @@ test.describe('canvas - tabula rasa', () => {
     await setInteractionTool(page, 'ink');
 
     await dispatchPenStroke(page, [
-      { x: 220, y: 220, pressure: 0.55 },
-      { x: 260, y: 250, pressure: 0.7 },
-      { x: 300, y: 280, pressure: 0.65 },
+      { x: 220, y: 220, pressure: 0.55, tiltX: 12, tiltY: -4, twist: 18 },
+      { x: 260, y: 250, pressure: 0.7, tiltX: 18, tiltY: -2, twist: 24 },
+      { x: 300, y: 280, pressure: 0.65, tiltX: 24, tiltY: 1, twist: 30 },
     ]);
     await page.waitForTimeout(100);
 
@@ -295,8 +387,12 @@ test.describe('canvas - tabula rasa', () => {
       const hit = log.find((entry: any) => entry.type === 'api_fetch' && entry.action === 'ink_submit');
       return hit?.payload || null;
     });
+    expect(await page.locator('#ink-layer').evaluate((node) => node.tagName)).toBe('CANVAS');
     expect(typeof payload?.png_base64).toBe('string');
     expect(String(payload?.png_base64 || '').length).toBeGreaterThan(20);
+    expect(Number(payload?.strokes?.[0]?.points?.[0]?.tilt_x || 0)).toBe(12);
+    expect(Number(payload?.strokes?.[0]?.points?.[0]?.roll || 0)).toBe(18);
+    expect(Number.isFinite(Number(payload?.strokes?.[0]?.points?.[0]?.timestamp_ms))).toBe(true);
 
     const canvasImage = page.locator('#canvas-image');
     await expect(canvasImage).toHaveClass(/is-active/);

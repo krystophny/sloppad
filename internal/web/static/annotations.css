@@ -83,16 +83,11 @@
 .canvas-ink-draft-layer {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
   pointer-events: none;
   z-index: 2;
-}
-
-.canvas-ink-draft-layer path {
-  stroke: #0f172a;
-  fill: none;
-  opacity: 0.82;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .annotation-bubble {
