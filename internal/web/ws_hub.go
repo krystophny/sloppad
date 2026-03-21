@@ -73,6 +73,12 @@ func (h *wsHub) chatClients(sessionID string) []*chatWSConn {
 	return clients
 }
 
+func (h *wsHub) hasChatClients(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.chatWS[sessionID]) > 0
+}
+
 func (h *wsHub) forEachChatConn(fn func(*chatWSConn)) {
 	h.mu.Lock()
 	all := make([]*chatWSConn, 0)

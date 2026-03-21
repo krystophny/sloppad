@@ -58,6 +58,7 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/scan/upload", a.handleScanUpload)
 	r.Post("/api/scan/confirm", a.handleScanConfirm)
 	r.Post("/api/bugs/report", a.handleBugReportCreate)
+	r.Post("/api/push/register", a.handlePushRegister)
 	r.Get("/api/mail/accounts", a.handleMailAccountList)
 	r.Post("/api/mail/drafts", a.handleMailDraftCreate)
 	r.Post("/api/mail/drafts/reply", a.handleMailDraftReply)

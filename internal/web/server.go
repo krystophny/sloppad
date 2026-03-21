@@ -120,10 +120,13 @@ type App struct {
 	dictationSessions       *dictationSessionTracker
 	workspaceWatches        *workspaceWatchTracker
 	reviewDispatches        *reviewDispatchTracker
-	workspaceAttention        *workspaceAttentionTracker
+	workspaceAttention      *workspaceAttentionTracker
 	emailRefreshes          *emailRefreshQueue
 	mailBackoffs            *mailBackoffTracker
 	tunnels                 *tunnelRegistry
+	pushService             *pushService
+	mdnsAdvertiserFactory   func(string, int, []string) (mdnsAdvertiser, error)
+	mdnsAdvertiser          mdnsAdvertiser
 	chatAppSessions         map[string]*appserver.Session
 	pendingConfirmations    map[string]*pendingActionConfirmation
 	pendingApprovals        map[string]map[string]*pendingAppServerApproval
@@ -314,10 +317,12 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		dictationSessions:       newDictationSessionTracker(),
 		workspaceWatches:        newWorkspaceWatchTracker(),
 		reviewDispatches:        newReviewDispatchTracker(),
-		workspaceAttention:        newProjectAttentionTracker(),
+		workspaceAttention:      newProjectAttentionTracker(),
 		emailRefreshes:          newEmailRefreshQueue(),
 		mailBackoffs:            newMailBackoffTracker(),
 		tunnels:                 newTunnelRegistry(),
+		pushService:             newPushService(s),
+		mdnsAdvertiserFactory:   defaultMDNSAdvertiserFactory,
 		chatAppSessions:         map[string]*appserver.Session{},
 		pendingConfirmations:    map[string]*pendingActionConfirmation{},
 		pendingApprovals:        map[string]map[string]*pendingAppServerApproval{},
@@ -356,6 +361,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	app.startItemResurfacer()
 	app.startSourcePush()
 	app.startSourcePoller()
+	app.startPushScheduler()
 	app.resumeWorkspaceWatches()
 	return app, nil
 }
@@ -787,6 +793,10 @@ func (a *App) start(host string, port int, certFile, keyFile string) error {
 	if err := a.startLocalServe(); err != nil {
 		return err
 	}
+	if err := a.startMDNSAdvertisement(host, port); err != nil {
+		log.Printf("mdns advertisement disabled: %v", err)
+	}
+	defer a.stopMDNSAdvertisement()
 	srv := &http.Server{Addr: fmt.Sprintf("%s:%d", host, port), Handler: a.Router(), ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	scheme := "http"
 	if certFile != "" && keyFile != "" {
@@ -820,6 +830,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.shutdownCancel != nil {
 		a.shutdownCancel()
 	}
+	a.stopMDNSAdvertisement()
 	a.turns.cancelAll()
 	a.hub.closeAllChat()
 	waitErr := a.waitForAssistantWorkers(ctx)

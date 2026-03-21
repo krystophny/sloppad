@@ -199,6 +199,18 @@ CREATE INDEX IF NOT EXISTS idx_mail_action_logs_account_created
   ON mail_action_logs(account_id, datetime(created_at) DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_mail_action_logs_message
   ON mail_action_logs(account_id, message_id);
+CREATE TABLE IF NOT EXISTS push_registrations (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL DEFAULT '',
+  workspace_id INTEGER NOT NULL DEFAULT 0,
+  platform TEXT NOT NULL CHECK (platform IN ('apns', 'fcm')),
+  device_token TEXT NOT NULL,
+  device_label TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_push_registrations_identity
+  ON push_registrations(platform, device_token, session_id, workspace_id);
 `
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

@@ -750,6 +750,7 @@ func (a *App) finalizeAssistantResponseWithMetadata(
 	}
 	a.finishCompanionPendingTurn(sessionID, "assistant_turn_completed")
 	a.broadcastChatEvent(sessionID, payload)
+	a.maybeNotifyCompletedTurn(sessionID, workspacePath, chatPlain)
 	if strings.TrimSpace(positionPrompt) != "" {
 		a.broadcastChatEvent(sessionID, map[string]interface{}{
 			"type":        "request_position",

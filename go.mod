@@ -15,6 +15,7 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/Azure/go-ntlmssp v0.1.0 // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-imap/v2 v2.0.0-beta.7 // indirect
 	github.com/emersion/go-message v0.18.2 // indirect
@@ -27,7 +28,9 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.9 // indirect
 	github.com/googleapis/gax-go/v2 v2.16.0 // indirect
+	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/miekg/dns v1.1.27 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/richardlehane/mscfb v1.0.4 // indirect
