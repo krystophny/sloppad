@@ -9,6 +9,21 @@ type Recording struct {
 	DurationMS int    `json:"duration_ms"`
 }
 
+type Feedback struct {
+	ID          string `json:"id"`
+	RecordingID string `json:"recording_id"`
+	Outcome     string `json:"outcome"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type FeedbackSummary struct {
+	Total          int    `json:"total"`
+	MissedTriggers int    `json:"missed_triggers"`
+	FalseTriggers  int    `json:"false_triggers"`
+	LatestOutcome  string `json:"latest_outcome,omitempty"`
+	LatestAt       string `json:"latest_at,omitempty"`
+}
+
 type Model struct {
 	Name       string `json:"name"`
 	FileName   string `json:"file_name"`

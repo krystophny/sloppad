@@ -21,6 +21,7 @@ func TestHotwordStatusReportsMissingAssets(t *testing.T) {
 	app := newAuthedTestApp(t)
 	root := t.TempDir()
 	app.localProjectDir = root
+	app.hotwordTrainer = app.hotwordTrainerForTest(root)
 
 	rr := doAuthedJSONRequest(t, app.Router(), "GET", "/api/hotword/status", nil)
 	if rr.Code != 200 {
@@ -41,11 +42,21 @@ func TestHotwordStatusReportsMissingAssets(t *testing.T) {
 	if modelRaw["file"] != hotwordModelFileName {
 		t.Fatalf("model file = %#v, want %q", modelRaw["file"], hotwordModelFileName)
 	}
+	if revision, _ := modelRaw["revision"].(string); revision != "" {
+		t.Fatalf("expected empty model revision, got %#v", modelRaw["revision"])
+	}
 	if exists, _ := modelRaw["exists"].(bool); exists {
 		t.Fatalf("expected model exists=false, got %#v", modelRaw["exists"])
 	}
 	if training, _ := payload["training_in_progress"].(bool); training {
 		t.Fatalf("expected training_in_progress=false, got %#v", payload["training_in_progress"])
+	}
+	summary, ok := payload["feedback_summary"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected feedback_summary, got %#v", payload["feedback_summary"])
+	}
+	if total, _ := summary["total"].(float64); total != 0 {
+		t.Fatalf("feedback summary total = %#v, want 0", summary["total"])
 	}
 }
 
@@ -93,5 +104,8 @@ func TestHotwordStatusReportsReadyWhenAllAssetsPresent(t *testing.T) {
 	}
 	if modified, _ := modelRaw["modified_at"].(string); modified != modifiedAt.Format(time.RFC3339) {
 		t.Fatalf("model modified_at = %#v, want %q", modelRaw["modified_at"], modifiedAt.Format(time.RFC3339))
+	}
+	if revision, _ := modelRaw["revision"].(string); revision == "" {
+		t.Fatalf("model revision missing: %#v", modelRaw)
 	}
 }

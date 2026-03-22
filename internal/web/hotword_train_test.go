@@ -81,6 +81,49 @@ func TestHotwordTrainRecordingCRUDAndAudio(t *testing.T) {
 	}
 }
 
+func TestHotwordTrainFeedbackCapture(t *testing.T) {
+	app := newAuthedTestApp(t)
+	root := t.TempDir()
+	app.localProjectDir = root
+	app.hotwordTrainer = app.hotwordTrainerForTest(root)
+
+	upload := uploadHotwordRecording(t, app, "test")
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, want 201 body=%s", upload.Code, upload.Body.String())
+	}
+	recording := decodeJSONResponse(t, upload)["recording"].(map[string]any)
+	recordingID := strFromAny(recording["id"])
+
+	feedbackRR := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/hotword/train/feedback", map[string]any{
+		"recording_id": recordingID,
+		"outcome":      "missed_trigger",
+	})
+	if feedbackRR.Code != http.StatusCreated {
+		t.Fatalf("feedback status = %d, want 201 body=%s", feedbackRR.Code, feedbackRR.Body.String())
+	}
+	feedbackPayload := decodeJSONResponse(t, feedbackRR)
+	if summary := feedbackPayload["summary"].(map[string]any); int(summary["missed_triggers"].(float64)) != 1 {
+		t.Fatalf("summary = %#v, want one missed trigger", summary)
+	}
+
+	listRR := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/hotword/train/feedback", nil)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("feedback list status = %d, want 200 body=%s", listRR.Code, listRR.Body.String())
+	}
+	listPayload := decodeJSONResponse(t, listRR)
+	feedbackEntries := listPayload["feedback"].([]any)
+	if len(feedbackEntries) != 1 {
+		t.Fatalf("feedback list = %#v, want one entry", listPayload)
+	}
+	entry := feedbackEntries[0].(map[string]any)
+	if strFromAny(entry["recording_id"]) != recordingID {
+		t.Fatalf("feedback recording_id = %q, want %q", strFromAny(entry["recording_id"]), recordingID)
+	}
+	if strFromAny(entry["outcome"]) != "missed_trigger" {
+		t.Fatalf("feedback outcome = %q, want missed_trigger", strFromAny(entry["outcome"]))
+	}
+}
+
 func TestHotwordTrainJobsStreamStatusAndDeploy(t *testing.T) {
 	app := newAuthedTestApp(t)
 	root := t.TempDir()
@@ -164,6 +207,18 @@ echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy.onnx"
 	})
 	if deployRR.Code != http.StatusOK {
 		t.Fatalf("deploy status = %d, want 200 body=%s", deployRR.Code, deployRR.Body.String())
+	}
+	deployPayload := decodeJSONResponse(t, deployRR)
+	hotwordStatus, ok := deployPayload["hotword_status"].(map[string]any)
+	if !ok {
+		t.Fatalf("deploy payload missing hotword_status: %#v", deployPayload)
+	}
+	modelPayload, ok := hotwordStatus["model"].(map[string]any)
+	if !ok {
+		t.Fatalf("deploy hotword_status missing model: %#v", hotwordStatus)
+	}
+	if strFromAny(modelPayload["revision"]) == "" {
+		t.Fatalf("deploy hotword revision missing from payload: %#v", modelPayload)
 	}
 	vendorPath := filepath.Join(root, "internal", "web", "static", "vendor", "openwakeword", "sloppy.onnx")
 	data, err := os.ReadFile(vendorPath)

@@ -21,6 +21,11 @@ type hotwordTrainDeployRequest struct {
 	Model string `json:"model"`
 }
 
+type hotwordTrainFeedbackRequest struct {
+	RecordingID string `json:"recording_id"`
+	Outcome     string `json:"outcome"`
+}
+
 func (a *App) serveHotwordTrain(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -173,6 +178,52 @@ func (a *App) handleHotwordTrainStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *App) handleHotwordTrainFeedbackList(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	feedback, err := a.hotwordTrainer.ListFeedback()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":       true,
+		"feedback": feedbackPayloads(feedback),
+		"summary":  hotwordtrain.SummarizeFeedback(feedback),
+	})
+}
+
+func (a *App) handleHotwordTrainFeedbackCreate(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var req hotwordTrainFeedbackRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	feedback, err := a.hotwordTrainer.SaveFeedback(req.RecordingID, req.Outcome)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeAPIError(w, http.StatusNotFound, "recording not found")
+			return
+		}
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	feedbackEntries, listErr := a.hotwordTrainer.ListFeedback()
+	if listErr != nil {
+		writeAPIError(w, http.StatusInternalServerError, listErr.Error())
+		return
+	}
+	writeJSONStatus(w, http.StatusCreated, map[string]any{
+		"ok":       true,
+		"feedback": feedbackPayload(feedback),
+		"summary":  hotwordtrain.SummarizeFeedback(feedbackEntries),
+	})
+}
+
 func (a *App) handleHotwordTrainStatus(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -214,8 +265,9 @@ func (a *App) handleHotwordTrainDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{
-		"ok":    true,
-		"model": model,
+		"ok":             true,
+		"model":          model,
+		"hotword_status": checkHotwordStatus(a.hotwordProjectRoot()),
 	})
 }
 
@@ -269,5 +321,22 @@ func recordingPayload(recording hotwordtrain.Recording) map[string]any {
 		"size_bytes":  recording.SizeBytes,
 		"duration_ms": recording.DurationMS,
 		"audio_url":   "./api/hotword/train/recordings/" + url.PathEscape(recording.ID) + "/audio",
+	}
+}
+
+func feedbackPayloads(feedback []hotwordtrain.Feedback) []map[string]any {
+	out := make([]map[string]any, 0, len(feedback))
+	for _, entry := range feedback {
+		out = append(out, feedbackPayload(entry))
+	}
+	return out
+}
+
+func feedbackPayload(entry hotwordtrain.Feedback) map[string]any {
+	return map[string]any{
+		"id":           entry.ID,
+		"recording_id": entry.RecordingID,
+		"outcome":      entry.Outcome,
+		"created_at":   entry.CreatedAt,
 	}
 }

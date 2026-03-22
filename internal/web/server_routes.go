@@ -176,6 +176,8 @@ func (a *App) Router() http.Handler {
 	r.Get("/api/hotword/train/generate/status", a.handleHotwordTrainGenerateStatus)
 	r.Post("/api/hotword/train/start", a.handleHotwordTrainStart)
 	r.Get("/api/hotword/train/status", a.handleHotwordTrainStatus)
+	r.Get("/api/hotword/train/feedback", a.handleHotwordTrainFeedbackList)
+	r.Post("/api/hotword/train/feedback", a.handleHotwordTrainFeedbackCreate)
 	r.Post("/api/hotword/train/deploy", a.handleHotwordTrainDeploy)
 	r.Get("/api/hotword/train/models", a.handleHotwordTrainModels)
 	r.Post("/api/stt/transcribe", a.handleSTTTranscribe)

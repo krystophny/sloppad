@@ -24,6 +24,12 @@ type evernoteSyncResult struct {
 	TaskCount int
 }
 
+type evernoteSyncCall struct {
+	done   chan struct{}
+	result evernoteSyncResult
+	err    error
+}
+
 func parseInlineEvernoteIntent(text string) *SystemAction {
 	if normalizeItemCommandText(text) != "sync evernote" {
 		return nil
@@ -422,6 +428,20 @@ func (a *App) executeEvernoteAction(_ store.ChatSession, action *SystemAction) (
 }
 
 func (a *App) syncEvernoteAccount(ctx context.Context, account store.ExternalAccount) (evernoteSyncResult, error) {
+	if call, leader := a.beginEvernoteSync(account.ID); !leader {
+		select {
+		case <-ctx.Done():
+			return evernoteSyncResult{}, ctx.Err()
+		case <-call.done:
+			return call.result, call.err
+		}
+	}
+	result, err := a.syncEvernoteAccountNow(ctx, account)
+	a.finishEvernoteSync(account.ID, result, err)
+	return result, err
+}
+
+func (a *App) syncEvernoteAccountNow(ctx context.Context, account store.ExternalAccount) (evernoteSyncResult, error) {
 	mappings, err := a.store.ListContainerMappings(store.ExternalProviderEvernote)
 	if err != nil {
 		return evernoteSyncResult{}, err
@@ -460,4 +480,28 @@ func (a *App) syncEvernoteAccount(ctx context.Context, account store.ExternalAcc
 		result.TaskCount += synced.TaskCount
 	}
 	return result, nil
+}
+
+func (a *App) beginEvernoteSync(accountID int64) (*evernoteSyncCall, bool) {
+	a.evernoteSyncMu.Lock()
+	defer a.evernoteSyncMu.Unlock()
+	if existing := a.evernoteSyncs[accountID]; existing != nil {
+		return existing, false
+	}
+	call := &evernoteSyncCall{done: make(chan struct{})}
+	a.evernoteSyncs[accountID] = call
+	return call, true
+}
+
+func (a *App) finishEvernoteSync(accountID int64, result evernoteSyncResult, err error) {
+	a.evernoteSyncMu.Lock()
+	call := a.evernoteSyncs[accountID]
+	delete(a.evernoteSyncs, accountID)
+	a.evernoteSyncMu.Unlock()
+	if call == nil {
+		return
+	}
+	call.result = result
+	call.err = err
+	close(call.done)
 }

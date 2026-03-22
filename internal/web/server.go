@@ -111,6 +111,7 @@ type App struct {
 	mu                      sync.Mutex
 	confirmMu               sync.Mutex
 	approvalMu              sync.Mutex
+	evernoteSyncMu          sync.Mutex
 	workerWG                sync.WaitGroup
 	hub                     *wsHub
 	turns                   *chatTurnTracker
@@ -134,6 +135,7 @@ type App struct {
 	chatAppSessions         map[string]*appserver.Session
 	pendingConfirmations    map[string]*pendingActionConfirmation
 	pendingApprovals        map[string]map[string]*pendingAppServerApproval
+	evernoteSyncs           map[int64]*evernoteSyncCall
 	ghCommandRunner         ghCommandRunner
 	workspaceWatchProcessor workspaceWatchProcessorFunc
 	reviewEmailSender       reviewDispatchEmailSender
@@ -349,6 +351,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		chatAppSessions:         map[string]*appserver.Session{},
 		pendingConfirmations:    map[string]*pendingActionConfirmation{},
 		pendingApprovals:        map[string]map[string]*pendingAppServerApproval{},
+		evernoteSyncs:           map[int64]*evernoteSyncCall{},
 		ghCommandRunner:         runGitHubCLI,
 		workspaceWatchProcessor: nil,
 		reviewEmailSender:       sendReviewDispatchEmail,

@@ -32,7 +32,7 @@ function wavBuffer() {
   return Buffer.from(buffer);
 }
 
-test('hotword training page uploads recordings and runs the core workflow', async ({ page }) => {
+test('hotword training page captures retry feedback and deploys a live revision', async ({ page }) => {
   await page.goto('/tests/playwright/hotword-train-harness.html');
 
   await expect(page.locator('#train-banner')).toContainText('Wake word assets are not fully deployed yet');
@@ -50,15 +50,25 @@ test('hotword training page uploads recordings and runs the core workflow', asyn
   await expect(page.locator('#training-status')).toContainText('Training complete.');
   await expect(page.locator('#model-list')).toContainText('sloppy.onnx');
 
+  await page.setInputFiles('#testing-upload', {
+    name: 'retry.wav',
+    mimeType: 'audio/wav',
+    buffer: wavBuffer(),
+  });
+  await expect(page.locator('#testing-list')).toContainText('This should have triggered');
+  await page.getByRole('button', { name: 'This should have triggered' }).click();
+  await expect(page.locator('#feedback-status')).toContainText('1 missed-trigger clip');
+
   await page.getByRole('button', { name: 'Deploy' }).click();
-  await expect(page.locator('#deployment-status')).toContainText('Deployed sloppy.onnx.');
+  await expect(page.locator('#deployment-status')).toContainText('Connected clients will reload revision');
 
   const requests = await page.evaluate(() => (window as any).__hotwordTrainRequests);
   expect(requests).toEqual({
-    uploads: 1,
+    uploads: 2,
     deletes: 0,
     generate: 1,
     train: 1,
+    feedback: 1,
     deploy: 1,
   });
 });

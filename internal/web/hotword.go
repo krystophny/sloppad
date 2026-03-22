@@ -1,11 +1,14 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/krystophny/tabura/internal/hotwordtrain"
 )
 
 const (
@@ -57,13 +60,16 @@ func checkHotwordStatus(root string) map[string]interface{} {
 	ready := len(missing) == 0
 	modelPath := hotwordVendorModelPath(root)
 	model := map[string]interface{}{
-		"exists": false,
-		"file":   hotwordModelFileName,
+		"exists":   false,
+		"file":     hotwordModelFileName,
+		"revision": "",
 	}
 	if info, err := os.Stat(modelPath); err == nil && !info.IsDir() {
+		modifiedAt := info.ModTime().UTC().Format(time.RFC3339)
 		model["exists"] = true
-		model["modified_at"] = info.ModTime().UTC().Format(time.RFC3339)
+		model["modified_at"] = modifiedAt
 		model["size_bytes"] = info.Size()
+		model["revision"] = fmt.Sprintf("%s:%d", modifiedAt, info.Size())
 	}
 	return map[string]interface{}{
 		"ok":                   true,
@@ -84,6 +90,10 @@ func (a *App) handleHotwordStatus(w http.ResponseWriter, r *http.Request) {
 		training := a.hotwordTrainer.TrainingStatus()
 		status["training_in_progress"] = training.State == "running"
 		status["training_status"] = training
+		feedback, err := a.hotwordTrainer.ListFeedback()
+		if err == nil {
+			status["feedback_summary"] = hotwordtrain.SummarizeFeedback(feedback)
+		}
 	}
 	writeJSON(w, status)
 }

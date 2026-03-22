@@ -52,6 +52,7 @@ func (m *Manager) runGeneration(ctx context.Context, models []string, sampleCoun
 		cmd.Env = append(os.Environ(),
 			"TABURA_HOTWORD_RECORDINGS_DIR="+m.recordingsDir(),
 			"TABURA_HOTWORD_OUTPUT_DIR="+outputDir,
+			"TABURA_HOTWORD_FEEDBACK_DIR="+m.feedbackDir(),
 			"TABURA_HOTWORD_SAMPLE_COUNT="+strconv.Itoa(sampleCount),
 			"TABURA_HOTWORD_MODEL_ID="+model,
 		)
@@ -155,7 +156,11 @@ func (m *Manager) runTraining(ctx context.Context, req TrainRequest) {
 	scriptPath := m.trainingScriptPath()
 	lastLine := ""
 	cmd := exec.CommandContext(ctx, scriptPath)
-	cmd.Env = append(os.Environ(), "TABURA_HOTWORD_OUTPUT_DIR="+outputDir)
+	cmd.Env = append(os.Environ(),
+		"TABURA_HOTWORD_OUTPUT_DIR="+outputDir,
+		"TABURA_HOTWORD_RECORDINGS_DIR="+m.recordingsDir(),
+		"TABURA_HOTWORD_FEEDBACK_DIR="+m.feedbackDir(),
+	)
 	if req.ConfigPath != "" {
 		cmd.Env = append(cmd.Env, "TABURA_HOTWORD_CONFIG="+req.ConfigPath)
 	}

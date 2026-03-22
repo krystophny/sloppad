@@ -93,7 +93,26 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">4. Deployment</p>
+            <p class="train-step">4. Testing</p>
+            <h2>Capture misses and false triggers</h2>
+          </div>
+          <span id="testing-badge" class="train-badge">idle</span>
+        </div>
+        <div class="train-actions">
+          <label class="train-upload">
+            <input id="testing-upload" type="file" accept="audio/wav">
+            <span>Upload test WAV</span>
+          </label>
+        </div>
+        <p id="testing-status" class="train-status"></p>
+        <p id="feedback-status" class="train-status"></p>
+        <ul id="testing-list" class="train-list"></ul>
+      </article>
+
+      <article class="train-card">
+        <div class="train-card-head">
+          <div>
+            <p class="train-step">5. Deployment</p>
             <h2>Promote a trained model</h2>
           </div>
           <span id="deployment-badge" class="train-badge">ready</span>
@@ -109,10 +128,11 @@
       const state = {
         recordings: [],
         models: [],
+        feedback: [],
         generationStatus: { state: 'idle', stage: 'idle', message: 'Idle.', models: [] },
         trainingStatus: { state: 'idle', stage: 'idle', message: 'Idle.' },
       };
-      const requests = { uploads: 0, deletes: 0, generate: 0, train: 0, deploy: 0 };
+      const requests = { uploads: 0, deletes: 0, generate: 0, train: 0, feedback: 0, deploy: 0 };
       const streams = { generation: new Set(), training: new Set() };
       let nextId = 1;
 
@@ -218,13 +238,38 @@
           notify('training');
           return jsonResponse({ ok: true, status: state.trainingStatus }, 202);
         }
+        if (url.endsWith('/api/hotword/train/feedback') && method === 'GET') {
+          const summary = summarizeFeedback(state.feedback);
+          return jsonResponse({ ok: true, feedback: state.feedback, summary });
+        }
+        if (url.endsWith('/api/hotword/train/feedback') && method === 'POST') {
+          requests.feedback += 1;
+          const body = JSON.parse(String(init.body || '{}'));
+          const feedback = {
+            id: String(nextId++),
+            recording_id: String(body.recording_id || ''),
+            outcome: String(body.outcome || ''),
+            created_at: '2026-03-22T10:03:00Z',
+          };
+          state.feedback = [feedback, ...state.feedback];
+          const summary = summarizeFeedback(state.feedback);
+          return jsonResponse({ ok: true, feedback, summary }, 201);
+        }
         if (url.endsWith('/api/hotword/train/models')) {
           return jsonResponse({ ok: true, models: state.models });
         }
         if (url.endsWith('/api/hotword/train/deploy') && method === 'POST') {
           requests.deploy += 1;
           state.models = state.models.map((model) => ({ ...model, production: true }));
-          return jsonResponse({ ok: true, model: state.models[0] || null });
+          return jsonResponse({
+            ok: true,
+            model: state.models[0] || null,
+            hotword_status: {
+              ok: true,
+              ready: true,
+              model: { file: 'sloppy.onnx', exists: true, revision: '2026-03-22T10:05:00Z:13' },
+            },
+          });
         }
         throw new Error(`Unhandled fetch: ${method} ${url}`);
       };
@@ -235,9 +280,17 @@
           headers: { 'Content-Type': 'application/json' },
         }));
       }
+
+      function summarizeFeedback(entries) {
+        const summary = { total: entries.length, missed_triggers: 0, false_triggers: 0 };
+        for (const entry of entries) {
+          if (entry.outcome === 'missed_trigger') summary.missed_triggers += 1;
+          if (entry.outcome === 'false_trigger') summary.false_triggers += 1;
+        }
+        return summary;
+      }
     })();
   </script>
   <script type="module" src="/internal/web/static/hotword-train.js"></script>
 </body>
 </html>
-

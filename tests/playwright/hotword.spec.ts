@@ -125,6 +125,45 @@ test('hotword runtime uses sloppy model defaults', async ({ page }) => {
   expect(config.detectionCooldownMs).toBe(800);
 });
 
+test('deployed hotword revision is reloaded without restarting the client', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).__taburaHotwordStatusPollMs = 50;
+  });
+  await waitReady(page);
+  await page.evaluate(() => {
+    (window as any).__setHotwordStatus({
+      ready: true,
+      model: {
+        file: 'sloppy.onnx',
+        exists: true,
+        revision: 'rev-1',
+      },
+    });
+  });
+  await setMeetingMode(page);
+  await waitForHotwordStart(page);
+  await clearLog(page);
+
+  await page.evaluate(() => {
+    (window as any).__setHotwordStatus({
+      ready: true,
+      model: {
+        file: 'sloppy.onnx',
+        exists: true,
+        revision: 'rev-2',
+      },
+    });
+  });
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    const initCount = log.filter((entry) => entry.type === 'hotword' && entry.action === 'init').length;
+    const startCount = log.filter((entry) => entry.type === 'hotword' && entry.action === 'start').length;
+    const stopCount = log.filter((entry) => entry.type === 'hotword' && entry.action === 'stop').length;
+    return { initCount, startCount, stopCount };
+  }, { timeout: 5_000 }).toEqual({ initCount: 1, startCount: 1, stopCount: 1 });
+});
+
 test('hotword ring buffer retains four seconds of pre-roll audio', async ({ page }) => {
   await waitReady(page);
 

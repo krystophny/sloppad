@@ -95,12 +95,32 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">4. Deployment</p>
+            <p class="train-step">4. Testing</p>
+            <h2>Capture misses and false triggers</h2>
+          </div>
+          <span id="testing-badge" class="train-badge">idle</span>
+        </div>
+        <p class="train-copy">Upload dedicated retry clips here, or use Step 1 with "Test retry clip" selected. Mark each clip when the current model misses it or triggers when it should stay quiet.</p>
+        <div class="train-actions">
+          <label class="train-upload">
+            <input id="testing-upload" type="file" accept="audio/wav">
+            <span>Upload test WAV</span>
+          </label>
+        </div>
+        <p id="testing-status" class="train-status" role="status" aria-live="polite"></p>
+        <p id="feedback-status" class="train-status" role="status" aria-live="polite"></p>
+        <ul id="testing-list" class="train-list"></ul>
+      </article>
+
+      <article class="train-card">
+        <div class="train-card-head">
+          <div>
+            <p class="train-step">5. Deployment</p>
             <h2>Promote a trained model</h2>
           </div>
           <span id="deployment-badge" class="train-badge">ready</span>
         </div>
-        <p class="train-copy">Deployment copies the selected model into the browser hotword vendor path and keeps the previous production model as `sloppy.onnx.bak`.</p>
+        <p class="train-copy">Deployment copies the selected model into the browser hotword vendor path, keeps the previous production model as `sloppy.onnx.bak`, and exposes a new revision token so connected clients can reload it without a manual restart.</p>
         <p id="deployment-status" class="train-status" role="status" aria-live="polite"></p>
         <ul id="model-list" class="train-list"></ul>
       </article>

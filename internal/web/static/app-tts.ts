@@ -292,7 +292,11 @@ let hotwordResyncQueued = false;
 let hotwordInitAttempted = false;
 let hotwordUnsubscribe = null;
 let hotwordRetryTimer = null;
+let hotwordStatusPollTimer = null;
+let hotwordStatusPollInFlight = false;
+let hotwordModelRevision = '';
 const HOTWORD_RETRY_MS = 800;
+const HOTWORD_STATUS_POLL_MS = 5000;
 export function readTTSSilentPreference() {
   try {
     const value = window.localStorage.getItem(TTS_SILENT_STORAGE_KEY);
@@ -408,6 +412,49 @@ export function clearHotwordRetry() {
   }
 }
 
+function hotwordStatusPollDelayMs() {
+  const override = Number((window as any).__taburaHotwordStatusPollMs);
+  if (Number.isFinite(override) && override >= 0) {
+    return Math.floor(override);
+  }
+  return HOTWORD_STATUS_POLL_MS;
+}
+
+function scheduleHotwordStatusPoll(delayMs = hotwordStatusPollDelayMs()) {
+  if (hotwordStatusPollTimer !== null) {
+    window.clearTimeout(hotwordStatusPollTimer);
+  }
+  hotwordStatusPollTimer = window.setTimeout(() => {
+    hotwordStatusPollTimer = null;
+    void pollHotwordStatus();
+  }, Math.max(0, delayMs));
+}
+
+async function pollHotwordStatus() {
+  if (hotwordStatusPollInFlight) return;
+  hotwordStatusPollInFlight = true;
+  try {
+    const resp = await fetch(apiURL('hotword/status'), { cache: 'no-store' });
+    if (!resp.ok) return;
+    const payload = await resp.json();
+    const ready = Boolean(payload?.ready);
+    const revision = String(payload?.model?.revision || '').trim();
+    const revisionChanged = revision !== hotwordModelRevision;
+    if (revisionChanged && ready && state.liveSessionActive) {
+      hotwordModelRevision = revision;
+      await initHotwordLifecycleWithOptions({ force: true });
+      return;
+    }
+    if (revision) {
+      hotwordModelRevision = revision;
+    }
+  } catch (_) {
+  } finally {
+    hotwordStatusPollInFlight = false;
+    scheduleHotwordStatusPoll();
+  }
+}
+
 export function scheduleHotwordRetry() {
   if (hotwordRetryTimer !== null) return;
   hotwordRetryTimer = window.setTimeout(() => {
@@ -517,6 +564,7 @@ export async function initHotwordLifecycleWithOptions(options: Record<string, an
     state.hotwordEnabled = false;
     console.warn('Hotword initialization error:', err);
   }
+  scheduleHotwordStatusPoll(force ? 0 : hotwordStatusPollDelayMs());
   requestHotwordSync();
   return state.hotwordEnabled;
 }

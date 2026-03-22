@@ -22,6 +22,21 @@ type StatusPayload = {
   models?: Array<{ name: string; state: string; message?: string; count?: number; target?: number; output_dir?: string }>;
 };
 
+type Feedback = {
+  id: string;
+  recording_id: string;
+  outcome: string;
+  created_at: string;
+};
+
+type FeedbackSummary = {
+  total: number;
+  missed_triggers: number;
+  false_triggers: number;
+  latest_outcome?: string;
+  latest_at?: string;
+};
+
 type Model = {
   name: string;
   file_name: string;
@@ -40,6 +55,8 @@ const state = {
   stream: null as MediaStream | null,
   sampleRate: 16000,
   chunks: [] as Float32Array[],
+  recordings: [] as Recording[],
+  feedback: [] as Feedback[],
 };
 
 function byId<T extends HTMLElement>(id: string) {
@@ -65,6 +82,11 @@ const generationStartEl = byId<HTMLButtonElement>('generation-start');
 const trainingBadgeEl = byId<HTMLSpanElement>('training-badge');
 const trainingStatusEl = byId<HTMLParagraphElement>('training-status');
 const trainingStartEl = byId<HTMLButtonElement>('training-start');
+const testingBadgeEl = byId<HTMLSpanElement>('testing-badge');
+const testingStatusEl = byId<HTMLParagraphElement>('testing-status');
+const testingUploadEl = byId<HTMLInputElement>('testing-upload');
+const testingListEl = byId<HTMLUListElement>('testing-list');
+const feedbackStatusEl = byId<HTMLParagraphElement>('feedback-status');
 const deploymentBadgeEl = byId<HTMLSpanElement>('deployment-badge');
 const deploymentStatusEl = byId<HTMLParagraphElement>('deployment-status');
 const modelListEl = byId<HTMLUListElement>('model-list');
@@ -155,6 +177,111 @@ function renderRecordings(recordings: Recording[]) {
   }
 }
 
+function feedbackForRecording(recordingID: string) {
+  return state.feedback.filter((entry) => entry.recording_id === recordingID);
+}
+
+async function submitFeedback(recordingID: string, outcome: string) {
+  const payload = await loadJSON('hotword/train/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recording_id: recordingID,
+      outcome,
+    }),
+  });
+  testingStatusEl.textContent = outcome === 'missed_trigger'
+    ? 'Marked clip as a missed trigger for the next round.'
+    : 'Marked clip as a false trigger for the next round.';
+  setBadge(testingBadgeEl, 'saved');
+  renderFeedbackSummary(payload?.summary || {});
+  await refreshFeedback();
+}
+
+function renderFeedbackSummary(summary: FeedbackSummary) {
+  const missed = Number(summary?.missed_triggers || 0);
+  const falseTriggers = Number(summary?.false_triggers || 0);
+  const total = Number(summary?.total || 0);
+  if (total === 0) {
+    feedbackStatusEl.textContent = 'No retry feedback captured yet.';
+    return;
+  }
+  feedbackStatusEl.textContent = `${missed} missed-trigger clip(s), ${falseTriggers} false-trigger clip(s) saved for the next training round.`;
+}
+
+function renderTestingList() {
+  testingListEl.replaceChildren();
+  const recordings = state.recordings.filter((recording) => recording.kind === 'test');
+  if (recordings.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'train-list-item';
+    empty.textContent = 'No test clips yet. Upload one here or record a Test retry clip in Step 1.';
+    testingListEl.appendChild(empty);
+    setBadge(testingBadgeEl, 'idle');
+    if (!feedbackStatusEl.textContent) {
+      feedbackStatusEl.textContent = 'No retry feedback captured yet.';
+    }
+    return;
+  }
+  setBadge(testingBadgeEl, state.feedback.length > 0 ? 'reviewing' : 'ready');
+  for (const recording of recordings) {
+    const item = document.createElement('li');
+    item.className = 'train-list-item';
+    const title = document.createElement('div');
+    title.className = 'train-list-head';
+    title.innerHTML = `<strong>${recording.file_name}</strong><span>${formatDate(recording.created_at)}</span>`;
+    const meta = document.createElement('p');
+    meta.className = 'train-list-meta';
+    const feedbackEntries = feedbackForRecording(recording.id);
+    const feedbackLabel = feedbackEntries.length > 0
+      ? ` | feedback: ${feedbackEntries.map((entry) => entry.outcome.replace(/_/g, ' ')).join(', ')}`
+      : '';
+    meta.textContent = `${formatDuration(recording.duration_ms)} | ${formatBytes(recording.size_bytes)}${feedbackLabel}`;
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = appURL(recording.audio_url);
+    const actions = document.createElement('div');
+    actions.className = 'train-list-actions';
+    const missed = document.createElement('button');
+    missed.className = 'train-list-button';
+    missed.type = 'button';
+    missed.textContent = 'This should have triggered';
+    missed.addEventListener('click', async () => {
+      missed.disabled = true;
+      falseTrigger.disabled = true;
+      try {
+        await submitFeedback(recording.id, 'missed_trigger');
+      } catch (err: any) {
+        testingStatusEl.textContent = String(err?.message || err || 'feedback failed');
+        setBadge(testingBadgeEl, 'error');
+      } finally {
+        missed.disabled = false;
+        falseTrigger.disabled = false;
+      }
+    });
+    const falseTrigger = document.createElement('button');
+    falseTrigger.className = 'train-list-button';
+    falseTrigger.type = 'button';
+    falseTrigger.textContent = 'This was a false trigger';
+    falseTrigger.addEventListener('click', async () => {
+      missed.disabled = true;
+      falseTrigger.disabled = true;
+      try {
+        await submitFeedback(recording.id, 'false_trigger');
+      } catch (err: any) {
+        testingStatusEl.textContent = String(err?.message || err || 'feedback failed');
+        setBadge(testingBadgeEl, 'error');
+      } finally {
+        missed.disabled = false;
+        falseTrigger.disabled = false;
+      }
+    });
+    actions.append(missed, falseTrigger);
+    item.append(title, meta, audio, actions);
+    testingListEl.appendChild(item);
+  }
+}
+
 function renderGenerationStatus(status: StatusPayload) {
   setBadge(generationBadgeEl, status.state || 'idle');
   generationStatusEl.textContent = String(status.error || status.message || 'Idle.');
@@ -213,7 +340,10 @@ function renderModels(models: Model[]) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ model: model.file_name }),
           });
-          deploymentStatusEl.textContent = `Deployed ${payload?.model?.file_name || model.file_name}.`;
+          const revision = String(payload?.hotword_status?.model?.revision || '').trim();
+          deploymentStatusEl.textContent = revision
+            ? `Deployed ${payload?.model?.file_name || model.file_name}. Connected clients will reload revision ${revision}.`
+            : `Deployed ${payload?.model?.file_name || model.file_name}.`;
           setBadge(deploymentBadgeEl, 'deployed');
           await refreshModels();
         } catch (err: any) {
@@ -232,16 +362,24 @@ function renderModels(models: Model[]) {
 
 async function refreshRecordings() {
   const payload = await loadJSON('hotword/train/recordings');
-  const recordings = Array.isArray(payload?.recordings) ? payload.recordings as Recording[] : [];
-  renderRecordings(recordings);
-  recordingStatusEl.textContent = recordings.length > 0
-    ? `${recordings.filter((item) => item.kind === 'hotword').length} hotword clip(s), ${recordings.filter((item) => item.kind === 'reference').length} reference clip(s).`
+  state.recordings = Array.isArray(payload?.recordings) ? payload.recordings as Recording[] : [];
+  renderRecordings(state.recordings);
+  renderTestingList();
+  recordingStatusEl.textContent = state.recordings.length > 0
+    ? `${state.recordings.filter((item) => item.kind === 'hotword').length} hotword clip(s), ${state.recordings.filter((item) => item.kind === 'reference').length} reference clip(s), ${state.recordings.filter((item) => item.kind === 'test').length} test clip(s).`
     : 'Record or upload a WAV file to start.';
 }
 
 async function refreshModels() {
   const payload = await loadJSON('hotword/train/models');
   renderModels(Array.isArray(payload?.models) ? payload.models as Model[] : []);
+}
+
+async function refreshFeedback() {
+  const payload = await loadJSON('hotword/train/feedback');
+  state.feedback = Array.isArray(payload?.feedback) ? payload.feedback as Feedback[] : [];
+  renderFeedbackSummary(payload?.summary || {});
+  renderTestingList();
 }
 
 function mergeChunks() {
@@ -381,6 +519,22 @@ async function bootstrap() {
     }
   });
 
+  testingUploadEl.addEventListener('change', async () => {
+    const file = testingUploadEl.files?.[0];
+    testingUploadEl.value = '';
+    if (!(file instanceof File)) return;
+    try {
+      setBadge(testingBadgeEl, 'uploading');
+      await uploadBlob(file, 'test');
+      testingStatusEl.textContent = `Uploaded ${file.name}.`;
+      setBadge(testingBadgeEl, 'saved');
+      await refreshRecordings();
+    } catch (err: any) {
+      setBadge(testingBadgeEl, 'error');
+      testingStatusEl.textContent = String(err?.message || err || 'test upload failed');
+    }
+  });
+
   generationStartEl.addEventListener('click', async () => {
     const models = selectedGenerationModels();
     if (models.length === 0) {
@@ -432,7 +586,7 @@ async function bootstrap() {
     }
   } catch (_) {}
 
-  await Promise.all([refreshRecordings(), refreshModels()]);
+  await Promise.all([refreshRecordings(), refreshModels(), refreshFeedback()]);
   void connectStatusStream('hotword/train/generate/status', renderGenerationStatus);
   void connectStatusStream('hotword/train/status', (status) => {
     setBadge(trainingBadgeEl, status.state || 'idle');
