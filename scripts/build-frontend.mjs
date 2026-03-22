@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,34 @@ import { transform } from 'esbuild';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 const staticRoot = path.join(repoRoot, 'internal', 'web', 'static');
+const vadRoot = path.join(staticRoot, 'vad');
+const requiredVadAssets = [
+  'bundle.min.js',
+  'silero_vad_v5.onnx',
+  'vad.worklet.bundle.min.js',
+  'ort.min.mjs',
+  'ort-wasm-simd-threaded.mjs',
+  'ort-wasm-simd-threaded.wasm',
+];
 const globalScripts = new Set(['capture.ts', 'polyfill.ts']);
+
+async function ensureVadAssets() {
+  const missing = [];
+  for (const name of requiredVadAssets) {
+    try {
+      await fs.access(path.join(vadRoot, name));
+    } catch {
+      missing.push(name);
+    }
+  }
+  if (missing.length === 0) {
+    return;
+  }
+  execFileSync(path.join(repoRoot, 'scripts', 'fetch-vad-assets.sh'), {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+}
 
 async function listTSFiles(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -54,5 +82,6 @@ if (files.length === 0) {
   throw new Error(`no TypeScript sources found under ${staticRoot}`);
 }
 
+await ensureVadAssets();
 await Promise.all(files.map(buildFile));
 process.stdout.write(`built ${files.length} frontend modules\n`);

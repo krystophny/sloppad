@@ -139,10 +139,22 @@ export async function applySessionCookie(page: Page, sessionToken: string) {
   }]);
 }
 
+export async function acknowledgeDisclaimerIfPresent(page: Page) {
+  const button = page.locator('#liability-ack-btn');
+  try {
+    await button.waitFor({ state: 'visible', timeout: 1_000 });
+  } catch {
+    return;
+  }
+  await button.click();
+  await button.waitFor({ state: 'hidden', timeout: 10_000 });
+}
+
 export async function openLiveApp(page: Page, sessionToken: string) {
   await applySessionCookie(page, sessionToken);
   await page.goto('/');
   await page.waitForLoadState('networkidle');
+  await acknowledgeDisclaimerIfPresent(page);
   await page.waitForFunction(() => {
     const app = (window as { _taburaApp?: { getState?: () => { activeWorkspaceId?: string } } })._taburaApp;
     if (!app || typeof app.getState !== 'function') return false;

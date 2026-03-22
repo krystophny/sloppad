@@ -3,9 +3,33 @@ package stt
 import (
 	"bytes"
 	"encoding/binary"
+	"os"
 	"os/exec"
 	"testing"
 )
+
+func TestResolveFFmpegPathFallback(t *testing.T) {
+	fakebin := t.TempDir()
+	fakeffmpeg := fakebin + "/ffmpeg"
+	if err := os.WriteFile(fakeffmpeg, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	originalPaths := ffmpegSearchPaths
+	ffmpegSearchPaths = []string{fakeffmpeg}
+	t.Cleanup(func() {
+		ffmpegSearchPaths = originalPaths
+	})
+	t.Setenv("PATH", t.TempDir())
+
+	path, err := resolveFFmpegPath()
+	if err != nil {
+		t.Fatalf("resolveFFmpegPath error: %v", err)
+	}
+	if path != fakeffmpeg {
+		t.Fatalf("resolveFFmpegPath=%q, want %q", path, fakeffmpeg)
+	}
+}
 
 func TestWrapPCM16Mono16kWAV(t *testing.T) {
 	pcm := make([]byte, 320)

@@ -57,7 +57,7 @@ const (
 	disclaimerVersionCurrent     = "2026-03-03-v1"
 )
 
-//go:embed static/* static/vendor/*
+//go:embed static/* static/*/* static/*/*/*
 var staticFiles embed.FS
 
 type App struct {

@@ -11,6 +11,37 @@ import {
   postSTTTranscribeAPI,
 } from './helpers';
 
+function mergeWavChunks(chunks: Buffer[]): Buffer {
+  expect(chunks.length).toBeGreaterThan(0);
+  const first = chunks[0]!;
+  const channels = first.readUInt16LE(22);
+  const sampleRate = first.readUInt32LE(24);
+  const bitsPerSample = first.readUInt16LE(34);
+  const pcmParts = chunks.map((chunk) => chunk.slice(44));
+  const dataSize = pcmParts.reduce((sum, part) => sum + part.length, 0);
+  const out = Buffer.alloc(44 + dataSize);
+  out.write('RIFF', 0);
+  out.writeUInt32LE(36 + dataSize, 4);
+  out.write('WAVE', 8);
+  out.write('fmt ', 12);
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20);
+  out.writeUInt16LE(channels, 22);
+  out.writeUInt32LE(sampleRate, 24);
+  const bytesPerSample = bitsPerSample / 8;
+  out.writeUInt32LE(sampleRate * channels * bytesPerSample, 28);
+  out.writeUInt16LE(channels * bytesPerSample, 32);
+  out.writeUInt16LE(bitsPerSample, 34);
+  out.write('data', 36);
+  out.writeUInt32LE(dataSize, 40);
+  let offset = 44;
+  for (const part of pcmParts) {
+    part.copy(out, offset);
+    offset += part.length;
+  }
+  return out;
+}
+
 test.describe('STT/TTS system tests @local-only', () => {
   let sessionToken: string;
   let chatSessionId: string;
@@ -43,20 +74,12 @@ test.describe('STT/TTS system tests @local-only', () => {
         }
 
         const wavBuffers: Buffer[] = [];
-        for (let i = 0; i < 3; i++) {
-          const wav = await new Promise<Buffer>((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error(`TTS wav ${i} timed out`)), 20_000);
-            const check = () => {
-              const binaries = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
-              if (binaries.length > wavBuffers.length) {
-                clearTimeout(timer);
-                resolve(binaries[wavBuffers.length].data);
-                return;
-              }
-              setTimeout(check, 50);
-            };
-            check();
-          });
+        for (let i = 0; i < sentences.length; i++) {
+          const before = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary').length;
+          await conn.waitForText((m) => m.type === 'tts_done' && Number(m.seq) === i, 20_000);
+          const binaries = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
+          expect(binaries.length).toBeGreaterThan(before);
+          const wav = binaries[before]!.data;
           wavBuffers.push(wav);
         }
 
@@ -134,7 +157,36 @@ test.describe('STT/TTS system tests @local-only', () => {
       let ttsWav: Buffer;
       try {
         ttsConn.ws.send(JSON.stringify({ type: 'tts_speak', text: 'The quick brown fox jumps over the lazy dog.', lang: 'en' }));
-        ttsWav = await ttsConn.waitForBinary(15_000);
+        const chunks: Buffer[] = [];
+        const seen = new Set<number>();
+        for (;;) {
+          const donePromise = ttsConn.waitForText((m) => m.type === 'tts_done', 20_000);
+          let grew = true;
+          while (grew) {
+            grew = false;
+            const binaries = ttsConn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
+            for (let i = 0; i < binaries.length; i++) {
+              if (seen.has(i)) continue;
+              seen.add(i);
+              chunks.push(binaries[i]!.data);
+              grew = true;
+            }
+            if (!grew) {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            if (chunks.length > 0) break;
+          }
+          await donePromise;
+          const binaries = ttsConn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
+          for (let i = 0; i < binaries.length; i++) {
+            if (seen.has(i)) continue;
+            seen.add(i);
+            chunks.push(binaries[i]!.data);
+          }
+          expect(chunks.length).toBeGreaterThan(0);
+          ttsWav = mergeWavChunks(chunks);
+          break;
+        }
         expect(ttsWav.length).toBeGreaterThan(44);
       } finally {
         ttsConn.close();

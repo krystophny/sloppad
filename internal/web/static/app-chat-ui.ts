@@ -496,7 +496,7 @@ export function ensurePendingForTurn(turnID) {
   }
   let row = state.pendingQueue.shift() || null;
   if (!row) {
-    row = appendRenderedAssistant('_Thinking..._', { pending: true, localId: nextLocalMessageId() });
+    row = appendRenderedAssistant('_Working..._', { pending: true, localId: nextLocalMessageId() });
   }
   if (key) {
     row.dataset.turnId = key;

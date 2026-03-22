@@ -34,6 +34,10 @@ confirm_default_yes() {
 
 REUSE_LLM_URL=""
 LLAMA_SERVER_BIN_RESOLVED=""
+CODEX_PATH=""
+VOXTYPE_PATH=""
+BIN_PATH=""
+WEB_DATA_DIR=""
 
 configure_codex_cli() {
   local fast_url agentic_url
@@ -249,7 +253,7 @@ install_macos() {
   local plist_src="$REPO_ROOT/deploy/launchd"
   local plist_dst="$HOME/Library/LaunchAgents"
   local data_root="$HOME/Library/Application Support/tabura"
-  local bin_path codex_path voxtype_path web_data_dir piper_model_dir piper_venv_dir
+  local piper_model_dir piper_venv_dir
   local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
   local web_host="${TABURA_WEB_HOST:-127.0.0.1}"
 
@@ -261,25 +265,28 @@ install_macos() {
     fail "go build failed"
   fi
 
-  bin_path="$REPO_ROOT/tabura"
-  codex_path="$(command -v codex)"
-  voxtype_path="$(command -v voxtype 2>/dev/null || echo voxtype)"
-  web_data_dir="${data_root}/web-data"
+  BIN_PATH="$REPO_ROOT/tabura"
+  CODEX_PATH="$(command -v codex 2>/dev/null || true)"
+  VOXTYPE_PATH="$(command -v voxtype 2>/dev/null || echo voxtype)"
+  WEB_DATA_DIR="${data_root}/web-data"
   piper_model_dir="${HOME}/.local/share/tabura-piper-tts/models"
   piper_venv_dir="${HOME}/.local/share/tabura-piper-tts/venv"
 
-  mkdir -p "$plist_dst" "$web_data_dir"
+  mkdir -p "$plist_dst" "$WEB_DATA_DIR"
   if [ -n "$REUSE_LLM_URL" ]; then
     launchctl unload "$plist_dst/io.tabura.llm.plist" >/dev/null 2>&1 || true
     launchctl unload "$plist_dst/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
     rm -f "$plist_dst/io.tabura.llm.plist" "$plist_dst/io.tabura.codex-llm.plist"
   fi
+  launchctl unload "$plist_dst/io.tabura.piper-tts.plist" >/dev/null 2>&1 || true
+  launchctl unload "$plist_dst/io.tabura.macos-tts.plist" >/dev/null 2>&1 || true
+  launchctl unload "$plist_dst/io.tabura.codex-app-server.plist" >/dev/null 2>&1 || true
+  rm -f "$plist_dst/io.tabura.piper-tts.plist" "$plist_dst/io.tabura.macos-tts.plist" "$plist_dst/io.tabura.codex-app-server.plist"
 
   # Determine which agents to install
-  local agents=(codex-app-server piper-tts web)
+  local agents=(piper-tts web)
   if [ "$HAVE_LLAMA" = "1" ] && [ -z "$REUSE_LLM_URL" ]; then
     agents+=(llm)
-    agents+=(codex-llm)
   fi
   if [ "$HAVE_VOXTYPE" = "1" ]; then
     agents+=(stt)
@@ -295,10 +302,10 @@ install_macos() {
       continue
     fi
     sed \
-      -e "s|@@BIN_PATH@@|${bin_path}|g" \
-      -e "s|@@CODEX_PATH@@|${codex_path}|g" \
+      -e "s|@@BIN_PATH@@|${BIN_PATH}|g" \
+      -e "s|@@CODEX_PATH@@|${CODEX_PATH}|g" \
       -e "s|@@PROJECT_DIR@@|${REPO_ROOT}|g" \
-      -e "s|@@WEB_DATA_DIR@@|${web_data_dir}|g" \
+      -e "s|@@WEB_DATA_DIR@@|${WEB_DATA_DIR}|g" \
       -e "s|@@TABURA_WEB_HOST@@|${web_host}|g" \
       -e "s|@@VENV_DIR@@|${piper_venv_dir}|g" \
       -e "s|@@SCRIPT_DIR@@|${REPO_ROOT}/scripts|g" \
@@ -307,7 +314,7 @@ install_macos() {
       -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
       -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
       -e "s|@@STT_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-voxtype-stt.sh|g" \
-      -e "s|@@VOXTYPE_BIN@@|${voxtype_path}|g" \
+      -e "s|@@VOXTYPE_BIN@@|${VOXTYPE_PATH}|g" \
       -e "s|@@TABURA_INTENT_LLM_URL@@|${effective_llm_url}|g" \
       "$src" > "$dst"
     log "Installed plist: $dst"
@@ -351,31 +358,32 @@ activate_launchd() {
 activate_direct() {
   local pidfile="/tmp/tabura-pids.txt"
   local web_host="${TABURA_WEB_HOST:-127.0.0.1}"
+  local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
   : > "$pidfile"
 
   for name in "$@"; do
     local logfile="/tmp/tabura-${name}.log"
     case "$name" in
       codex-app-server)
-        nohup "$codex_path" app-server --listen ws://127.0.0.1:8787 \
+        nohup "$CODEX_PATH" app-server --listen ws://127.0.0.1:8787 \
           >"$logfile" 2>&1 &
         ;;
       piper-tts)
-        PIPER_MODEL_DIR="$piper_model_dir" \
-        nohup "$piper_venv_dir/bin/uvicorn" piper_tts_server:app \
+        PIPER_MODEL_DIR="${HOME}/.local/share/tabura-piper-tts/models" \
+        nohup "${HOME}/.local/share/tabura-piper-tts/venv/bin/uvicorn" piper_tts_server:app \
           --app-dir "$REPO_ROOT/scripts" --host 127.0.0.1 --port 8424 \
           >"$logfile" 2>&1 &
         ;;
       web)
         TABURA_INTENT_LLM_URL="$effective_llm_url" \
+        TABURA_ASSISTANT_MODE=local \
         TABURA_INTENT_LLM_MODEL=local \
         TABURA_INTENT_LLM_PROFILE=qwen3.5-9b \
-        TABURA_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b \
-        nohup "$bin_path" server \
-          --project-dir "$REPO_ROOT" --data-dir "$web_data_dir" \
+        TABURA_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b \
+        nohup "$BIN_PATH" server \
+          --project-dir "$REPO_ROOT" --data-dir "$WEB_DATA_DIR" \
           --web-host "$web_host" --web-port 8420 \
           --mcp-host 127.0.0.1 --mcp-port 9420 \
-          --app-server-url ws://127.0.0.1:8787 \
           --tts-url http://127.0.0.1:8424 \
           >"$logfile" 2>&1 &
         ;;

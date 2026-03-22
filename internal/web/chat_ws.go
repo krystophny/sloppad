@@ -9,16 +9,18 @@ import (
 // Privacy: sttBuf and participantBuf are RAM-only and never persisted to disk or database.
 // See docs/meeting-notes-privacy.md.
 type chatWSConn struct {
-	conn        *websocket.Conn
-	writeMu     sync.Mutex
-	sttMu       sync.Mutex
-	sttActive   bool
-	sttMimeType string
-	sttBuf      []byte
-	ttsMu       sync.Mutex
-	ttsNextSeq  int64
-	ttsNextEmit int64
-	ttsPending  map[int64]ttsOrderedResult
+	conn                 *websocket.Conn
+	writeMu              sync.Mutex
+	sttMu                sync.Mutex
+	sttActive            bool
+	sttMimeType          string
+	sttBuf               []byte
+	ttsMu                sync.Mutex
+	ttsCond              *sync.Cond
+	ttsNextSeq           int64
+	ttsNextEmit          int64
+	ttsNextStream        int64
+	ttsPending           map[int64]ttsOrderedResult
 	participantMu        sync.Mutex
 	participantActive    bool
 	participantSessionID string
@@ -26,10 +28,12 @@ type chatWSConn struct {
 }
 
 func newChatWSConn(conn *websocket.Conn) *chatWSConn {
-	return &chatWSConn{
+	c := &chatWSConn{
 		conn:       conn,
 		ttsPending: map[int64]ttsOrderedResult{},
 	}
+	c.ttsCond = sync.NewCond(&c.ttsMu)
+	return c
 }
 
 func (c *chatWSConn) writeJSON(v interface{}) error {
@@ -85,4 +89,21 @@ func (c *chatWSConn) completeTTSSeq(seq int64, audio []byte, errMsg string) []tt
 		ready = append(ready, result)
 	}
 	return ready
+}
+
+func (c *chatWSConn) waitTTSStreamTurn(seq int64) {
+	c.ttsMu.Lock()
+	defer c.ttsMu.Unlock()
+	for seq != c.ttsNextStream {
+		c.ttsCond.Wait()
+	}
+}
+
+func (c *chatWSConn) finishTTSStreamTurn(seq int64) {
+	c.ttsMu.Lock()
+	defer c.ttsMu.Unlock()
+	if seq == c.ttsNextStream {
+		c.ttsNextStream++
+		c.ttsCond.Broadcast()
+	}
 }

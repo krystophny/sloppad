@@ -3,10 +3,21 @@ set -euo pipefail
 
 VOXTYPE_REPO="${VOXTYPE_REPO:-https://github.com/peteonrails/voxtype.git}"
 VOXTYPE_BRANCH="${VOXTYPE_BRANCH:-feature/single-daemon-openai-stt-api}"
+VOXTYPE_COMMIT="${VOXTYPE_COMMIT:-fe517afb30f43f9abef4fbfa87bca2deb042d6ab}"
 INSTALL_DIR="${VOXTYPE_INSTALL_DIR:-${HOME}/.local/bin}"
+ASSUME_YES=0
 
 log()  { printf '[build-voxtype] %s\n' "$*"; }
 fail() { printf '[build-voxtype] ERROR: %s\n' "$*" >&2; exit 1; }
+
+supports_stt_service() {
+    local help_text
+    help_text="$("$1" --help 2>&1 || true)"
+    case "$help_text" in
+        *"--service"*) return 0 ;;
+    esac
+    return 1
+}
 
 print_help() {
     cat <<USAGE
@@ -22,6 +33,7 @@ Options:
 Environment:
   VOXTYPE_REPO         Git clone URL (default: peteonrails/voxtype)
   VOXTYPE_BRANCH       Branch to build (default: feature/single-daemon-openai-stt-api)
+  VOXTYPE_COMMIT       Commit to pin after clone (default: ${VOXTYPE_COMMIT})
   VOXTYPE_INSTALL_DIR  Binary install directory (default: ~/.local/bin)
 USAGE
 }
@@ -29,6 +41,7 @@ USAGE
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) print_help; exit 0 ;;
+        --yes) ASSUME_YES=1; shift ;;
         *) fail "unknown argument: $1" ;;
     esac
 done
@@ -50,6 +63,9 @@ log "Cloning $VOXTYPE_REPO (branch: $VOXTYPE_BRANCH)"
 git clone --depth 1 --branch "$VOXTYPE_BRANCH" "$VOXTYPE_REPO" "$BUILD_DIR/voxtype"
 
 cd "$BUILD_DIR/voxtype"
+git fetch --depth 1 origin "$VOXTYPE_COMMIT"
+git checkout --detach "$VOXTYPE_COMMIT"
+log "Pinned voxtype commit: $VOXTYPE_COMMIT"
 
 # --- Build ---
 
@@ -89,6 +105,9 @@ cp target/release/voxtype "$INSTALL_DIR/voxtype"
 chmod +x "$INSTALL_DIR/voxtype"
 
 log "Installed: $INSTALL_DIR/voxtype"
+if ! supports_stt_service "$INSTALL_DIR/voxtype"; then
+    fail "built voxtype does not expose --service; wrong branch or commit"
+fi
 
 if ! printf ':%s:' "$PATH" | grep -Fq ":${INSTALL_DIR}:"; then
     log "WARNING: $INSTALL_DIR is not in PATH; add it to your shell profile"

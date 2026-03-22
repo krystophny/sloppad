@@ -50,20 +50,12 @@ test.describe('TTS over WebSocket @local-only', () => {
       }
 
       const wavBuffers: Buffer[] = [];
-      for (let i = 0; i < 3; i++) {
-        const wav = await new Promise<Buffer>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error(`TTS wav ${i} timed out`)), 20_000);
-          const check = () => {
-            const binaries = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
-            if (binaries.length > wavBuffers.length) {
-              clearTimeout(timer);
-              resolve(binaries[wavBuffers.length].data);
-              return;
-            }
-            setTimeout(check, 50);
-          };
-          check();
-        });
+      for (let i = 0; i < sentences.length; i++) {
+        const before = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary').length;
+        await conn.waitForText((m) => m.type === 'tts_done' && Number(m.seq) === i, 20_000);
+        const binaries = conn.messages.filter((m): m is { kind: 'binary'; data: Buffer } => m.kind === 'binary');
+        expect(binaries.length).toBeGreaterThan(before);
+        const wav = binaries[before]!.data;
         wavBuffers.push(wav);
       }
 

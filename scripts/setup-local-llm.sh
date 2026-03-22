@@ -28,15 +28,23 @@ NGL="${TABURA_LLM_NGL:-}"
 PARALLEL="${TABURA_LLM_PARALLEL:-}"
 ALIAS="${TABURA_LLM_ALIAS:-}"
 REASONING_BUDGET="${TABURA_LLM_REASONING_BUDGET:-}"
+PLATFORM="$(uname -s)"
 
 case "$PROFILE_PRESET" in
   "" | "fast-qwen9b")
-    MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
-    MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
+    if [ "$PLATFORM" = "Darwin" ]; then
+      MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
+      MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
+      THREADS="$(default_if_empty "$THREADS" "8")"
+      CTX_SIZE="$(default_if_empty "$CTX_SIZE" "32768")"
+    else
+      MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
+      MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
+      THREADS="$(default_if_empty "$THREADS" "4")"
+      CTX_SIZE="$(default_if_empty "$CTX_SIZE" "32768")"
+    fi
     HOST="$(default_if_empty "$HOST" "127.0.0.1")"
     PORT="$(default_if_empty "$PORT" "8081")"
-    THREADS="$(default_if_empty "$THREADS" "4")"
-    CTX_SIZE="$(default_if_empty "$CTX_SIZE" "32768")"
     NGL="$(default_if_empty "$NGL" "99")"
     PARALLEL="$(default_if_empty "$PARALLEL" "1")"
     ALIAS="$(default_if_empty "$ALIAS" "qwen3.5-9b")"

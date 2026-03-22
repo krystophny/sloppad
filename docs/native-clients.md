@@ -75,6 +75,15 @@ Use these checks before claiming the native slice is working:
 
    This covers dialogue presentation logic, transport URL helpers, payload encoding, Boox detection heuristics, and the shared flow contract.
 
+   The underlying commands are:
+
+   ```bash
+   swift test --package-path platforms/ios
+   ANDROID_HOME=/home/ert/android-sdk gradle -p platforms/android app:testDebugUnitTest
+   gradle -p platforms/android/flow-contracts test
+   ./scripts/playwright.sh
+   ```
+
 2. Release-validation path:
 
    ```bash

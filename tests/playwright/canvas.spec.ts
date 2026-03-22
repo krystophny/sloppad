@@ -125,6 +125,33 @@ async function dispatchTouchTap(page: Page, x: number, y: number) {
   }, { x, y });
 }
 
+async function dispatchTouchDriftTap(page: Page, startX: number, startY: number, endX: number, endY: number) {
+  await page.evaluate(({ startX, startY, endX, endY }) => {
+    if (typeof Touch === 'undefined') return;
+    const startTarget = document.elementFromPoint(startX, startY) || document.body;
+    const endTarget = document.elementFromPoint(endX, endY) || startTarget;
+    const start = new Touch({
+      clientX: startX,
+      clientY: startY,
+      pageX: startX,
+      pageY: startY,
+      identifier: 0,
+      target: startTarget,
+    });
+    const end = new Touch({
+      clientX: endX,
+      clientY: endY,
+      pageX: endX,
+      pageY: endY,
+      identifier: 0,
+      target: endTarget,
+    });
+    startTarget.dispatchEvent(new TouchEvent('touchstart', { touches: [start], changedTouches: [start], bubbles: true }));
+    startTarget.dispatchEvent(new TouchEvent('touchmove', { touches: [end], changedTouches: [end], bubbles: true, cancelable: true }));
+    startTarget.dispatchEvent(new TouchEvent('touchend', { touches: [], changedTouches: [end], bubbles: true, cancelable: true }));
+  }, { startX, startY, endX, endY });
+}
+
 async function dispatchTouchSwipe(page: Page, startX: number, startY: number, endX: number, endY: number) {
   await page.evaluate(({ startX, startY, endX, endY }) => {
     if (typeof Touch === 'undefined') return;
@@ -995,20 +1022,23 @@ test.describe('canvas - edge panels', () => {
     await expect(cpInput).toBeVisible();
   });
 
-  test('desktop right edge strip moves to the chat boundary while the panel is open', async ({ page }) => {
+  test('desktop right edge strip stays on the screen edge while the panel is open', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
 
     const edgeRight = page.locator('#edge-right');
     const edgeRightTap = page.locator('#edge-right-tap');
+    const closedTapBox = await edgeRightTap.boundingBox();
+    expect(closedTapBox).not.toBeNull();
 
     await edgeRightTap.click();
     await expect(edgeRight).toHaveClass(/edge-pinned/);
 
     const tapBox = await edgeRightTap.boundingBox();
-    const inputBox = await page.locator('#chat-pane-input').boundingBox();
     expect(tapBox).not.toBeNull();
-    expect(inputBox).not.toBeNull();
-    expect(Number(inputBox?.x || 0)).toBeGreaterThan(Number(tapBox?.x || 0));
+    expect(closedTapBox).not.toBeNull();
+    expect(Math.round(Number(tapBox?.x || 0) + Number(tapBox?.width || 0))).toBe(1280);
+    expect(Number(tapBox?.x || 0)).toBeGreaterThanOrEqual(Number(closedTapBox?.x || 0) - 1);
+    expect(Number(tapBox?.x || 0)).toBeLessThanOrEqual(Number(closedTapBox?.x || 0) + 1);
   });
 
   test('touch tap on right edge toggles a full-width chat panel without recording', async ({ page }) => {
@@ -1120,5 +1150,35 @@ test.describe('canvas - edge panels', () => {
     expect(paneClasses).not.toContain('is-open');
     const bodyClass = await page.locator('body').getAttribute('class');
     expect(bodyClass || '').not.toContain('file-sidebar-open');
+  });
+
+  test('touch taps with slight drift still toggle edge panels', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const edgeRight = page.locator('#edge-right');
+    const pane = page.locator('#pr-file-pane');
+
+    await dispatchTouchDriftTap(page, 372, 333, 362, 338);
+    await page.waitForTimeout(200);
+    await expect(edgeRight).toHaveClass(/edge-pinned/);
+
+    await dispatchTouchDriftTap(page, 372, 333, 364, 340);
+    await page.waitForTimeout(150);
+    await expect(edgeRight).not.toHaveClass(/edge-pinned/);
+
+    await dispatchTouchDriftTap(page, 3, 333, 12, 338);
+    await page.waitForTimeout(200);
+    await expect(pane).toHaveClass(/is-open/);
+
+    const closeZone = await page.locator('#edge-left-tap').boundingBox();
+    expect(closeZone).not.toBeNull();
+    await dispatchTouchDriftTap(
+      page,
+      Number(closeZone?.x || 0) + Number(closeZone?.width || 0) / 2,
+      Number(closeZone?.y || 0) + Number(closeZone?.height || 0) / 2,
+      Number(closeZone?.x || 0) + Number(closeZone?.width || 0) / 2 - 8,
+      Number(closeZone?.y || 0) + Number(closeZone?.height || 0) / 2 + 5,
+    );
+    await page.waitForTimeout(150);
+    await expect(pane).not.toHaveClass(/is-open/);
   });
 });

@@ -151,6 +151,26 @@ test('"recording..." status text suppressed when companion visible', async ({ pa
   expect(statusText).not.toBe('recording...');
 });
 
+test('recording cue stays visible while companion surface is visible', async ({ page }) => {
+  await enableCompanion(page);
+  await page.evaluate(() => {
+    const app = (window as any)._taburaApp;
+    app?.syncCompanionIdleSurface?.();
+  });
+
+  await page.mouse.click(640, 360);
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some((entry) => entry.type === 'recorder' && entry.action === 'start');
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect(page.locator('#indicator')).toBeVisible();
+  await expect(page.locator('.record-dot')).toBeVisible();
+  await expect.poll(async () => page.evaluate(() => {
+    return document.body.classList.contains('indicator-recording');
+  })).toBe(true);
+});
+
 test('companion reaches thinking state during assistant turn', async ({ page }) => {
   await setDialogueListenWindowMs(page, 3_000);
   await setDialogueMode(page, true);

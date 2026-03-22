@@ -113,17 +113,28 @@ func (a *App) requestLocalAssistantCompletion(ctx context.Context, messages []ma
 	if baseURL == "" {
 		return localIntentLLMMessage{}, errors.New("local assistant is not configured")
 	}
-	requestBody, _ := json.Marshal(map[string]any{
+	return a.requestLocalAssistantCompletionWithConfig(ctx, messages, localAssistantToolDefinitions(), "auto")
+}
+
+func (a *App) requestLocalAssistantCompletionWithConfig(ctx context.Context, messages []map[string]any, tools []map[string]any, toolChoice string) (localIntentLLMMessage, error) {
+	baseURL := a.assistantLLMBaseURL()
+	if baseURL == "" {
+		return localIntentLLMMessage{}, errors.New("local assistant is not configured")
+	}
+	request := map[string]any{
 		"model":       a.localAssistantLLMModel(),
 		"temperature": 0,
 		"max_tokens":  assistantLLMMaxTokens,
-		"tool_choice": "auto",
-		"tools":       localAssistantToolDefinitions(),
 		"chat_template_kwargs": map[string]any{
 			"enable_thinking": false,
 		},
 		"messages": messages,
-	})
+	}
+	if len(tools) > 0 {
+		request["tools"] = tools
+		request["tool_choice"] = firstNonEmptyCursorText(strings.TrimSpace(toolChoice), "auto")
+	}
+	requestBody, _ := json.Marshal(request)
 	requestCtx, cancel := context.WithTimeout(ctx, assistantLLMRequestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(
@@ -152,7 +163,9 @@ func (a *App) requestLocalAssistantCompletion(ctx context.Context, messages []ma
 	if len(payload.Choices) == 0 {
 		return localIntentLLMMessage{}, errors.New("assistant llm returned no choices")
 	}
-	return payload.Choices[0].Message, nil
+	message := payload.Choices[0].Message
+	message.Content = stripLocalAssistantThinkingPreamble(message.Content)
+	return message, nil
 }
 
 func parseLocalAssistantDecision(message localIntentLLMMessage) (localAssistantDecision, error) {
@@ -368,6 +381,40 @@ func localAssistantRepairPrompt(err error) string {
 	)
 }
 
+func stripLocalAssistantThinkingPreamble(raw string) string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" {
+		return clean
+	}
+	if strings.HasPrefix(clean, "<think>") {
+		if idx := strings.Index(clean, "</think>"); idx >= 0 {
+			clean = clean[idx+len("</think>"):]
+		}
+	}
+	if strings.HasPrefix(clean, "</think>") {
+		clean = clean[len("</think>"):]
+	}
+	return strings.TrimSpace(clean)
+}
+
+func localAssistantNeedsTools(req *assistantTurnRequest, visual *chatVisualAttachment) bool {
+	if req == nil {
+		return false
+	}
+	if visual != nil {
+		return true
+	}
+	if req.cursorCtx != nil {
+		if req.cursorCtx.hasPointedItem() || strings.TrimSpace(req.cursorCtx.SelectedText) != "" {
+			return true
+		}
+	}
+	if len(req.inkCtx) > 0 || len(req.positionCtx) > 0 {
+		return true
+	}
+	return localAssistantAutoRouteCandidate(req.userText)
+}
+
 func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnRequest, prompt string, visual *chatVisualAttachment) (string, error) {
 	if a == nil || req == nil {
 		return "", errors.New("assistant turn request is required")
@@ -379,6 +426,16 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 	conversation := []map[string]any{
 		{"role": "system", "content": localAssistantDialoguePrompt},
 		{"role": "user", "content": buildLocalAssistantUserContent(prompt, visual)},
+	}
+	if !localAssistantNeedsTools(req, visual) {
+		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, []map[string]any{
+			{"role": "system", "content": localAssistantDirectPrompt},
+			{"role": "user", "content": buildLocalAssistantUserContent(prompt, visual)},
+		}, nil, "")
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(message.Content), nil
 	}
 	malformedRetries := 0
 	for round := 0; round < assistantLLMMaxToolRounds; round++ {

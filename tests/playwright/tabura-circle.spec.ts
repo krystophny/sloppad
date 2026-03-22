@@ -65,6 +65,19 @@ test('circle segments switch tools without using the top panel', async ({ page }
   await expect(page.locator('#tabura-circle-dot')).toHaveAttribute('data-tool', 'ink');
 });
 
+test('circle keeps live mode and tool mode visibly separate', async ({ page }) => {
+  await expect(page.locator('#tabura-circle-dot')).toHaveAttribute('aria-label', /Live mode: Manual/);
+  await expect(page.locator('#tabura-circle-dot .tabura-circle-dot-badge')).toHaveText('Manual');
+
+  await openCircle(page);
+  await expect(page.locator('#tabura-circle-segment-dialogue')).toHaveAttribute('aria-label', 'Live mode: Dialogue');
+  await expect(page.locator('#tabura-circle-segment-prompt')).toHaveAttribute('aria-label', 'Tool: Prompt');
+
+  await clickSegment(page, 'dialogue');
+  await expect(page.locator('#tabura-circle-dot')).toHaveAttribute('aria-label', /Live mode: Dialogue/);
+  await expect(page.locator('#tabura-circle-dot .tabura-circle-dot-badge')).toHaveText('Dialogue');
+});
+
 test('silent stays independent from tool selection', async ({ page }) => {
   await openCircle(page);
   await clickSegment(page, 'silent');

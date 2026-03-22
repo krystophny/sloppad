@@ -6,11 +6,18 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const ffmpegNormalizeTimeout = 25 * time.Second
+
+var ffmpegSearchPaths = []string{
+	"/opt/homebrew/bin/ffmpeg",
+	"/usr/local/bin/ffmpeg",
+	"/opt/local/bin/ffmpeg",
+}
 
 // NormalizeForWhisper converts any incoming audio payload to a deterministic
 // STT-service-friendly format: mono 16k WAV.
@@ -96,12 +103,16 @@ func transcodeToMono16kWAV(data []byte) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("audio payload is empty")
 	}
+	ffmpegPath, err := resolveFFmpegPath()
+	if err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), ffmpegNormalizeTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(
 		ctx,
-		"ffmpeg",
+		ffmpegPath,
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostdin",
@@ -136,6 +147,24 @@ func transcodeToMono16kWAV(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("ffmpeg produced misaligned PCM output (%d bytes)", len(out))
 	}
 	return wrapPCM16Mono16kWAV(out), nil
+}
+
+func resolveFFmpegPath() (string, error) {
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		return path, nil
+	}
+	for _, candidate := range ffmpegSearchPaths {
+		if candidate == "" {
+			continue
+		}
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		return "", fmt.Errorf("ffmpeg not found in PATH or common macOS locations")
+	}
+	return "", fmt.Errorf("ffmpeg not found in PATH")
 }
 
 func wrapPCM16Mono16kWAV(pcm []byte) []byte {

@@ -80,9 +80,12 @@ curl -sS -X POST http://127.0.0.1:8424/v1/audio/speech \
   -d '{"input":"Hello, this is a test of voice recording.","voice":"en","response_format":"wav"}' \
   -o "$SPEECH_WAV"
 
-# Pad: 0.5s silence before speech + speech + 3s silence after (VAD needs silence to auto-stop)
+# Pad: 5s silence before speech + speech + 3s silence after.
+# Chromium's fake audio capture can start consuming the file before the test
+# click arms recording, so the leading silence needs to cover page boot,
+# websocket connect, and MediaRecorder/VAD startup.
 ffmpeg -hide_banner -loglevel error -nostdin -y \
-  -f lavfi -t 0.5 -i anullsrc=r=22050:cl=mono \
+  -f lavfi -t 5 -i anullsrc=r=22050:cl=mono \
   -i "$SPEECH_WAV" \
   -f lavfi -t 3 -i anullsrc=r=22050:cl=mono \
   -filter_complex '[0][1][2]concat=n=3:v=0:a=1[out]' \

@@ -66,9 +66,14 @@ Uninstall:
 Manual build:
 
 ```bash
+npm run build:frontend
 go build ./cmd/tabura
 go install ./cmd/tabura
 ```
+
+`npm run build:frontend` auto-fetches the browser VAD runtime assets into
+`internal/web/static/vad/` when they are missing, so source builds retain live
+dialogue, hotword, and tap-to-talk browser VAD on a fresh checkout.
 
 Requirements:
 - Go 1.24+
@@ -87,15 +92,16 @@ tabura server --project-dir . --data-dir ~/.tabura-web --web-host 0.0.0.0 --web-
 Tabura runs as one Go runtime plus five local services:
 
 1. `tabura-web.service` (`tabura server`)
-2. `tabura-codex-app-server.service` (`codex app-server`)
-3. `tabura-piper-tts.service` (Piper `/v1/audio/speech`)
-4. `tabura-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
-5. `tabura-llm.service` (Qwen3.5 9B GGUF local coordinator at `127.0.0.1:8081/v1/chat/completions`)
-6. `tabura-codex-llm.service` (gpt-oss-120b llama.cpp runtime for local Codex profiles at `127.0.0.1:8080/v1/responses`)
+2. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
+   - default: Piper
+3. `tabura-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
+4. `tabura-llm.service` (Qwen3.5 9B GGUF local coordinator at `127.0.0.1:8081/v1/chat/completions`)
+   - macOS default: `Qwen3.5-9B-Q4_K_M.gguf` with `65536` context
+5. `tabura-codex-app-server.service` and `tabura-codex-llm.service` for non-unplugged Codex profiles
 
 Voice commit still uses built-in browser VAD auto-stop, then sends audio to the local voxtype STT service.
 
-Why Piper remains an HTTP sidecar:
+Why TTS remains an HTTP sidecar:
 - Piper `libpiper` linking is GPL-governed; direct linking would change distribution obligations.
 - A local loopback HTTP sidecar keeps integration simple and license boundaries clear.
 
@@ -106,13 +112,14 @@ Why Piper remains an HTTP sidecar:
 - MCP listener: `http://127.0.0.1:9420/mcp` (loopback-only)
 - Canvas websocket relay source: `ws://127.0.0.1:9420/ws/canvas`
 - Codex app-server websocket: `ws://127.0.0.1:8787`
-- Piper TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
+- TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
 - Voxtype STT endpoint: `http://127.0.0.1:8427/v1/audio/transcriptions`
 - Intent LLM endpoint: `http://127.0.0.1:8081/v1/chat/completions` (`TABURA_INTENT_LLM_URL`, set `off` to disable)
 - Local Codex llama.cpp endpoint: `http://127.0.0.1:8080/v1/responses`
 - Intent/delegator request model id: `TABURA_INTENT_LLM_MODEL` (default `local`)
 - Intent/delegator profile selection: `TABURA_INTENT_LLM_PROFILE` (default `qwen3.5-9b`)
-- Intent/delegator profile options: `TABURA_INTENT_LLM_PROFILE_OPTIONS` (default `qwen3.5-9b,qwen3.5-4b`)
+- Intent/delegator profile options: `TABURA_INTENT_LLM_PROFILE_OPTIONS` (macOS unplugged default: `qwen3.5-9b`)
+- Assistant routing mode: `TABURA_ASSISTANT_MODE` (macOS unplugged default: `local`)
 - Codex local profiles written by `scripts/setup-codex-mcp.sh`: `tabura_local_agentic` and `tabura_local_fast`
 - Codex local wrapper for current CLI builds: `scripts/codex-local.sh fast ...` or `scripts/codex-local.sh agentic ...`
 - Local canvas session id: `local`
@@ -138,7 +145,8 @@ scripts/build-voxtype-macos.sh
 ```
 
 This clones the pinned branch and builds with Metal GPU support on
-Apple Silicon. Requires Rust (`rustup`) and `cmake`.
+Apple Silicon. The resulting binary must expose `--service`, `GET /healthz`,
+and `POST /v1/audio/transcriptions`. Requires Rust (`rustup`) and `cmake`.
 
 ## LAN HTTPS For Voice Capture
 

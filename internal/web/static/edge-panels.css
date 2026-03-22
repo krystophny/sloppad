@@ -14,14 +14,6 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-body.file-sidebar-open .edge-left-tap {
-  left: calc(var(--file-sidebar-width) - var(--file-sidebar-close-strip-width));
-}
-
-body.file-sidebar-open .edge-right-tap {
-  pointer-events: none;
-}
-
 .edge-left-tap:hover,
 .edge-left-tap:active {
   background: transparent;
@@ -65,17 +57,12 @@ body.file-sidebar-open .edge-right-tap {
 }
 
 @media (min-width: 768px) {
-  body:has(#edge-right.edge-active) .edge-right-tap,
-  body:has(#edge-right.edge-pinned) .edge-right-tap {
-    right: calc(var(--chat-panel-width) - var(--file-sidebar-close-strip-width));
-  }
-
   .edge-right #chat-history {
-    padding-left: calc(0.6rem + var(--file-sidebar-close-strip-width));
+    padding-right: calc(0.6rem + var(--file-sidebar-close-strip-width));
   }
 
   .edge-right .chat-pane-input-row {
-    padding-left: calc(0.6rem + var(--file-sidebar-close-strip-width));
+    padding-right: calc(0.6rem + var(--file-sidebar-close-strip-width));
   }
 }
 

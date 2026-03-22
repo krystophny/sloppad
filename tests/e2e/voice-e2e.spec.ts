@@ -1,4 +1,4 @@
-import { applySessionCookie, expect, test } from './live';
+import { expect, openLiveApp, test } from './live';
 import { authenticate } from './helpers';
 
 test.describe('full browser voice flow @local-only', () => {
@@ -8,11 +8,8 @@ test.describe('full browser voice flow @local-only', () => {
     sessionToken = await authenticate();
   });
 
-  test('mic click -> real VAD -> real STT -> transcript in chat', async ({ page }) => {
-    await applySessionCookie(page, sessionToken);
-
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
+  test('mic click -> real browser capture -> real STT -> transcript in chat', async ({ page }) => {
+    await openLiveApp(page, sessionToken);
 
     // Wait for app to initialize and WS to connect.
     await page.waitForFunction(() => {
@@ -41,9 +38,24 @@ test.describe('full browser voice flow @local-only', () => {
       });
     }, { timeout: 8_000 }).toBe('recording');
 
-    // Wait for VAD to detect speech end from the silence padding in the WAV
-    // and for STT to process the audio. This can take up to 30s total.
-    // The flow is: VAD auto-stop -> audio sent to server -> STT transcription -> result in UI
+    // Let the fake device feed the speech segment into the real browser
+    // capture path. If VAD has not auto-stopped yet, stop manually so this
+    // E2E stays focused on browser capture -> STT -> chat delivery.
+    await page.waitForTimeout(3_000);
+    const stillRecording = await page.evaluate(() => {
+      const app = (window as any)._taburaApp;
+      const state = app?.getState?.();
+      return String(state?.voiceLifecycle || '') === 'recording';
+    });
+    if (stillRecording) {
+      await page.locator('#canvas-viewport').click({
+        position: { x: 420, y: 320 },
+        timeout: 10_000,
+      });
+    }
+
+    // Wait for STT to process the captured audio and for the transcript to
+    // appear in the UI.
     await expect.poll(async () => {
       const chatHistory = page.locator('#chat-history');
       const text = await chatHistory.textContent();

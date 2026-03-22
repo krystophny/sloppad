@@ -115,6 +115,7 @@ SH
     esac
     assert_contains "$out_file" "Service mode:  ${expected_os}"
     assert_contains "$out_file" "Piper TTS"
+    assert_contains "$out_file" "TTS backend:   Piper"
     assert_contains "$out_file" "Local LLM"
     assert_contains "$out_file" "skipping voxtype STT setup"
 
@@ -139,6 +140,12 @@ run_install_ps1_static_checks() {
     assert_contains "$ps1" "Setup-LocalLlm"
     assert_contains "$ps1" "gpt-oss-120b-default"
     assert_contains "$ps1" "Print-WindowsSTTNotice"
+}
+
+run_local_llm_profile_static_checks() {
+    assert_contains "${ROOT_DIR}/scripts/setup-local-llm.sh" 'CTX_SIZE="$(default_if_empty "$CTX_SIZE" "32768")"'
+    assert_contains "${ROOT_DIR}/deploy/launchd/io.tabura.llm.plist" "<string>32768</string>"
+    assert_contains "${ROOT_DIR}/scripts/install.sh" "Environment=TABURA_LLM_CTX=32768"
 }
 
 run_setup_codex_mcp_checks() {
@@ -169,6 +176,7 @@ main() {
     run_install_sh_dry_run
     run_llama_helper_checks
     run_install_ps1_static_checks
+    run_local_llm_profile_static_checks
     run_setup_codex_mcp_checks
     "${ROOT_DIR}/tests/installers/distribution_artifacts_test.sh"
     echo "installer tests passed"

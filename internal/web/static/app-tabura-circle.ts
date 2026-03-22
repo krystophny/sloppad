@@ -50,6 +50,16 @@ function currentSession() {
   return mode === 'meeting' ? 'meeting' : 'dialogue';
 }
 
+function sessionDisplayName(session: string) {
+  if (session === 'dialogue') return 'Dialogue';
+  if (session === 'meeting') return 'Meeting';
+  return 'Manual';
+}
+
+function toolDisplayName(tool: string) {
+  return String(tool || 'pointer').trim().replaceAll('_', ' ') || 'pointer';
+}
+
 function clearLongPressTimer() {
   if (longPressTimer !== null) {
     window.clearTimeout(longPressTimer);
@@ -375,15 +385,17 @@ export function renderTaburaCircle() {
 
   const tool = String(state.interaction.tool || 'pointer').trim().toLowerCase() || 'pointer';
   const session = currentSession();
+  const sessionLabel = sessionDisplayName(session);
+  const toolLabel = toolDisplayName(tool);
   dot.dataset.tool = tool;
   dot.dataset.icon = taburaCircleToolIconID(tool);
   dot.dataset.session = session;
   dot.dataset.silent = String(Boolean(state.ttsSilent));
-  dot.innerHTML = iconMarkup(taburaCircleToolIcon(tool));
+  dot.innerHTML = `${iconMarkup(taburaCircleToolIcon(tool))}<span class="tabura-circle-dot-badge" aria-hidden="true">${sessionLabel}</span>`;
   dot.title = circleExpanded ? 'Close Tabura Circle' : 'Open Tabura Circle';
   dot.setAttribute(
     'aria-label',
-    `${circleExpanded ? 'Close' : 'Open'} Tabura Circle. Current tool: ${tool.replace('_', ' ')}.`,
+    `${circleExpanded ? 'Close' : 'Open'} Tabura Circle. Live mode: ${sessionLabel}. Current tool: ${toolLabel}.`,
   );
   dot.setAttribute('aria-expanded', circleExpanded ? 'true' : 'false');
 

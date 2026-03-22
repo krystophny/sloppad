@@ -60,6 +60,10 @@
 }
 
 @media (hover: none) and (pointer: coarse) {
+  :root {
+    --file-sidebar-close-strip-width: 44px;
+  }
+
   input:not([type]),
   input[type="text"],
   input[type="search"],

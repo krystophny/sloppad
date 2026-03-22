@@ -10,7 +10,7 @@
   max-width: var(--file-sidebar-width);
   border-right: 1px solid var(--border);
   background: var(--bg-surface);
-  padding-right: var(--file-sidebar-close-strip-width);
+  padding-left: var(--file-sidebar-close-strip-width);
   min-height: 0;
   transform: translateX(-104%);
   transition: transform var(--panel-slide-duration) var(--panel-slide-ease);

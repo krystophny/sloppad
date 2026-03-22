@@ -19,7 +19,8 @@ const (
 	assistantLLMMaxTokens        = 4096
 	assistantLLMMaxToolRounds    = 6
 	assistantLLMMalformedRetries = 2
-	localAssistantDialoguePrompt = "You are Tabura's local assistant. Use tools when the task depends on workspace state, shell inspection, or MCP capabilities. Prefer native tool calls when the model supports them. If native tool calls are unavailable, respond with JSON only using either {\"tool_calls\":[...]} or {\"final\":\"...\"}. Available tools: shell with command and optional cwd, and mcp with name, arguments, and optional mcp_url. When a tool fails, recover with another tool call or explain the failure clearly. Do not emit markdown fences around JSON."
+	localAssistantDialoguePrompt = "You are Tabura's local assistant. Use shell or mcp tools only when needed. Otherwise answer directly. If native tool calls are unavailable, return JSON only: {\"tool_calls\":[...]} or {\"final\":\"...\"}. No markdown fences around JSON."
+	localAssistantDirectPrompt   = "You are Tabura's local assistant. Answer directly and briefly. No tools. No markdown fences. No <think> tags."
 )
 
 func normalizeAssistantMode(raw string) string {
@@ -79,16 +80,19 @@ func (a *App) localAssistantLLMModel() string {
 }
 
 func (a *App) buildLocalAssistantPrompt(sessionID string, session store.ChatSession, messages []store.ChatMessage, cursorCtx *chatCursorContext, inkCtx []*chatCanvasInkEvent, positionCtx []*chatCanvasPositionEvent, outputMode string) (string, error) {
+	var workspaceRef *store.Workspace
+	if workspace, err := a.effectiveWorkspaceForChatSession(session); err == nil {
+		workspaceRef = &workspace
+	}
 	canvasCtx := a.resolveCanvasContext(session.WorkspacePath)
 	companionCtx := a.loadCompanionPromptContext(session.WorkspacePath)
-	prompt := buildPromptFromHistoryForSessionWithCompanionPolicy(session.Mode, a.yoloModeEnabled(), sessionID, messages, canvasCtx, companionCtx, outputMode, "")
+	prompt := buildLeanLocalAssistantPrompt(workspaceRef, messages, canvasCtx, companionCtx, outputMode)
 	prompt = appendChatCursorPrompt(prompt, cursorCtx)
 	prompt = appendCanvasInkPrompt(prompt, inkCtx)
 	prompt = appendCanvasPositionPrompt(prompt, positionCtx)
 	if strings.TrimSpace(prompt) == "" {
 		return "", errors.New("empty prompt")
 	}
-	prompt = a.applyWorkspacePromptContext(session.WorkspacePath, prompt)
 	prompt, err := a.applyPreAssistantPromptHook(context.Background(), sessionID, session.WorkspacePath, outputMode, session.Mode, prompt)
 	if err != nil {
 		return "", err

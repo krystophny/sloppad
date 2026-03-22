@@ -233,7 +233,7 @@ export async function submitMessage(text, options: Record<string, any> = {}) {
   appendPlainMessage('user', finalText);
 
   if (!finalText.startsWith('/') && (isVoiceTurn() || isMobileSilent())) {
-    const pending = appendRenderedAssistant('_Thinking..._', { pending: true, localId: nextLocalMessageId() });
+    const pending = appendRenderedAssistant('_Working..._', { pending: true, localId: nextLocalMessageId() });
     state.pendingQueue.push(pending);
     updateAssistantActivityIndicator();
   }

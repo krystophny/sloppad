@@ -20,13 +20,13 @@
     <string>127.0.0.1</string>
     <string>--mcp-port</string>
     <string>9420</string>
-    <string>--app-server-url</string>
-    <string>ws://127.0.0.1:8787</string>
     <string>--tts-url</string>
     <string>http://127.0.0.1:8424</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>TABURA_ASSISTANT_MODE</key>
+    <string>local</string>
     <key>TABURA_INTENT_LLM_URL</key>
     <string>@@TABURA_INTENT_LLM_URL@@</string>
     <key>TABURA_INTENT_LLM_MODEL</key>
@@ -34,7 +34,7 @@
     <key>TABURA_INTENT_LLM_PROFILE</key>
     <string>qwen3.5-9b</string>
     <key>TABURA_INTENT_LLM_PROFILE_OPTIONS</key>
-    <string>qwen3.5-9b,qwen3.5-4b</string>
+    <string>qwen3.5-9b</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

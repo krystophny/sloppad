@@ -14,6 +14,14 @@
     <string>fast-qwen9b</string>
     <key>TABURA_LLM_MODEL_DIR</key>
     <string>@@LLM_MODEL_DIR@@</string>
+    <key>TABURA_LLM_MODEL_FILE</key>
+    <string>Qwen3.5-9B-Q4_K_M.gguf</string>
+    <key>TABURA_LLM_MODEL_URL</key>
+    <string>https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true</string>
+    <key>TABURA_LLM_CTX</key>
+    <string>32768</string>
+    <key>TABURA_LLM_THREADS</key>
+    <string>8</string>
     <key>LLAMA_SERVER_BIN</key>
     <string>@@LLAMA_SERVER_BIN@@</string>
   </dict>

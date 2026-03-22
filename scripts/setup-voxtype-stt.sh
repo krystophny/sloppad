@@ -19,6 +19,16 @@ if ! command -v "$VOXTYPE_BIN" >/dev/null 2>&1; then
   echo "Install voxtype and ensure it is in PATH (or set VOXTYPE_BIN)." >&2
   exit 1
 fi
+VOXTYPE_HELP="$("$VOXTYPE_BIN" --help 2>&1 || true)"
+case "$VOXTYPE_HELP" in
+  *"--service"*) ;;
+  *)
+  echo "voxtype binary does not expose the local STT service flags." >&2
+  echo "Installed version: $("$VOXTYPE_BIN" --version 2>/dev/null || echo unknown)" >&2
+  echo "Rebuild and reinstall the pinned branch via scripts/build-voxtype-macos.sh." >&2
+  exit 1
+  ;;
+esac
 
 LANGUAGE_CSV="$(printf '%s' "$LANGUAGE_RAW" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 if [ -z "$LANGUAGE_CSV" ]; then

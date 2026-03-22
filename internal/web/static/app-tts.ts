@@ -126,7 +126,7 @@ export class SentenceChunker {
   }
   _tryEmit() {
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
-    const boundaries = /([.!?])\s+/g;
+    const boundaries = /([.!?]+|[,;:])\s+/g;
     let lastIndex = 0;
     let match;
     while ((match = boundaries.exec(this._buffer)) !== null) {
@@ -138,11 +138,19 @@ export class SentenceChunker {
     if (lastIndex > 0) {
       this._buffer = this._buffer.slice(lastIndex).trimStart();
     }
+    if (this._buffer.length > 72) {
+      const softBreak = findChunkSoftBreak(this._buffer, 72);
+      if (softBreak > 0) {
+        const sentence = this._buffer.slice(0, softBreak).trim();
+        this._buffer = this._buffer.slice(softBreak).trimStart();
+        if (sentence) this._onSentence(sentence);
+      }
+    }
     if (this._buffer.length > 0) {
       this._timer = setTimeout(() => {
         this._timer = null;
         this.flush();
-      }, 300);
+      }, 120);
     }
   }
   flush() {
@@ -155,6 +163,23 @@ export class SentenceChunker {
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     this._buffer = '';
   }
+}
+
+function findChunkSoftBreak(text, softLimit = 72) {
+  const clean = String(text || '');
+  if (!clean) return -1;
+  if (clean.length <= softLimit) return -1;
+  const probe = clean.slice(0, softLimit + 1);
+  const preferred = Math.max(
+    probe.lastIndexOf(','),
+    probe.lastIndexOf(';'),
+    probe.lastIndexOf(':'),
+    probe.lastIndexOf('\n'),
+  );
+  if (preferred >= 24) return preferred + 1;
+  const whitespace = probe.lastIndexOf(' ');
+  if (whitespace >= 32) return whitespace + 1;
+  return -1;
 }
 
 export class TTSPlayer {
@@ -594,12 +619,12 @@ export function liveSessionStatusSummary() {
   if (isDialogueLiveSession()) {
     const lifecycle = syncVoiceLifecycle('live-dialogue-summary');
     if (lifecycle === VOICE_LIFECYCLE.TTS_PLAYING) return 'Dialogue • Talking';
-    if (lifecycle === VOICE_LIFECYCLE.ASSISTANT_WORKING || lifecycle === VOICE_LIFECYCLE.AWAITING_TURN) return 'Dialogue • Thinking';
+    if (lifecycle === VOICE_LIFECYCLE.ASSISTANT_WORKING || lifecycle === VOICE_LIFECYCLE.AWAITING_TURN) return 'Dialogue • Working';
     return 'Dialogue • Listening';
   }
   const runtimeState = normalizeCompanionRuntimeState(state.companionRuntimeState);
   if (runtimeState === COMPANION_RUNTIME_STATES.TALKING) return 'Meeting • Talking';
-  if (runtimeState === COMPANION_RUNTIME_STATES.THINKING) return 'Meeting • Thinking';
+  if (runtimeState === COMPANION_RUNTIME_STATES.THINKING) return 'Meeting • Working';
   if (runtimeState === COMPANION_RUNTIME_STATES.ERROR) return 'Meeting • Error';
   if (runtimeState === COMPANION_RUNTIME_STATES.LISTENING) return 'Meeting • Listening';
   return 'Meeting • Quiet';

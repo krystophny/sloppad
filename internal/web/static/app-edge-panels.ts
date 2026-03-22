@@ -24,6 +24,7 @@ const setSyncKeyboardStateNow = (...args) => refs.setSyncKeyboardStateNow(...arg
 const stepCanvasFile = (...args) => refs.stepCanvasFile(...args);
 
 const EDGE_TAP_SIZE_PX = 30;
+const EDGE_TAP_CANCEL_MOVE_PX = 18;
 
 export function getEdgeTapSizePx() {
   return EDGE_TAP_SIZE_PX;
@@ -141,7 +142,7 @@ export function initEdgePanels() {
       if (!touchState || ev.touches.length !== 1) return;
       const touch = ev.touches[0];
       const { dx, dy } = horizontalSwipeDelta(touchState, touch);
-      if (!touchState.moved && hasGestureMoved(dx, dy)) {
+      if (!touchState.moved && hasGestureMoved(dx, dy, EDGE_TAP_CANCEL_MOVE_PX)) {
         touchState.moved = true;
       }
       if (!options.allowHorizontalCanvasSwipe || touchState.swiped || !state.hasArtifact) return;

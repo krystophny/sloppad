@@ -106,6 +106,18 @@ have_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+voxtype_supports_stt_service() {
+    local help_text
+    if ! have_cmd "$1"; then
+        return 1
+    fi
+    help_text="$("$1" --help 2>&1 || true)"
+    case "$help_text" in
+        *"--service"*) return 0 ;;
+    esac
+    return 1
+}
+
 detect_llama_server() {
     local port url
     for port in 8080 8081 8081; do
@@ -631,12 +643,20 @@ NOTICE
         run_cmd chmod +x "$LLM_SETUP_SCRIPT"
     fi
 
-    local model_file="Qwen3.5-9B-Q4_K_M.gguf"
-    local model_url="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
+    local model_file model_url model_size
+    if [ "$TABURA_OS" = "darwin" ]; then
+        model_file="Qwen3.5-9B-Q4_K_M.gguf"
+        model_url="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
+        model_size="~5.9 GB"
+    else
+        model_file="Qwen3.5-9B-Q4_K_M.gguf"
+        model_url="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
+        model_size="~5.9 GB"
+    fi
     local model_path="${LLM_MODEL_DIR}/${model_file}"
     if [ -f "$model_path" ]; then
         log "LLM model already present: ${model_file}"
-    elif confirm_default_yes "Download Qwen3.5 9B GGUF model (~5.3 GB)?"; then
+    elif confirm_default_yes "Download Qwen3.5 9B GGUF model (${model_size})?"; then
         if [ "$DRY_RUN" = "1" ]; then
             run_cmd curl -fL -o "$model_path" "$model_url"
         else
@@ -662,8 +682,8 @@ NOTICE
         return
     fi
 
-    if have_cmd voxtype; then
-        log "voxtype already installed"
+    if voxtype_supports_stt_service voxtype; then
+        log "voxtype already installed with STT service support"
     elif [ "$TABURA_OS" = "linux" ] && have_cmd pacman; then
         if confirm_default_yes "Install voxtype via AUR (voxtype-bin, fallback voxtype)?"; then
             if have_cmd paru; then
@@ -706,12 +726,12 @@ NOTICE
         log "voxtype not found; install voxtype and ensure it is on PATH"
     fi
 
-    if have_cmd voxtype; then
+    if voxtype_supports_stt_service voxtype; then
         if confirm_default_yes "Download voxtype model large-v3-turbo (~1.5 GB)?"; then
             run_cmd voxtype setup --download --model large-v3-turbo --no-post-install
         fi
     else
-        log "voxtype was not installed; speech-to-text remains unavailable"
+        log "voxtype with STT service support was not installed; speech-to-text remains unavailable"
     fi
 
     local staging_stt="${1:-}"
@@ -775,6 +795,7 @@ Type=simple
 Environment=TABURA_LLM_MODEL_DIR=${LLM_MODEL_DIR}
 Environment=TABURA_LLM_MODEL_FILE=Qwen3.5-9B-Q4_K_M.gguf
 Environment=TABURA_LLM_MODEL_URL=https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true
+Environment=TABURA_LLM_CTX=32768
 Environment=LLAMA_SERVER_BIN=${LLAMA_SERVER_BIN_RESOLVED}
 ExecStart=${LLM_SETUP_SCRIPT}
 Restart=on-failure
@@ -888,17 +909,19 @@ write_launchd_plists() {
 
     [ -d "$template_dir" ] || fail "launchd templates not found in ${template_dir}"
 
-    substitute_launchd_template "${template_dir}/io.tabura.codex-app-server.plist" "${agent_dir}/io.tabura.codex-app-server.plist"
     substitute_launchd_template "${template_dir}/io.tabura.piper-tts.plist" "${agent_dir}/io.tabura.piper-tts.plist"
+    run_cmd launchctl unload "${agent_dir}/io.tabura.macos-tts.plist" >/dev/null 2>&1 || true
+    run_cmd launchctl unload "${agent_dir}/io.tabura.codex-app-server.plist" >/dev/null 2>&1 || true
+    run_cmd rm -f "${agent_dir}/io.tabura.macos-tts.plist" "${agent_dir}/io.tabura.codex-app-server.plist"
 
     if [ -x "$LLM_SETUP_SCRIPT" ] && [ -z "$REUSE_LLM_URL" ]; then
         substitute_launchd_template "${template_dir}/io.tabura.llm.plist" "${agent_dir}/io.tabura.llm.plist"
-        substitute_launchd_template "${template_dir}/io.tabura.codex-llm.plist" "${agent_dir}/io.tabura.codex-llm.plist"
     else
         run_cmd launchctl unload "${agent_dir}/io.tabura.llm.plist" >/dev/null 2>&1 || true
-        run_cmd launchctl unload "${agent_dir}/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
-        run_cmd rm -f "${agent_dir}/io.tabura.llm.plist" "${agent_dir}/io.tabura.codex-llm.plist"
+        run_cmd rm -f "${agent_dir}/io.tabura.llm.plist"
     fi
+    run_cmd launchctl unload "${agent_dir}/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
+    run_cmd rm -f "${agent_dir}/io.tabura.codex-llm.plist"
 
     if [ -x "$STT_SETUP_SCRIPT" ]; then
         substitute_launchd_template "${template_dir}/io.tabura.stt.plist" "${agent_dir}/io.tabura.stt.plist"
@@ -918,16 +941,9 @@ install_services_macos() {
     local agent_dir
     agent_dir="${HOME}/Library/LaunchAgents"
     write_launchd_plists "$staging_dir"
-    load_launchd_service "${agent_dir}/io.tabura.codex-app-server.plist"
     load_launchd_service "${agent_dir}/io.tabura.piper-tts.plist"
-    if [ -f "${agent_dir}/io.tabura.intent.plist" ]; then
-        load_launchd_service "${agent_dir}/io.tabura.intent.plist"
-    fi
     if [ -f "${agent_dir}/io.tabura.llm.plist" ]; then
         load_launchd_service "${agent_dir}/io.tabura.llm.plist"
-    fi
-    if [ -f "${agent_dir}/io.tabura.codex-llm.plist" ]; then
-        load_launchd_service "${agent_dir}/io.tabura.codex-llm.plist"
     fi
     if [ -f "${agent_dir}/io.tabura.stt.plist" ]; then
         load_launchd_service "${agent_dir}/io.tabura.stt.plist"
@@ -960,7 +976,7 @@ open_browser() {
 print_summary() {
     local version="$1"
     local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
-    local effective_codex_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8080}"
+    local tts_summary="Piper (${MODEL_DIR})"
     cat <<SUMMARY
 
 Install complete
@@ -968,16 +984,27 @@ Install complete
   Binary:        ${BIN_PATH}
   Data root:     ${DATA_ROOT}
   Project dir:   ${PROJECT_DIR}
-  Piper models:  ${MODEL_DIR}
-  Piper venv:    ${VENV_DIR}
+  TTS backend:   ${tts_summary}
   Service mode:  ${TABURA_OS}
   Web URL:       http://127.0.0.1:8420
-  Intent LLM:   ${effective_llm_url}
-  Codex LLM:    ${effective_codex_llm_url}
+  Intent LLM:    ${effective_llm_url}
 SUMMARY
     if [ -n "$REUSE_LLM_URL" ]; then
         log "using existing llama-server at ${REUSE_LLM_URL} (no tabura-llm service created)"
     fi
+}
+
+disable_lm_studio_login_item() {
+    [ "$TABURA_OS" = "darwin" ] || return 0
+    if [ "$DRY_RUN" = "1" ]; then
+        log "[dry-run] remove LM Studio from login items"
+        return 0
+    fi
+    osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+tell application "System Events"
+    delete every login item whose name is "LM Studio"
+end tell
+APPLESCRIPT
 }
 
 remove_linux_services() {
@@ -1044,6 +1071,7 @@ install_flow() {
     installed_tag="$(download_release_payload "$release_json" "$tmpdir")"
     install_binary_payload "$tmpdir"
     bootstrap_project
+    disable_lm_studio_login_item
     setup_piper_tts
     setup_local_llm "$tmpdir"
     install_voxtype_stt "$tmpdir"

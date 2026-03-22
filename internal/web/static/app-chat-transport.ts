@@ -649,7 +649,7 @@ export function handleChatEvent(payload) {
     const row = findAssistantRowForTurn(turnID) || ensurePendingForTurn(turnID);
     if (row && (markdown.trim() || html)) {
       const pending = row instanceof HTMLElement ? row.classList.contains('is-pending') : true;
-      updateAssistantRow(row, markdown || '_Thinking..._', pending, { html });
+      updateAssistantRow(row, markdown || '_Working..._', pending, { html });
     }
     if (!isVoiceTurn()) hideOverlay();
     return;
@@ -676,7 +676,7 @@ export function handleChatEvent(payload) {
     if (String(md || '').trim()) {
       updateAssistantRow(row, md, true);
     } else if (!renderOnCanvas) {
-      updateAssistantRow(row, '_Thinking..._', true);
+      updateAssistantRow(row, '_Working..._', true);
     }
 
     if (autoCanvas) {
@@ -697,8 +697,9 @@ export function handleChatEvent(payload) {
       }
       if (shouldSpeakStreaming && canSpeakTTS()) {
         const { ttsText, ttsLang } = extractTTSText(md);
+        const { ttsText: hintedDeltaText } = extractTTSText(String(payload.delta || ''));
         if (ttsLang) setTTSSpeakLang(ttsLang);
-        const diff = computeTTSDiff(ttsText);
+        const diff = computeTTSDiff(ttsText, hintedDeltaText);
         queueTTSDiff(diff);
       }
     }
@@ -742,8 +743,9 @@ export function handleChatEvent(payload) {
 
     if (shouldSpeakTurn && canSpeakTTS() && md.trim()) {
       const { ttsText, ttsLang } = extractTTSText(md);
+      const { ttsText: hintedDeltaText } = extractTTSText(String(payload.delta || ''));
       if (ttsLang) setTTSSpeakLang(ttsLang);
-      const diff = computeTTSDiff(ttsText);
+      const diff = computeTTSDiff(ttsText, hintedDeltaText);
       queueTTSDiff(diff);
     } else if (autoCanvas) {
       state.indicatorSuppressedByCanvasUpdate = true;

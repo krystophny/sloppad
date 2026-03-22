@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,41 +32,31 @@ func (a *App) handleTTSSpeak(sessionID string, conn *chatWSConn, seq int64, text
 			})
 		}
 	}
-	wavData, clientErr := a.synthesizeTTSAudio(sessionID, seq, text, lang)
-	ready := conn.completeTTSSeq(seq, wavData, clientErr)
-	for _, result := range ready {
-		if result.err != "" {
-			log.Printf("tts emit error: session=%s seq=%d err=%s", sessionID, result.seq, result.err)
-			if workspacePath != "" {
-				a.broadcastCompanionRuntimeState(workspacePath, companionRuntimeSnapshot{
-					State:         companionRuntimeStateError,
-					Reason:        "tts_failed",
-					Error:         result.err,
-					WorkspacePath: workspacePath,
-					OutputMode:    turnOutputModeVoice,
-				})
-			}
-			_ = conn.writeJSON(map[string]string{"type": "tts_error", "error": result.err})
-			continue
-		}
-		if err := conn.writeBinary(result.audio); err != nil {
-			log.Printf("tts websocket write error: session=%s seq=%d bytes=%d err=%v", sessionID, result.seq, len(result.audio), err)
-			if workspacePath != "" {
-				a.broadcastCompanionRuntimeState(workspacePath, companionRuntimeSnapshot{
-					State:         companionRuntimeStateError,
-					Reason:        "tts_delivery_failed",
-					Error:         err.Error(),
-					WorkspacePath: workspacePath,
-					OutputMode:    turnOutputModeVoice,
-				})
-			}
-			continue
-		}
-		log.Printf("tts delivered: session=%s seq=%d bytes=%d", sessionID, result.seq, len(result.audio))
+	if conn == nil {
+		return
+	}
+	conn.waitTTSStreamTurn(seq)
+	defer conn.finishTTSStreamTurn(seq)
+
+	delivered, clientErr := a.streamTTSAudio(sessionID, conn, seq, text, lang)
+	if clientErr != "" {
+		log.Printf("tts emit error: session=%s seq=%d err=%s", sessionID, seq, clientErr)
 		if workspacePath != "" {
-			if project, err := a.store.GetWorkspaceByStoredPath(workspacePath); err == nil {
-				a.settleCompanionRuntimeState(workspacePath, a.loadCompanionConfig(project), "tts_completed")
-			}
+			a.broadcastCompanionRuntimeState(workspacePath, companionRuntimeSnapshot{
+				State:         companionRuntimeStateError,
+				Reason:        "tts_failed",
+				Error:         clientErr,
+				WorkspacePath: workspacePath,
+				OutputMode:    turnOutputModeVoice,
+			})
+		}
+		_ = conn.writeJSON(map[string]string{"type": "tts_error", "error": clientErr})
+		return
+	}
+	_ = conn.writeJSON(map[string]any{"type": "tts_done", "seq": seq, "chunks": delivered})
+	if workspacePath != "" {
+		if project, err := a.store.GetWorkspaceByStoredPath(workspacePath); err == nil {
+			a.settleCompanionRuntimeState(workspacePath, a.loadCompanionConfig(project), "tts_completed")
 		}
 	}
 }
@@ -122,4 +114,95 @@ func (a *App) synthesizeTTSAudio(sessionID string, seq int64, text, lang string)
 		return nil, "failed to read TTS response"
 	}
 	return wavData, ""
+}
+
+type streamingTTSChunk struct {
+	Audio string `json:"audio"`
+}
+
+func (a *App) streamTTSAudio(sessionID string, conn *chatWSConn, seq int64, text, lang string) (int, string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		log.Printf("tts dropped: session=%s seq=%d reason=empty_text", sessionID, seq)
+		return 0, "text is required"
+	}
+	if lang == "" {
+		lang = "en"
+	}
+
+	ttsURL := strings.TrimSpace(a.ttsURL)
+	if ttsURL == "" {
+		log.Printf("tts dropped: session=%s seq=%d reason=service_not_configured", sessionID, seq)
+		return 0, "TTS service not configured"
+	}
+	log.Printf("tts start: session=%s seq=%d chars=%d lang=%q stream=true", sessionID, seq, len([]rune(text)), strings.TrimSpace(lang))
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"input":           text,
+		"voice":           lang,
+		"response_format": "wav",
+		"stream":          true,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), ttsRequestTimeout)
+	defer cancel()
+
+	upstream := fmt.Sprintf("%s/v1/audio/speech", strings.TrimRight(ttsURL, "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstream, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("tts request build error: session=%s seq=%d err=%v", sessionID, seq, err)
+		return 0, "failed to create TTS request"
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("tts upstream error: session=%s seq=%d err=%v", sessionID, seq, err)
+		return 0, "TTS service unavailable"
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		log.Printf("tts upstream HTTP %d: session=%s seq=%d body=%s", resp.StatusCode, sessionID, seq, strings.TrimSpace(string(errBody)))
+		return 0, fmt.Sprintf("TTS error: HTTP %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	const maxStreamingLine = 16 * 1024 * 1024
+	scanner.Buffer(make([]byte, 0, 64*1024), maxStreamingLine)
+	delivered := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var chunk streamingTTSChunk
+		if err := json.Unmarshal([]byte(line), &chunk); err != nil {
+			log.Printf("tts stream decode error: session=%s seq=%d err=%v", sessionID, seq, err)
+			return delivered, "failed to decode TTS stream"
+		}
+		audio, err := base64.StdEncoding.DecodeString(strings.TrimSpace(chunk.Audio))
+		if err != nil {
+			log.Printf("tts stream base64 error: session=%s seq=%d err=%v", sessionID, seq, err)
+			return delivered, "failed to decode TTS chunk"
+		}
+		if len(audio) <= 44 {
+			continue
+		}
+		if err := conn.writeBinary(audio); err != nil {
+			log.Printf("tts websocket write error: session=%s seq=%d bytes=%d err=%v", sessionID, seq, len(audio), err)
+			return delivered, err.Error()
+		}
+		delivered++
+		log.Printf("tts delivered: session=%s seq=%d chunk=%d bytes=%d", sessionID, seq, delivered, len(audio))
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("tts stream read error: session=%s seq=%d err=%v", sessionID, seq, err)
+		return delivered, "failed to read TTS stream"
+	}
+	if delivered == 0 {
+		return 0, "TTS stream returned no audio"
+	}
+	return delivered, ""
 }

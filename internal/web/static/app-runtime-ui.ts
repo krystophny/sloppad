@@ -751,7 +751,7 @@ export function companionStatusCopy(runtimeState) {
     case COMPANION_RUNTIME_STATES.LISTENING:
       return { label: 'Listening', detail: 'Ambient capture is live.' };
     case COMPANION_RUNTIME_STATES.THINKING:
-      return { label: 'Thinking', detail: 'Working through the current request.' };
+      return { label: 'Working', detail: 'Processing the current request.' };
     case COMPANION_RUNTIME_STATES.TALKING:
       return { label: 'Talking', detail: 'Speaking the current response.' };
     case COMPANION_RUNTIME_STATES.ERROR:

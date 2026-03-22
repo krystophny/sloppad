@@ -10,13 +10,16 @@ Start::
 """
 
 import asyncio
+import base64
 import io
+import json
 import os
 import threading
 import wave
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 
 MODEL_DIR = os.environ.get(
     "PIPER_MODEL_DIR",
@@ -50,6 +53,16 @@ def _get_voice(lang: str):
     return _voices[lang], _voice_locks[lang]
 
 
+def _wav_bytes_from_pcm(pcm_bytes: bytes, sample_rate: int) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm_bytes)
+    return buf.getvalue()
+
+
 @app.on_event("startup")
 def preload():
     for lang, path in MODELS.items():
@@ -74,21 +87,26 @@ async def speech(request: Request):
 
     voice_key = str(body.get("voice", "en")).strip().lower()
     lang = "de" if voice_key in ("de", "de_de", "german") else "en"
+    stream = bool(body.get("stream"))
 
     voice, lock = _get_voice(lang)
+
+    if stream:
+        def _synthesize_stream():
+            with lock:
+                for chunk in voice.synthesize(text):
+                    wav_bytes = _wav_bytes_from_pcm(chunk.audio_int16_bytes, voice.config.sample_rate)
+                    payload = {"audio": base64.b64encode(wav_bytes).decode("ascii")}
+                    yield (json.dumps(payload) + "\n").encode("utf-8")
+
+        return StreamingResponse(_synthesize_stream(), media_type="application/x-ndjson")
 
     def _synthesize():
         with lock:
             pcm_chunks = []
             for chunk in voice.synthesize(text):
                 pcm_chunks.append(chunk.audio_int16_bytes)
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(voice.config.sample_rate)
-            wav.writeframes(b"".join(pcm_chunks))
-        return buf.getvalue()
+        return _wav_bytes_from_pcm(b"".join(pcm_chunks), voice.config.sample_rate)
 
     data = await asyncio.to_thread(_synthesize)
     return Response(content=data, media_type="audio/wav")

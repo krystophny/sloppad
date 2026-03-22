@@ -59,8 +59,8 @@ async function expectSidebarCloseStripToStayFree(page: Page) {
   const edgeBox = await edgeLeftTap.boundingBox();
   expect(rowBox).not.toBeNull();
   expect(edgeBox).not.toBeNull();
-  const rowRight = Number(rowBox?.x || 0) + Number(rowBox?.width || 0);
-  expect(rowRight).toBeLessThanOrEqual(Number(edgeBox?.x || 0) + 1);
+  const stripRight = Number(edgeBox?.x || 0) + Number(edgeBox?.width || 0);
+  expect(Number(rowBox?.x || 0)).toBeGreaterThanOrEqual(stripRight - 1);
 }
 
 async function clickSidebarCloseStripAtRowHeight(page: Page) {

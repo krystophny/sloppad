@@ -198,6 +198,33 @@ test('workspace sidebar exposes meeting transcript, summary, and references view
   await expect(page.locator('#canvas-text')).toContainText('Budget');
 });
 
+test('meeting mode does not keep the idle cursor indicator pinned on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await waitReady(page);
+
+  await page.evaluate(async () => {
+    const ui = await import('../../internal/web/static/ui.js');
+    const canvasUi = await import('../../internal/web/static/app-canvas-ui.js');
+    const appState = (window as any)._taburaApp?.getState?.();
+    if (!appState || typeof canvasUi.updateAssistantActivityIndicator !== 'function') {
+      throw new Error('tabura modules not ready');
+    }
+    appState.liveSessionActive = true;
+    appState.liveSessionMode = 'meeting';
+    appState.requestedPositionPrompt = false;
+    appState.hotwordActive = false;
+    appState.ttsPlaying = false;
+    appState.voiceAwaitingTurn = false;
+    appState.chatVoiceCapture = null;
+    appState.assistantActiveTurns.clear();
+    appState.assistantUnknownTurns = 0;
+    ui.pinCursorAnchor(320, 280, { title: 'Meeting note', x: 320, y: 280 });
+    canvasUi.updateAssistantActivityIndicator();
+  });
+
+  await expect(page.locator('#indicator')).toBeHidden();
+});
+
 test('meeting summary proposes selectable inbox items and creates the chosen ones', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await waitReady(page);
