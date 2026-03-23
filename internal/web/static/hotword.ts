@@ -29,6 +29,7 @@ const HOTWORD_MODEL_FILES = {
   mel: `${HOTWORD_VENDOR_BASE}/melspectrogram.onnx`,
   embedding: `${HOTWORD_VENDOR_BASE}/embedding_model.onnx`,
   keyword: `${HOTWORD_VENDOR_BASE}/sloppy.onnx`,
+  keywordData: `${HOTWORD_VENDOR_BASE}/sloppy.onnx.data`,
 };
 const HOTWORD_DEFAULT_THRESHOLD = 0.3;
 const HOTWORD_DETECTION_COOLDOWN_MS = 800;
@@ -428,7 +429,13 @@ async function initOnnxModel() {
 
   const melSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.mel, sessionOptions);
   const embeddingSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.embedding, sessionOptions);
-  const keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, sessionOptions);
+  const keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, {
+    ...sessionOptions,
+    externalData: [{
+      path: 'sloppy.onnx.data',
+      data: HOTWORD_MODEL_FILES.keywordData,
+    }],
+  });
 
   state.model = {
     melSession,

@@ -141,6 +141,7 @@ test('hotword runtime uses sloppy model defaults', async ({ page }) => {
   });
 
   expect(new URL(config.modelFiles.keyword).pathname).toContain('/static/vendor/openwakeword/sloppy.onnx');
+  expect(new URL(config.modelFiles.keywordData).pathname).toContain('/static/vendor/openwakeword/sloppy.onnx.data');
   expect(config.defaultThreshold).toBe(0.3);
   expect(config.detectionCooldownMs).toBe(800);
 });

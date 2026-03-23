@@ -19,6 +19,7 @@ var hotwordRuntimeAssetFiles = []string{
 	"melspectrogram.onnx",
 	"embedding_model.onnx",
 	hotwordModelFileName,
+	hotwordModelFileName + ".data",
 }
 
 func (a *App) hotwordProjectRoot() string {

@@ -99,8 +99,8 @@ func TestHotwordStatusReportsReadyWhenAllAssetsPresent(t *testing.T) {
 	if exists, _ := modelRaw["exists"].(bool); !exists {
 		t.Fatalf("expected model exists=true, got %#v", modelRaw["exists"])
 	}
-	if size, _ := modelRaw["size_bytes"].(float64); size != 1 {
-		t.Fatalf("model size = %#v, want 1", modelRaw["size_bytes"])
+	if size, _ := modelRaw["size_bytes"].(float64); size != 2 {
+		t.Fatalf("model size = %#v, want 2", modelRaw["size_bytes"])
 	}
 	if modified, _ := modelRaw["modified_at"].(string); modified != modifiedAt.Format(time.RFC3339) {
 		t.Fatalf("model modified_at = %#v, want %q", modelRaw["modified_at"], modifiedAt.Format(time.RFC3339))
