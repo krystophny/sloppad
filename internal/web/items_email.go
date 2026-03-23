@@ -879,6 +879,15 @@ func (a *App) emailContainerRepairIDs(account store.ExternalAccount) ([]string, 
 }
 
 func (a *App) syncEmailAccount(ctx context.Context, account store.ExternalAccount) (int, error) {
+	if a != nil && a.accountSyncs != nil {
+		return a.accountSyncs.Do(ctx, account.ID, func(ctx context.Context) (int, error) {
+			return a.syncEmailAccountDirect(ctx, account)
+		})
+	}
+	return a.syncEmailAccountDirect(ctx, account)
+}
+
+func (a *App) syncEmailAccountDirect(ctx context.Context, account store.ExternalAccount) (int, error) {
 	cfg, err := decodeEmailSyncAccountConfig(account)
 	if err != nil {
 		return 0, err

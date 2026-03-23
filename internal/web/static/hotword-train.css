@@ -125,6 +125,10 @@ body {
   margin-top: 1rem;
 }
 
+.train-card-hero {
+  grid-column: 1 / -1;
+}
+
 .train-card {
   padding: 1.5rem;
   border: 1px solid var(--train-line);
@@ -166,14 +170,113 @@ body {
   min-width: 12rem;
 }
 
+.train-field-wide {
+  min-width: 100%;
+}
+
 .train-field select,
-.train-field input {
+.train-field input,
+.train-field textarea {
   min-height: 2.75rem;
   border: 1px solid var(--train-line);
   border-radius: 0.95rem;
-  padding: 0 0.85rem;
+  padding: 0.75rem 0.85rem;
   background: rgba(255, 255, 255, 0.78);
   font: inherit;
+}
+
+.train-field textarea {
+  min-height: 6.75rem;
+  resize: vertical;
+}
+
+.train-hero-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 1rem;
+}
+
+.train-panel {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  padding: 1rem;
+  border: 1px solid var(--train-line);
+  border-radius: 1.15rem;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.train-panel h3 {
+  margin: 0;
+  font-family: "IBM Plex Serif", "Iowan Old Style", serif;
+}
+
+.train-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.train-check {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.2rem 0;
+  color: var(--train-muted);
+}
+
+.train-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.train-summary-card,
+.train-generator-item {
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--train-line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.train-summary-card strong,
+.train-generator-item strong {
+  display: block;
+  margin-bottom: 0.2rem;
+}
+
+.train-summary-card span,
+.train-generator-item span,
+.train-generator-item code {
+  color: var(--train-muted);
+  font-size: 0.92rem;
+}
+
+.train-generator-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.train-progress {
+  height: 0.75rem;
+  border-radius: 999px;
+  background: rgba(13, 90, 69, 0.14);
+  overflow: hidden;
+}
+
+.train-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0d5a45 0%, #1b7d62 55%, #c99f45 100%);
+  transition: width 180ms ease;
+}
+
+.train-progress-label {
+  margin: -0.15rem 0 0;
+  color: var(--train-muted);
+  font-size: 0.9rem;
 }
 
 .train-upload input {
@@ -258,5 +361,10 @@ audio {
   .train-header {
     flex-direction: column;
   }
-}
 
+  .train-hero-layout,
+  .train-config-grid,
+  .train-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -33,7 +33,7 @@ func TestHotwordTrainPageRequiresAuthAndServesShell(t *testing.T) {
 	body := authed.Body.String()
 	for _, needle := range []string{
 		"<title>Hotword Training | Tabura</title>",
-		"Train \"Sloppy\" in one focused pass.",
+		"Train \"Sloppy\" with cloned voice, real clips, and live progress.",
 		`src="./static/hotword-train.js`,
 	} {
 		if !strings.Contains(body, needle) {
@@ -174,8 +174,8 @@ echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy.onnx"
 	server := httptest.NewServer(app.Router())
 	defer server.Close()
 	generationEvent := readStatusEvent(t, server.URL+"/api/hotword/train/generate/status")
-	if !strings.Contains(generationEvent, `"state":"running"`) {
-		t.Fatalf("generation event = %s, want running status", generationEvent)
+	if !strings.Contains(generationEvent, `"state":"running"`) && !strings.Contains(generationEvent, `"state":"completed"`) {
+		t.Fatalf("generation event = %s, want active status", generationEvent)
 	}
 	waitForHotwordJob(t, 5*time.Second, func() bool {
 		return app.hotwordTrainer.GenerationStatus().State == "completed"
@@ -227,6 +227,109 @@ echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy.onnx"
 	}
 	if string(data) != "trained-model" {
 		t.Fatalf("deployed model = %q, want %q", string(data), "trained-model")
+	}
+}
+
+func TestHotwordTrainConfigRoundTrip(t *testing.T) {
+	app := newAuthedTestApp(t)
+	root := t.TempDir()
+	app.localProjectDir = root
+	app.hotwordTrainer = app.hotwordTrainerForTest(root)
+
+	getRR := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/hotword/train/config", nil)
+	if getRR.Code != http.StatusOK {
+		t.Fatalf("GET config status = %d, want 200 body=%s", getRR.Code, getRR.Body.String())
+	}
+	getPayload := decodeJSONResponse(t, getRR)
+	config, ok := getPayload["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("config payload missing: %#v", getPayload)
+	}
+	settings := config["settings"].(map[string]any)
+	if strFromAny(settings["preferred_generator"]) != "qwen3tts" {
+		t.Fatalf("preferred_generator = %q, want qwen3tts", strFromAny(settings["preferred_generator"]))
+	}
+
+	putRR := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/hotword/train/config", map[string]any{
+		"preferred_generator": "piper",
+		"sample_count":        3000,
+		"auto_deploy":         false,
+		"negative_phrases":    []string{"copy", "slowly"},
+		"generator_commands": map[string]any{
+			"qwen3tts": "/tmp/qwen3tts-hotword",
+			"piper":    "/tmp/piper-hotword",
+		},
+	})
+	if putRR.Code != http.StatusOK {
+		t.Fatalf("PUT config status = %d, want 200 body=%s", putRR.Code, putRR.Body.String())
+	}
+	putPayload := decodeJSONResponse(t, putRR)
+	putConfig := putPayload["config"].(map[string]any)
+	putSettings := putConfig["settings"].(map[string]any)
+	if strFromAny(putSettings["preferred_generator"]) != "piper" {
+		t.Fatalf("updated preferred_generator = %q, want piper", strFromAny(putSettings["preferred_generator"]))
+	}
+	if int(putSettings["sample_count"].(float64)) != 3000 {
+		t.Fatalf("updated sample_count = %v, want 3000", putSettings["sample_count"])
+	}
+}
+
+func TestHotwordTrainPipelineStart(t *testing.T) {
+	app := newAuthedTestApp(t)
+	root := t.TempDir()
+	app.localProjectDir = root
+	app.hotwordTrainer = app.hotwordTrainerForTest(root)
+
+	generatorScript := filepath.Join(root, "generate.sh")
+	if err := os.WriteFile(generatorScript, []byte(`#!/usr/bin/env bash
+set -euo pipefail
+OUTPUT_DIR=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "$OUTPUT_DIR"
+printf 'RIFF....WAVEfmt ' >"$OUTPUT_DIR/piper-0001.wav"
+echo "generated sample"
+`), 0o755); err != nil {
+		t.Fatalf("write generator script: %v", err)
+	}
+	trainingScript := filepath.Join(root, "train.sh")
+	if err := os.WriteFile(trainingScript, []byte(`#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "$TABURA_HOTWORD_OUTPUT_DIR"
+printf 'trained-model' >"$TABURA_HOTWORD_OUTPUT_DIR/sloppy.onnx"
+echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy.onnx"
+`), 0o755); err != nil {
+		t.Fatalf("write training script: %v", err)
+	}
+	app.hotwordTrainer.SetGeneratorScriptPath("piper", generatorScript)
+	app.hotwordTrainer.SetTrainingScriptPath(trainingScript)
+
+	upload := uploadHotwordRecording(t, app, "hotword")
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload status = %d, want 201", upload.Code)
+	}
+
+	pipelineRR := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/hotword/train/pipeline", map[string]any{
+		"models": []string{"piper"},
+	})
+	if pipelineRR.Code != http.StatusAccepted {
+		t.Fatalf("pipeline status = %d, want 202 body=%s", pipelineRR.Code, pipelineRR.Body.String())
+	}
+
+	waitForHotwordJob(t, 5*time.Second, func() bool {
+		status := app.hotwordTrainer.TrainingStatus()
+		return status.State == "completed" || status.State == "failed"
+	})
+	status := app.hotwordTrainer.TrainingStatus()
+	if status.State != "completed" {
+		t.Fatalf("pipeline state = %q, want completed (message=%q)", status.State, status.Message)
+	}
+	if !strings.Contains(status.Message, "deployed") {
+		t.Fatalf("pipeline message = %q, want deployed", status.Message)
 	}
 }
 

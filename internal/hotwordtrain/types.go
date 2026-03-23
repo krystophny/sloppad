@@ -62,5 +62,46 @@ type GenerateRequest struct {
 }
 
 type TrainRequest struct {
-	ConfigPath string `json:"config_path"`
+	ConfigPath      string   `json:"config_path"`
+	SampleCount     int      `json:"sample_count"`
+	NegativePhrases []string `json:"negative_phrases"`
+}
+
+type PipelineRequest struct {
+	Models []string `json:"models"`
+}
+
+type GeneratorInfo struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Command     string `json:"command,omitempty"`
+	Available   bool   `json:"available"`
+	Recommended bool   `json:"recommended"`
+	Message     string `json:"message,omitempty"`
+}
+
+type Settings struct {
+	PreferredGenerator string            `json:"preferred_generator"`
+	SampleCount        int               `json:"sample_count"`
+	AutoDeploy         bool              `json:"auto_deploy"`
+	NegativePhrases    []string          `json:"negative_phrases"`
+	GeneratorCommands  map[string]string `json:"generator_commands,omitempty"`
+}
+
+type DatasetSummary struct {
+	HotwordClips      int             `json:"hotword_clips"`
+	ReferenceClips    int             `json:"reference_clips"`
+	TestClips         int             `json:"test_clips"`
+	Feedback          FeedbackSummary `json:"feedback"`
+	LatestModel       string          `json:"latest_model,omitempty"`
+	ProductionModel   string          `json:"production_model,omitempty"`
+	GeneratedSamples  int             `json:"generated_samples"`
+	GenerationRunning bool            `json:"generation_running"`
+	TrainingRunning   bool            `json:"training_running"`
+}
+
+type TrainUIConfig struct {
+	Settings   Settings        `json:"settings"`
+	Generators []GeneratorInfo `json:"generators"`
+	Dataset    DatasetSummary  `json:"dataset"`
 }

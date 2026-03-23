@@ -205,11 +205,14 @@ Participant and STT APIs:
 - `POST /api/hotword/train/recordings`
 - `DELETE /api/hotword/train/recordings/{recording_id}`
 - `GET /api/hotword/train/recordings/{recording_id}/audio`
+- `GET /api/hotword/train/config`
+- `PUT /api/hotword/train/config`
 - `POST /api/hotword/train/generate`
 - `GET /api/hotword/train/generate/status`
 - `GET /api/hotword/train/feedback`
 - `POST /api/hotword/train/feedback`
 - `POST /api/hotword/train/start`
+- `POST /api/hotword/train/pipeline`
 - `GET /api/hotword/train/status`
 - `POST /api/hotword/train/deploy`
 - `GET /api/hotword/train/models`

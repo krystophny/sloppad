@@ -21,9 +21,11 @@ import (
 const (
 	defaultModelName        = "sloppy"
 	defaultGeneratedSamples = 250
+	defaultPreferredModel   = "qwen3tts"
 	recordingsDirName       = "recordings"
 	modelsDirName           = "models"
 	generatedDirName        = "generated"
+	settingsFileName        = "settings.json"
 	statusStateIdle         = "idle"
 	statusStateRunning      = "running"
 	statusStateCompleted    = "completed"
@@ -41,6 +43,7 @@ type Manager struct {
 
 	mu             sync.Mutex
 	generatorPaths map[string]string
+	settings       Settings
 	generation     Status
 	training       Status
 	generationSubs map[chan Status]struct{}
@@ -59,14 +62,16 @@ func New(dataDir, projectRoot string) *Manager {
 		projectRoot:  root,
 		trainingPath: filepath.Join(root, "scripts", "train-hotword.sh"),
 		generatorPaths: map[string]string{
-			"qwen3tts":  filepath.Join(root, "scripts", "hotword-generate-qwen3tts.sh"),
-			"gptsovits": filepath.Join(root, "scripts", "hotword-generate-gptsovits.sh"),
+			"qwen3tts":  defaultGeneratorPath(strings.TrimSpace(os.Getenv("TABURA_HOTWORD_QWEN3TTS_COMMAND")), filepath.Join(root, "scripts", "hotword-generate-qwen3tts.sh")),
+			"gptsovits": defaultGeneratorPath(strings.TrimSpace(os.Getenv("TABURA_HOTWORD_GPTSOVITS_COMMAND")), filepath.Join(root, "scripts", "hotword-generate-gptsovits.sh")),
 			"piper":     filepath.Join(root, "scripts", "hotword-generate-piper.sh"),
-			"kokoro":    filepath.Join(root, "scripts", "hotword-generate-kokoro.sh"),
+			"kokoro":    defaultGeneratorPath(strings.TrimSpace(os.Getenv("TABURA_HOTWORD_KOKORO_COMMAND")), filepath.Join(root, "scripts", "hotword-generate-kokoro.sh")),
 		},
 		generationSubs: make(map[chan Status]struct{}),
 		trainingSubs:   make(map[chan Status]struct{}),
 	}
+	manager.settings = defaultSettings()
+	manager.loadSettings()
 	manager.generation = Status{State: statusStateIdle, Stage: "idle"}
 	manager.training = Status{State: statusStateIdle, Stage: "idle"}
 	return manager
@@ -197,6 +202,10 @@ func (m *Manager) generatedDir() string {
 	return filepath.Join(m.dataDir, "hotword-train", generatedDirName)
 }
 
+func (m *Manager) settingsPath() string {
+	return filepath.Join(m.dataDir, "hotword-train", settingsFileName)
+}
+
 func (m *Manager) vendorModelPath() string {
 	return filepath.Join(m.projectRoot, "internal", "web", "static", "vendor", "openwakeword", defaultModelName+".onnx")
 }
@@ -207,6 +216,13 @@ func cloneStatus(status Status) Status {
 		out.Models = append([]ModelStatus(nil), status.Models...)
 	}
 	return out
+}
+
+func defaultGeneratorPath(configured, fallback string) string {
+	if strings.TrimSpace(configured) != "" {
+		return strings.TrimSpace(configured)
+	}
+	return fallback
 }
 
 func (m *Manager) setGenerationLocked(status Status) {
@@ -424,6 +440,215 @@ func (m *Manager) generatorPath(model string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return strings.TrimSpace(m.generatorPaths[normalizeModelID(model)])
+}
+
+func defaultNegativePhrases() []string {
+	return []string{
+		"copy",
+		"happy",
+		"poppy",
+		"soapy",
+		"sleepy",
+		"slowly",
+		"sorry",
+		"soppy",
+		"stocky",
+		"rocky",
+	}
+}
+
+func defaultSettings() Settings {
+	return Settings{
+		PreferredGenerator: defaultPreferredModel,
+		SampleCount:        2000,
+		AutoDeploy:         true,
+		NegativePhrases:    defaultNegativePhrases(),
+		GeneratorCommands:  map[string]string{},
+	}
+}
+
+func (m *Manager) loadSettings() {
+	path := m.settingsPath()
+	var stored Settings
+	if err := decodeJSONFile(path, &stored); err != nil {
+		return
+	}
+	m.applySettingsLocked(stored)
+}
+
+func (m *Manager) persistSettingsLocked() error {
+	if err := m.ensureDir(filepath.Dir(m.settingsPath())); err != nil {
+		return err
+	}
+	return writeJSONFile(m.settingsPath(), m.settings)
+}
+
+func normalizeNegativePhrases(values []string) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		clean := strings.TrimSpace(strings.ToLower(value))
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	if len(out) == 0 {
+		return defaultNegativePhrases()
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (m *Manager) applySettingsLocked(stored Settings) {
+	if m.settings.GeneratorCommands == nil {
+		m.settings.GeneratorCommands = map[string]string{}
+	}
+	preferred := normalizeModelID(stored.PreferredGenerator)
+	if preferred == "" {
+		preferred = defaultPreferredModel
+	}
+	sampleCount := stored.SampleCount
+	if sampleCount <= 0 {
+		sampleCount = defaultSettings().SampleCount
+	}
+	m.settings.PreferredGenerator = preferred
+	m.settings.SampleCount = sampleCount
+	m.settings.AutoDeploy = stored.AutoDeploy
+	m.settings.NegativePhrases = normalizeNegativePhrases(stored.NegativePhrases)
+	if len(stored.GeneratorCommands) == 0 {
+		return
+	}
+	for model, command := range stored.GeneratorCommands {
+		cleanModel := normalizeModelID(model)
+		cleanCommand := strings.TrimSpace(command)
+		if cleanModel == "" {
+			continue
+		}
+		m.settings.GeneratorCommands[cleanModel] = cleanCommand
+		if cleanCommand != "" {
+			m.generatorPaths[cleanModel] = cleanCommand
+		}
+	}
+}
+
+func generatorLabel(model string) string {
+	switch normalizeModelID(model) {
+	case "qwen3tts":
+		return "Qwen3-TTS"
+	case "gptsovits":
+		return "GPT-SoVITS"
+	case "kokoro":
+		return "Kokoro"
+	default:
+		return "Piper"
+	}
+}
+
+func (m *Manager) GeneratorInfos() []GeneratorInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	infos := make([]GeneratorInfo, 0, 4)
+	for _, id := range []string{"qwen3tts", "gptsovits", "kokoro", "piper"} {
+		command := strings.TrimSpace(m.generatorPaths[id])
+		info := GeneratorInfo{
+			ID:          id,
+			Label:       generatorLabel(id),
+			Command:     command,
+			Recommended: id == m.settings.PreferredGenerator,
+		}
+		if err := requireExecutable(command); err != nil {
+			info.Available = false
+			if command == "" {
+				info.Message = "Not configured."
+			} else {
+				info.Message = err.Error()
+			}
+		} else {
+			info.Available = true
+			info.Message = "Ready."
+		}
+		infos = append(infos, info)
+	}
+	return infos
+}
+
+func (m *Manager) DatasetSummary() DatasetSummary {
+	recordings, _ := m.ListRecordings()
+	models, _ := m.ListModels()
+	feedback, _ := m.ListFeedback()
+	summary := DatasetSummary{
+		Feedback:          SummarizeFeedback(feedback),
+		GeneratedSamples:  countGeneratedSamples(m.generatedDir()),
+		GenerationRunning: m.GenerationStatus().State == statusStateRunning,
+		TrainingRunning:   m.TrainingStatus().State == statusStateRunning,
+	}
+	for _, recording := range recordings {
+		switch recording.Kind {
+		case recordingKindReference:
+			summary.ReferenceClips++
+		case recordingKindTest:
+			summary.TestClips++
+		default:
+			summary.HotwordClips++
+		}
+	}
+	for _, model := range models {
+		if summary.LatestModel == "" {
+			summary.LatestModel = model.FileName
+		}
+		if model.Production && summary.ProductionModel == "" {
+			summary.ProductionModel = model.FileName
+		}
+	}
+	return summary
+}
+
+func (m *Manager) SettingsSnapshot() Settings {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	copied := m.settings
+	copied.NegativePhrases = append([]string(nil), m.settings.NegativePhrases...)
+	copied.GeneratorCommands = map[string]string{}
+	for model, command := range m.settings.GeneratorCommands {
+		copied.GeneratorCommands[model] = command
+	}
+	return copied
+}
+
+func (m *Manager) SaveSettings(stored Settings) (Settings, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.applySettingsLocked(stored)
+	for _, id := range []string{"qwen3tts", "gptsovits", "kokoro", "piper"} {
+		command := strings.TrimSpace(stored.GeneratorCommands[id])
+		if command == "" {
+			if id == "piper" {
+				m.generatorPaths[id] = filepath.Join(m.projectRoot, "scripts", "hotword-generate-piper.sh")
+				m.settings.GeneratorCommands[id] = m.generatorPaths[id]
+			}
+			continue
+		}
+		m.generatorPaths[id] = command
+		m.settings.GeneratorCommands[id] = command
+	}
+	if m.settings.GeneratorCommands["piper"] == "" {
+		m.settings.GeneratorCommands["piper"] = m.generatorPaths["piper"]
+	}
+	if err := m.persistSettingsLocked(); err != nil {
+		return Settings{}, err
+	}
+	copied := m.settings
+	copied.NegativePhrases = append([]string(nil), m.settings.NegativePhrases...)
+	copied.GeneratorCommands = map[string]string{}
+	for model, command := range m.settings.GeneratorCommands {
+		copied.GeneratorCommands[model] = command
+	}
+	return copied, nil
 }
 
 func (m *Manager) trainingScriptPath() string {

@@ -12,7 +12,7 @@
     <header class="train-header">
       <div>
         <p class="train-kicker">Wake Word</p>
-        <h1>Train "Sloppy" in one focused pass.</h1>
+        <h1>Train "Sloppy" with cloned voice, real clips, and live progress.</h1>
         <p class="train-copy">Harness for the standalone hotword training workflow.</p>
       </div>
       <div class="train-header-actions">
@@ -24,6 +24,77 @@
     <p id="train-banner" class="train-banner" hidden></p>
 
     <section class="train-grid">
+      <article class="train-card train-card-hero">
+        <div class="train-card-head">
+          <div>
+            <p class="train-step">Guided Pipeline</p>
+            <h2>Best available training pass</h2>
+          </div>
+          <span id="pipeline-badge" class="train-badge">idle</span>
+        </div>
+        <div class="train-hero-layout">
+          <section class="train-panel">
+            <h3>Dataset</h3>
+            <div id="dataset-summary" class="train-summary-grid"></div>
+            <p id="pipeline-status" class="train-status"></p>
+            <div class="train-progress"><div id="pipeline-progress-fill" class="train-progress-fill"></div></div>
+            <p id="pipeline-progress-label" class="train-progress-label">0%</p>
+            <div class="train-actions">
+              <button id="config-save" class="train-button" type="button">Save trainer settings</button>
+              <button id="pipeline-start" class="train-button train-button-strong" type="button">Run guided pipeline</button>
+            </div>
+          </section>
+          <section class="train-panel">
+            <h3>Trainer Setup</h3>
+            <div class="train-config-grid">
+              <label class="train-field">
+                <span>Preferred cloned-voice generator</span>
+                <select id="trainer-preferred">
+                  <option value="qwen3tts">Qwen3-TTS</option>
+                  <option value="gptsovits">GPT-SoVITS</option>
+                  <option value="kokoro">Kokoro</option>
+                  <option value="piper">Piper only</option>
+                </select>
+              </label>
+              <label class="train-field">
+                <span>Target synthetic samples</span>
+                <input id="trainer-sample-count" type="number" min="250" step="250" value="2000">
+              </label>
+              <label class="train-check">
+                <input id="trainer-auto-deploy" type="checkbox" checked>
+                <span>Auto-deploy the latest model after training</span>
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Hard negatives</span>
+                <textarea id="trainer-negative-phrases" rows="4" spellcheck="false"></textarea>
+              </label>
+            </div>
+          </section>
+          <section class="train-panel">
+            <h3>Generator Commands</h3>
+            <div id="generator-status-list" class="train-generator-list"></div>
+            <div class="train-config-grid">
+              <label class="train-field train-field-wide">
+                <span>Qwen3-TTS command</span>
+                <input id="generator-command-qwen3tts" type="text" spellcheck="false">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>GPT-SoVITS command</span>
+                <input id="generator-command-gptsovits" type="text" spellcheck="false">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Kokoro command</span>
+                <input id="generator-command-kokoro" type="text" spellcheck="false">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Piper command</span>
+                <input id="generator-command-piper" type="text" spellcheck="false" readonly>
+              </label>
+            </div>
+          </section>
+        </div>
+      </article>
+
       <article class="train-card">
         <div class="train-card-head">
           <div>
@@ -54,8 +125,8 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">2. Generation</p>
-            <h2>Run enabled sample generators</h2>
+            <p class="train-step">2. Generator Lane</p>
+            <h2>Run selected generators directly</h2>
           </div>
           <span id="generation-badge" class="train-badge">idle</span>
         </div>
@@ -79,8 +150,8 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">3. Training</p>
-            <h2>Run the openWakeWord pipeline</h2>
+            <p class="train-step">3. Trainer Lane</p>
+            <h2>Run the raw trainer only</h2>
           </div>
           <span id="training-badge" class="train-badge">idle</span>
         </div>
@@ -129,10 +200,41 @@
         recordings: [],
         models: [],
         feedback: [],
+        config: {
+          settings: {
+            preferred_generator: 'qwen3tts',
+            sample_count: 2000,
+            auto_deploy: true,
+            negative_phrases: ['copy', 'happy', 'poppy'],
+            generator_commands: {
+              qwen3tts: '/opt/qwen3tts/bin/qwen3tts-hotword',
+              gptsovits: '',
+              kokoro: '',
+              piper: '/repo/scripts/hotword-generate-piper.sh',
+            },
+          },
+          generators: [
+            { id: 'qwen3tts', label: 'Qwen3-TTS', command: '/opt/qwen3tts/bin/qwen3tts-hotword', available: true, recommended: true, message: 'Ready.' },
+            { id: 'gptsovits', label: 'GPT-SoVITS', command: '', available: false, recommended: false, message: 'Not configured.' },
+            { id: 'kokoro', label: 'Kokoro', command: '', available: false, recommended: false, message: 'Not configured.' },
+            { id: 'piper', label: 'Piper', command: '/repo/scripts/hotword-generate-piper.sh', available: true, recommended: false, message: 'Ready.' },
+          ],
+          dataset: {
+            hotword_clips: 0,
+            reference_clips: 0,
+            test_clips: 0,
+            generated_samples: 0,
+            generation_running: false,
+            training_running: false,
+            latest_model: '',
+            production_model: '',
+            feedback: { total: 0, missed_triggers: 0, false_triggers: 0 },
+          },
+        },
         generationStatus: { state: 'idle', stage: 'idle', message: 'Idle.', models: [] },
         trainingStatus: { state: 'idle', stage: 'idle', message: 'Idle.' },
       };
-      const requests = { uploads: 0, deletes: 0, generate: 0, train: 0, feedback: 0, deploy: 0 };
+      const requests = { uploads: 0, deletes: 0, config: 0, generate: 0, train: 0, pipeline: 0, feedback: 0, deploy: 0 };
       const streams = { generation: new Set(), training: new Set() };
       let nextId = 1;
 
@@ -181,6 +283,7 @@
           return jsonResponse({ ok: true, ready: false, missing: ['sloppy.onnx'] });
         }
         if (url.endsWith('/api/hotword/train/recordings') && method === 'GET') {
+          syncDataset();
           return jsonResponse({ ok: true, recordings: state.recordings });
         }
         if (url.endsWith('/api/hotword/train/recordings') && method === 'POST') {
@@ -199,12 +302,39 @@
             audio_url: '/tests/playwright/fake.wav',
           };
           state.recordings = [recording, ...state.recordings];
+          syncDataset();
           return jsonResponse({ ok: true, recording }, 201);
+        }
+        if (url.endsWith('/api/hotword/train/config') && method === 'GET') {
+          syncDataset();
+          return jsonResponse({ ok: true, config: state.config });
+        }
+        if (url.endsWith('/api/hotword/train/config') && method === 'PUT') {
+          requests.config += 1;
+          const body = JSON.parse(String(init.body || '{}'));
+          state.config.settings = { ...state.config.settings, ...body };
+          state.config.settings.generator_commands = {
+            ...state.config.settings.generator_commands,
+            ...(body.generator_commands || {}),
+          };
+          state.config.generators = state.config.generators.map((generator) => {
+            const command = String(state.config.settings.generator_commands?.[generator.id] || '');
+            return {
+              ...generator,
+              command,
+              available: generator.id === 'piper' ? true : Boolean(command),
+              recommended: generator.id === state.config.settings.preferred_generator,
+              message: (generator.id === 'piper' || command) ? 'Ready.' : 'Not configured.',
+            };
+          });
+          syncDataset();
+          return jsonResponse({ ok: true, config: state.config });
         }
         if (url.includes('/api/hotword/train/recordings/') && method === 'DELETE') {
           requests.deletes += 1;
           const id = url.split('/').slice(-1)[0];
           state.recordings = state.recordings.filter((entry) => entry.id !== id);
+          syncDataset();
           return new Response(null, { status: 204 });
         }
         if (url.endsWith('/api/hotword/train/generate') && method === 'POST') {
@@ -216,6 +346,7 @@
             generated_samples: 1,
             models: [{ name: 'piper', state: 'completed', count: 1, target: 1, message: 'Generation complete.' }],
           };
+          state.config.dataset.generated_samples = 1;
           notify('generation');
           return jsonResponse({ ok: true, status: state.generationStatus }, 202);
         }
@@ -235,8 +366,32 @@
             size_bytes: 13,
             production: false,
           }];
+          state.config.dataset.latest_model = 'sloppy.onnx';
           notify('training');
           return jsonResponse({ ok: true, status: state.trainingStatus }, 202);
+        }
+        if (url.endsWith('/api/hotword/train/pipeline') && method === 'POST') {
+          requests.pipeline += 1;
+          state.trainingStatus = {
+            state: 'running',
+            stage: 'complete',
+            message: 'Training complete and deployed sloppy.onnx.',
+            latest_model: 'sloppy.onnx',
+            progress: 100,
+          };
+          state.models = [{
+            name: 'sloppy',
+            file_name: 'sloppy.onnx',
+            path: '/tmp/sloppy.onnx',
+            created_at: '2026-03-22T10:05:00Z',
+            size_bytes: 13,
+            production: true,
+          }];
+          state.config.dataset.generated_samples = 2000;
+          state.config.dataset.latest_model = 'sloppy.onnx';
+          state.config.dataset.production_model = 'sloppy.onnx';
+          notify('training');
+          return jsonResponse({ ok: true, status: state.trainingStatus, config: state.config }, 202);
         }
         if (url.endsWith('/api/hotword/train/feedback') && method === 'GET') {
           const summary = summarizeFeedback(state.feedback);
@@ -253,6 +408,7 @@
           };
           state.feedback = [feedback, ...state.feedback];
           const summary = summarizeFeedback(state.feedback);
+          state.config.dataset.feedback = summary;
           return jsonResponse({ ok: true, feedback, summary }, 201);
         }
         if (url.endsWith('/api/hotword/train/models')) {
@@ -261,6 +417,7 @@
         if (url.endsWith('/api/hotword/train/deploy') && method === 'POST') {
           requests.deploy += 1;
           state.models = state.models.map((model) => ({ ...model, production: true }));
+          state.config.dataset.production_model = 'sloppy.onnx';
           return jsonResponse({
             ok: true,
             model: state.models[0] || null,
@@ -288,6 +445,15 @@
           if (entry.outcome === 'false_trigger') summary.false_triggers += 1;
         }
         return summary;
+      }
+
+      function syncDataset() {
+        state.config.dataset.hotword_clips = state.recordings.filter((entry) => entry.kind === 'hotword').length;
+        state.config.dataset.reference_clips = state.recordings.filter((entry) => entry.kind === 'reference').length;
+        state.config.dataset.test_clips = state.recordings.filter((entry) => entry.kind === 'test').length;
+        state.config.dataset.feedback = summarizeFeedback(state.feedback);
+        state.config.dataset.training_running = state.trainingStatus.state === 'running';
+        state.config.dataset.generation_running = state.generationStatus.state === 'running';
       }
     })();
   </script>

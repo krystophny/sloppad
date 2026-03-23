@@ -12,8 +12,8 @@
     <header class="train-header">
       <div>
         <p class="train-kicker">Wake Word</p>
-        <h1>Train "Sloppy" in one focused pass.</h1>
-        <p class="train-copy">Record samples, generate synthetic data, run the trainer, then deploy the resulting model without leaving the management surface.</p>
+        <h1>Train "Sloppy" with cloned voice, real clips, and live progress.</h1>
+        <p class="train-copy">The guided pipeline stays behind auth, persists your generator setup, stages cloned positives plus retry negatives into one openWakeWord run, and can auto-deploy the resulting model.</p>
       </div>
       <div class="train-header-actions">
         <a class="train-link" href="./manage/hotword">Manage hotword</a>
@@ -24,6 +24,81 @@
     <p id="train-banner" class="train-banner" hidden></p>
 
     <section class="train-grid">
+      <article class="train-card train-card-hero">
+        <div class="train-card-head">
+          <div>
+            <p class="train-step">Guided Pipeline</p>
+            <h2>Best available training pass</h2>
+          </div>
+          <span id="pipeline-badge" class="train-badge">idle</span>
+        </div>
+        <div class="train-hero-layout">
+          <section class="train-panel">
+            <h3>Dataset</h3>
+            <div id="dataset-summary" class="train-summary-grid"></div>
+            <p id="pipeline-status" class="train-status" role="status" aria-live="polite"></p>
+            <div class="train-progress" aria-hidden="true">
+              <div id="pipeline-progress-fill" class="train-progress-fill"></div>
+            </div>
+            <p id="pipeline-progress-label" class="train-progress-label">0%</p>
+            <div class="train-actions">
+              <button id="config-save" class="train-button" type="button">Save trainer settings</button>
+              <button id="pipeline-start" class="train-button train-button-strong" type="button">Run guided pipeline</button>
+            </div>
+          </section>
+
+          <section class="train-panel">
+            <h3>Trainer Setup</h3>
+            <div class="train-config-grid">
+              <label class="train-field">
+                <span>Preferred cloned-voice generator</span>
+                <select id="trainer-preferred">
+                  <option value="qwen3tts">Qwen3-TTS</option>
+                  <option value="gptsovits">GPT-SoVITS</option>
+                  <option value="kokoro">Kokoro</option>
+                  <option value="piper">Piper only</option>
+                </select>
+              </label>
+              <label class="train-field">
+                <span>Target synthetic samples</span>
+                <input id="trainer-sample-count" type="number" min="250" step="250" value="2000">
+              </label>
+              <label class="train-check">
+                <input id="trainer-auto-deploy" type="checkbox" checked>
+                <span>Auto-deploy the latest model after training</span>
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Hard negatives</span>
+                <textarea id="trainer-negative-phrases" rows="4" spellcheck="false"></textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="train-panel">
+            <h3>Generator Commands</h3>
+            <div id="generator-status-list" class="train-generator-list"></div>
+            <div class="train-config-grid">
+              <label class="train-field train-field-wide">
+                <span>Qwen3-TTS command</span>
+                <input id="generator-command-qwen3tts" type="text" spellcheck="false" placeholder="/abs/path/to/qwen3tts launcher">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>GPT-SoVITS command</span>
+                <input id="generator-command-gptsovits" type="text" spellcheck="false" placeholder="/abs/path/to/gptsovits launcher">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Kokoro command</span>
+                <input id="generator-command-kokoro" type="text" spellcheck="false" placeholder="/abs/path/to/kokoro launcher">
+              </label>
+              <label class="train-field train-field-wide">
+                <span>Piper command</span>
+                <input id="generator-command-piper" type="text" spellcheck="false" readonly>
+              </label>
+            </div>
+          </section>
+        </div>
+      </article>
+
       <article class="train-card">
         <div class="train-card-head">
           <div>
@@ -32,7 +107,7 @@
           </div>
           <span id="recording-badge" class="train-badge">idle</span>
         </div>
-        <p class="train-copy">Hotword clips are short "Sloppy" takes. Reference clips can be longer free speech for model-specific generation pipelines.</p>
+        <p class="train-copy">Hotword clips become real positives. Reference clips become cloned-voice prompt material. Test clips feed the retry loop for missed and false triggers.</p>
         <div class="train-record-controls">
           <label class="train-field">
             <span>Clip kind</span>
@@ -55,8 +130,8 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">2. Generation</p>
-            <h2>Run enabled sample generators</h2>
+            <p class="train-step">2. Generator Lane</p>
+            <h2>Run selected generators directly</h2>
           </div>
           <span id="generation-badge" class="train-badge">idle</span>
         </div>
@@ -80,14 +155,14 @@
       <article class="train-card">
         <div class="train-card-head">
           <div>
-            <p class="train-step">3. Training</p>
-            <h2>Run the openWakeWord pipeline</h2>
+            <p class="train-step">3. Trainer Lane</p>
+            <h2>Run the raw trainer only</h2>
           </div>
           <span id="training-badge" class="train-badge">idle</span>
         </div>
-        <p class="train-copy">This page runs the existing `scripts/train-hotword.sh` pipeline and publishes generated models into the project-local training area.</p>
+        <p class="train-copy">This stays available as the expert lane. The guided pipeline above is the recommended path because it stages cloned positives and retry negatives before augment and train.</p>
         <div class="train-actions">
-          <button id="training-start" class="train-button" type="button">Train model</button>
+          <button id="training-start" class="train-button" type="button">Train model only</button>
         </div>
         <p id="training-status" class="train-status" role="status" aria-live="polite"></p>
       </article>
@@ -100,7 +175,7 @@
           </div>
           <span id="testing-badge" class="train-badge">idle</span>
         </div>
-        <p class="train-copy">Upload dedicated retry clips here, or use Step 1 with "Test retry clip" selected. Mark each clip when the current model misses it or triggers when it should stay quiet.</p>
+        <p class="train-copy">Missed-trigger clips are fed back as positives. False triggers are staged as hard negatives on the next guided pass.</p>
         <div class="train-actions">
           <label class="train-upload">
             <input id="testing-upload" type="file" accept="audio/wav">
@@ -120,7 +195,7 @@
           </div>
           <span id="deployment-badge" class="train-badge">ready</span>
         </div>
-        <p class="train-copy">Deployment copies the selected model into the browser hotword vendor path, keeps the previous production model as `sloppy.onnx.bak`, and exposes a new revision token so connected clients can reload it without a manual restart.</p>
+        <p class="train-copy">Deployment copies the selected model into the browser hotword vendor path, preserves the previous production model as `sloppy.onnx.bak`, and refreshes the revision token for connected clients.</p>
         <p id="deployment-status" class="train-status" role="status" aria-live="polite"></p>
         <ul id="model-list" class="train-list"></ul>
       </article>

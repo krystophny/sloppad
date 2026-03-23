@@ -19,6 +19,7 @@ const testAuthToken = "token-test"
 
 func newAuthedTestApp(t *testing.T) *App {
 	t.Helper()
+	t.Setenv("TABURA_BACKGROUND_SYNC", "off")
 	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("new app: %v", err)

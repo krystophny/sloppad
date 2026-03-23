@@ -24,6 +24,18 @@ type sourcePushWatcher struct {
 	cancel  context.CancelFunc
 }
 
+func (m *sourcePushManager) goWorker(run func()) {
+	if m != nil && m.app != nil {
+		m.app.workerWG.Add(1)
+		go func() {
+			defer m.app.workerWG.Done()
+			run()
+		}()
+		return
+	}
+	go run()
+}
+
 func newSourcePushManager(app *App, providers []*accountSyncProvider) sourcePushRunner {
 	pushProviders := make(map[string]*accountSyncProvider)
 	for _, provider := range providers {
@@ -101,7 +113,9 @@ func (m *sourcePushManager) reconcile(ctx context.Context) {
 		}
 		watchCtx, cancel := context.WithCancel(ctx)
 		m.watchers[accountID] = sourcePushWatcher{account: account, cancel: cancel}
-		go m.runWatcher(watchCtx, account, provider)
+		m.goWorker(func() {
+			m.runWatcher(watchCtx, account, provider)
+		})
 	}
 }
 
@@ -114,7 +128,9 @@ func (m *sourcePushManager) runWatcher(ctx context.Context, account store.Extern
 		}
 	}
 	triggerSync()
-	go m.consumeSyncTriggers(ctx, account, provider, triggerCh)
+	m.goWorker(func() {
+		m.consumeSyncTriggers(ctx, account, provider, triggerCh)
+	})
 	for {
 		if !m.waitForAccountRetry(ctx, account, nil) {
 			return
@@ -157,8 +173,14 @@ func (m *sourcePushManager) consumeSyncTriggers(ctx context.Context, account sto
 			if count > 0 && provider.onSynced != nil {
 				provider.onSynced(account, count)
 			}
+			if ctx.Err() != nil {
+				return
+			}
 			if provider.continueSync == nil {
 				continue
+			}
+			if ctx.Err() != nil {
+				return
 			}
 			fresh, freshErr := m.app.store.GetExternalAccount(account.ID)
 			if freshErr != nil {
@@ -169,7 +191,7 @@ func (m *sourcePushManager) consumeSyncTriggers(ctx context.Context, account sto
 			if !ok {
 				continue
 			}
-			go scheduleSourcePushTrigger(ctx, delay, triggerCh)
+			scheduleSourcePushTrigger(ctx, delay, triggerCh)
 		}
 	}
 }

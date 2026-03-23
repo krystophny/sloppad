@@ -46,6 +46,41 @@ type Model = {
   production: boolean;
 };
 
+type GeneratorInfo = {
+  id: string;
+  label: string;
+  command?: string;
+  available: boolean;
+  recommended: boolean;
+  message?: string;
+};
+
+type Settings = {
+  preferred_generator: string;
+  sample_count: number;
+  auto_deploy: boolean;
+  negative_phrases: string[];
+  generator_commands?: Record<string, string>;
+};
+
+type DatasetSummary = {
+  hotword_clips: number;
+  reference_clips: number;
+  test_clips: number;
+  generated_samples: number;
+  generation_running: boolean;
+  training_running: boolean;
+  latest_model?: string;
+  production_model?: string;
+  feedback: FeedbackSummary;
+};
+
+type TrainUIConfig = {
+  settings: Settings;
+  generators: GeneratorInfo[];
+  dataset: DatasetSummary;
+};
+
 const state = {
   recordingActive: false,
   audioContext: null as AudioContext | null,
@@ -57,6 +92,7 @@ const state = {
   chunks: [] as Float32Array[],
   recordings: [] as Recording[],
   feedback: [] as Feedback[],
+  trainConfig: null as TrainUIConfig | null,
 };
 
 function byId<T extends HTMLElement>(id: string) {
@@ -68,25 +104,46 @@ function byId<T extends HTMLElement>(id: string) {
 }
 
 const bannerEl = byId<HTMLParagraphElement>('train-banner');
+const pipelineBadgeEl = byId<HTMLSpanElement>('pipeline-badge');
+const pipelineStatusEl = byId<HTMLParagraphElement>('pipeline-status');
+const pipelineFillEl = byId<HTMLDivElement>('pipeline-progress-fill');
+const pipelineProgressLabelEl = byId<HTMLParagraphElement>('pipeline-progress-label');
+const datasetSummaryEl = byId<HTMLDivElement>('dataset-summary');
+const configSaveEl = byId<HTMLButtonElement>('config-save');
+const pipelineStartEl = byId<HTMLButtonElement>('pipeline-start');
+const preferredGeneratorEl = byId<HTMLSelectElement>('trainer-preferred');
+const trainerSampleCountEl = byId<HTMLInputElement>('trainer-sample-count');
+const trainerAutoDeployEl = byId<HTMLInputElement>('trainer-auto-deploy');
+const trainerNegativePhrasesEl = byId<HTMLTextAreaElement>('trainer-negative-phrases');
+const generatorStatusListEl = byId<HTMLDivElement>('generator-status-list');
+const qwenCommandEl = byId<HTMLInputElement>('generator-command-qwen3tts');
+const gptSovitsCommandEl = byId<HTMLInputElement>('generator-command-gptsovits');
+const kokoroCommandEl = byId<HTMLInputElement>('generator-command-kokoro');
+const piperCommandEl = byId<HTMLInputElement>('generator-command-piper');
+
 const recordingKindEl = byId<HTMLSelectElement>('recording-kind');
 const recordingToggleEl = byId<HTMLButtonElement>('recording-toggle');
 const recordingUploadEl = byId<HTMLInputElement>('recording-upload');
 const recordingBadgeEl = byId<HTMLSpanElement>('recording-badge');
 const recordingStatusEl = byId<HTMLParagraphElement>('recording-status');
 const recordingListEl = byId<HTMLUListElement>('recording-list');
+
 const generationBadgeEl = byId<HTMLSpanElement>('generation-badge');
 const generationStatusEl = byId<HTMLParagraphElement>('generation-status');
 const generationListEl = byId<HTMLUListElement>('generation-list');
 const generationCountEl = byId<HTMLInputElement>('generation-count');
 const generationStartEl = byId<HTMLButtonElement>('generation-start');
+
 const trainingBadgeEl = byId<HTMLSpanElement>('training-badge');
 const trainingStatusEl = byId<HTMLParagraphElement>('training-status');
 const trainingStartEl = byId<HTMLButtonElement>('training-start');
+
 const testingBadgeEl = byId<HTMLSpanElement>('testing-badge');
 const testingStatusEl = byId<HTMLParagraphElement>('testing-status');
 const testingUploadEl = byId<HTMLInputElement>('testing-upload');
 const testingListEl = byId<HTMLUListElement>('testing-list');
 const feedbackStatusEl = byId<HTMLParagraphElement>('feedback-status');
+
 const deploymentBadgeEl = byId<HTMLSpanElement>('deployment-badge');
 const deploymentStatusEl = byId<HTMLParagraphElement>('deployment-status');
 const modelListEl = byId<HTMLUListElement>('model-list');
@@ -98,6 +155,12 @@ function setBanner(message = '') {
 
 function setBadge(node: HTMLElement, value: string) {
   node.textContent = String(value || 'idle');
+}
+
+function setProgress(progress: number) {
+  const normalized = Math.max(0, Math.min(100, Math.round(Number(progress || 0))));
+  pipelineFillEl.style.width = `${normalized}%`;
+  pipelineProgressLabelEl.textContent = `${normalized}%`;
 }
 
 function formatDate(value: string) {
@@ -133,6 +196,99 @@ function selectedGenerationModels() {
     .map((node) => node.value);
 }
 
+function configuredGeneratorCommands() {
+  return {
+    qwen3tts: qwenCommandEl.value.trim(),
+    gptsovits: gptSovitsCommandEl.value.trim(),
+    kokoro: kokoroCommandEl.value.trim(),
+    piper: piperCommandEl.value.trim(),
+  };
+}
+
+function configPayloadFromForm(): Settings {
+  const negativePhrases = trainerNegativePhrasesEl.value
+    .split('\n')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return {
+    preferred_generator: preferredGeneratorEl.value,
+    sample_count: Math.max(250, Number(trainerSampleCountEl.value || 2000)),
+    auto_deploy: trainerAutoDeployEl.checked,
+    negative_phrases: negativePhrases,
+    generator_commands: configuredGeneratorCommands(),
+  };
+}
+
+function generationCheckbox(id: string) {
+  return document.querySelector<HTMLInputElement>(`input[name="generator-model"][value="${id}"]`);
+}
+
+function renderDatasetSummary(summary: DatasetSummary) {
+  datasetSummaryEl.replaceChildren();
+  const cards = [
+    ['Real positives', `${summary.hotword_clips || 0} hotword clips`],
+    ['Reference voice', `${summary.reference_clips || 0} prompt clips`],
+    ['Retry loop', `${summary.test_clips || 0} test clips`],
+    ['Synthetic', `${summary.generated_samples || 0} generated samples`],
+    ['Latest model', String(summary.latest_model || 'none yet')],
+    ['Production', String(summary.production_model || 'not deployed')],
+  ];
+  for (const [title, detail] of cards) {
+    const card = document.createElement('div');
+    card.className = 'train-summary-card';
+    card.innerHTML = `<strong>${title}</strong><span>${detail}</span>`;
+    datasetSummaryEl.appendChild(card);
+  }
+}
+
+function renderGeneratorInfos(generators: GeneratorInfo[]) {
+  generatorStatusListEl.replaceChildren();
+  for (const generator of generators) {
+    const item = document.createElement('div');
+    item.className = 'train-generator-item';
+    item.innerHTML = `<strong>${generator.label}</strong><span>${generator.available ? 'Ready' : 'Missing'}${generator.recommended ? ' · recommended' : ''}</span><code>${generator.command || 'not configured'}</code><span>${generator.message || ''}</span>`;
+    generatorStatusListEl.appendChild(item);
+    const checkbox = generationCheckbox(generator.id);
+    if (checkbox) {
+      checkbox.disabled = !generator.available;
+      if (generator.available && generator.recommended && generator.id !== 'piper') {
+        checkbox.checked = true;
+      }
+      if (!generator.available && generator.id !== 'piper') {
+        checkbox.checked = false;
+      }
+    }
+  }
+}
+
+function renderTrainConfig(config: TrainUIConfig) {
+  state.trainConfig = config;
+  preferredGeneratorEl.value = String(config.settings?.preferred_generator || 'qwen3tts');
+  trainerSampleCountEl.value = String(Number(config.settings?.sample_count || 2000));
+  trainerAutoDeployEl.checked = Boolean(config.settings?.auto_deploy);
+  trainerNegativePhrasesEl.value = Array.isArray(config.settings?.negative_phrases)
+    ? config.settings.negative_phrases.join('\n')
+    : '';
+  qwenCommandEl.value = String(config.settings?.generator_commands?.qwen3tts || config.generators.find((item) => item.id === 'qwen3tts')?.command || '');
+  gptSovitsCommandEl.value = String(config.settings?.generator_commands?.gptsovits || config.generators.find((item) => item.id === 'gptsovits')?.command || '');
+  kokoroCommandEl.value = String(config.settings?.generator_commands?.kokoro || config.generators.find((item) => item.id === 'kokoro')?.command || '');
+  piperCommandEl.value = String(config.settings?.generator_commands?.piper || config.generators.find((item) => item.id === 'piper')?.command || '');
+  generationCountEl.value = String(Math.max(1, Number(config.settings?.sample_count || 250)));
+  renderDatasetSummary(config.dataset || {} as DatasetSummary);
+  renderGeneratorInfos(Array.isArray(config.generators) ? config.generators : []);
+}
+
+function preferredPipelineModels() {
+  const config = state.trainConfig;
+  if (!config) return [];
+  const generatorMap = new Map((config.generators || []).map((item) => [item.id, item]));
+  const preferred = String(config.settings?.preferred_generator || 'qwen3tts').trim();
+  if (preferred && preferred !== 'piper' && generatorMap.get(preferred)?.available) {
+    return [preferred];
+  }
+  return [];
+}
+
 function renderRecordings(recordings: Recording[]) {
   recordingListEl.replaceChildren();
   if (!Array.isArray(recordings) || recordings.length === 0) {
@@ -164,7 +320,7 @@ function renderRecordings(recordings: Recording[]) {
       remove.disabled = true;
       try {
         await fetch(apiURL(`hotword/train/recordings/${encodeURIComponent(recording.id)}`), { method: 'DELETE' });
-        await refreshRecordings();
+        await Promise.all([refreshRecordings(), refreshTrainConfig()]);
       } catch (err: any) {
         setBanner(String(err?.message || err || 'delete failed'));
       } finally {
@@ -195,7 +351,7 @@ async function submitFeedback(recordingID: string, outcome: string) {
     : 'Marked clip as a false trigger for the next round.';
   setBadge(testingBadgeEl, 'saved');
   renderFeedbackSummary(payload?.summary || {});
-  await refreshFeedback();
+  await Promise.all([refreshFeedback(), refreshTrainConfig()]);
 }
 
 function renderFeedbackSummary(summary: FeedbackSummary) {
@@ -206,7 +362,7 @@ function renderFeedbackSummary(summary: FeedbackSummary) {
     feedbackStatusEl.textContent = 'No retry feedback captured yet.';
     return;
   }
-  feedbackStatusEl.textContent = `${missed} missed-trigger clip(s), ${falseTriggers} false-trigger clip(s) saved for the next training round.`;
+  feedbackStatusEl.textContent = `${missed} missed-trigger clip(s), ${falseTriggers} false-trigger clip(s) saved for the next guided training round.`;
 }
 
 function renderTestingList() {
@@ -306,6 +462,15 @@ function renderGenerationStatus(status: StatusPayload) {
   }
 }
 
+function syncTrainingStatus(status: StatusPayload) {
+  const label = String(status.error || status.message || 'Idle.');
+  setBadge(trainingBadgeEl, status.state || 'idle');
+  trainingStatusEl.textContent = label;
+  setBadge(pipelineBadgeEl, status.state || 'idle');
+  pipelineStatusEl.textContent = label;
+  setProgress(Number(status.progress || 0));
+}
+
 function renderModels(models: Model[]) {
   modelListEl.replaceChildren();
   if (!Array.isArray(models) || models.length === 0) {
@@ -345,7 +510,7 @@ function renderModels(models: Model[]) {
             ? `Deployed ${payload?.model?.file_name || model.file_name}. Connected clients will reload revision ${revision}.`
             : `Deployed ${payload?.model?.file_name || model.file_name}.`;
           setBadge(deploymentBadgeEl, 'deployed');
-          await refreshModels();
+          await Promise.all([refreshModels(), refreshTrainConfig()]);
         } catch (err: any) {
           deploymentStatusEl.textContent = String(err?.message || err || 'deploy failed');
           setBadge(deploymentBadgeEl, 'error');
@@ -380,6 +545,11 @@ async function refreshFeedback() {
   state.feedback = Array.isArray(payload?.feedback) ? payload.feedback as Feedback[] : [];
   renderFeedbackSummary(payload?.summary || {});
   renderTestingList();
+}
+
+async function refreshTrainConfig() {
+  const payload = await loadJSON('hotword/train/config');
+  renderTrainConfig(payload?.config || {} as TrainUIConfig);
 }
 
 function mergeChunks() {
@@ -471,7 +641,7 @@ async function stopRecording() {
   await uploadBlob(blob, recordingKindEl.value);
   recordingStatusEl.textContent = 'Recording uploaded.';
   setBadge(recordingBadgeEl, 'saved');
-  await refreshRecordings();
+  await Promise.all([refreshRecordings(), refreshTrainConfig()]);
 }
 
 async function connectStatusStream(path: string, render: (status: StatusPayload) => void) {
@@ -487,6 +657,16 @@ async function connectStatusStream(path: string, render: (status: StatusPayload)
       void connectStatusStream(path, render);
     }, 1200);
   };
+}
+
+async function saveTrainerConfig() {
+  const payload = await loadJSON('hotword/train/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(configPayloadFromForm()),
+  });
+  renderTrainConfig(payload?.config || {} as TrainUIConfig);
+  pipelineStatusEl.textContent = 'Trainer settings saved.';
 }
 
 async function bootstrap() {
@@ -512,7 +692,7 @@ async function bootstrap() {
       await uploadBlob(file, recordingKindEl.value);
       setBadge(recordingBadgeEl, 'saved');
       recordingStatusEl.textContent = `Uploaded ${file.name}.`;
-      await refreshRecordings();
+      await Promise.all([refreshRecordings(), refreshTrainConfig()]);
     } catch (err: any) {
       setBadge(recordingBadgeEl, 'error');
       recordingStatusEl.textContent = String(err?.message || err || 'upload failed');
@@ -528,7 +708,7 @@ async function bootstrap() {
       await uploadBlob(file, 'test');
       testingStatusEl.textContent = `Uploaded ${file.name}.`;
       setBadge(testingBadgeEl, 'saved');
-      await refreshRecordings();
+      await Promise.all([refreshRecordings(), refreshTrainConfig()]);
     } catch (err: any) {
       setBadge(testingBadgeEl, 'error');
       testingStatusEl.textContent = String(err?.message || err || 'test upload failed');
@@ -566,11 +746,9 @@ async function bootstrap() {
       const payload = await loadJSON('hotword/train/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(configPayloadFromForm()),
       });
-      const status = payload?.status || {};
-      setBadge(trainingBadgeEl, status.state || 'running');
-      trainingStatusEl.textContent = String(status.message || 'Training started.');
+      syncTrainingStatus(payload?.status || {});
     } catch (err: any) {
       trainingStatusEl.textContent = String(err?.message || err || 'training failed');
       setBadge(trainingBadgeEl, 'error');
@@ -579,20 +757,56 @@ async function bootstrap() {
     }
   });
 
+  configSaveEl.addEventListener('click', async () => {
+    configSaveEl.disabled = true;
+    try {
+      await saveTrainerConfig();
+    } catch (err: any) {
+      pipelineStatusEl.textContent = String(err?.message || err || 'save failed');
+      setBadge(pipelineBadgeEl, 'error');
+    } finally {
+      configSaveEl.disabled = false;
+    }
+  });
+
+  pipelineStartEl.addEventListener('click', async () => {
+    pipelineStartEl.disabled = true;
+    try {
+      await saveTrainerConfig();
+      const payload = await loadJSON('hotword/train/pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          models: preferredPipelineModels(),
+        }),
+      });
+      syncTrainingStatus(payload?.status || {});
+    } catch (err: any) {
+      pipelineStatusEl.textContent = String(err?.message || err || 'pipeline failed');
+      setBadge(pipelineBadgeEl, 'error');
+    } finally {
+      pipelineStartEl.disabled = false;
+    }
+  });
+
   try {
     const hotwordStatus = await loadJSON('hotword/status');
     if (hotwordStatus?.ready === false) {
-      setBanner('Wake word assets are not fully deployed yet. Use this page to train and promote a model.');
+      setBanner('Wake word assets are not fully deployed yet. Use the guided trainer here to record, clone, train, and deploy a better Sloppy model.');
     }
   } catch (_) {}
 
-  await Promise.all([refreshRecordings(), refreshModels(), refreshFeedback()]);
-  void connectStatusStream('hotword/train/generate/status', renderGenerationStatus);
-  void connectStatusStream('hotword/train/status', (status) => {
-    setBadge(trainingBadgeEl, status.state || 'idle');
-    trainingStatusEl.textContent = String(status.error || status.message || 'Idle.');
-    if (status.latest_model) {
-      void refreshModels();
+  await Promise.all([refreshRecordings(), refreshModels(), refreshFeedback(), refreshTrainConfig()]);
+  void connectStatusStream('hotword/train/generate/status', async (status) => {
+    renderGenerationStatus(status);
+    if (status.state === 'completed' || status.state === 'failed') {
+      await refreshTrainConfig();
+    }
+  });
+  void connectStatusStream('hotword/train/status', async (status) => {
+    syncTrainingStatus(status);
+    if (status.latest_model || status.state === 'completed' || status.state === 'failed') {
+      await Promise.all([refreshModels(), refreshTrainConfig()]);
     }
   });
 }

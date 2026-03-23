@@ -26,6 +26,10 @@ type hotwordTrainFeedbackRequest struct {
 	Outcome     string `json:"outcome"`
 }
 
+type hotwordTrainPipelineRequest struct {
+	Models []string `json:"models"`
+}
+
 func (a *App) serveHotwordTrain(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -152,6 +156,43 @@ func (a *App) handleHotwordTrainGenerateStart(w http.ResponseWriter, r *http.Req
 	})
 }
 
+func (a *App) hotwordTrainConfigPayload() hotwordtrain.TrainUIConfig {
+	return hotwordtrain.TrainUIConfig{
+		Settings:   a.hotwordTrainer.SettingsSnapshot(),
+		Generators: a.hotwordTrainer.GeneratorInfos(),
+		Dataset:    a.hotwordTrainer.DatasetSummary(),
+	}
+}
+
+func (a *App) handleHotwordTrainConfigGet(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":     true,
+		"config": a.hotwordTrainConfigPayload(),
+	})
+}
+
+func (a *App) handleHotwordTrainConfigPut(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var settings hotwordtrain.Settings
+	if err := decodeJSON(r, &settings); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if _, err := a.hotwordTrainer.SaveSettings(settings); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"ok":     true,
+		"config": a.hotwordTrainConfigPayload(),
+	})
+}
+
 func (a *App) handleHotwordTrainGenerateStatus(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAuth(w, r) {
 		return
@@ -175,6 +216,28 @@ func (a *App) handleHotwordTrainStart(w http.ResponseWriter, r *http.Request) {
 	writeJSONStatus(w, http.StatusAccepted, map[string]any{
 		"ok":     true,
 		"status": a.hotwordTrainer.TrainingStatus(),
+	})
+}
+
+func (a *App) handleHotwordTrainPipelineStart(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	var req hotwordTrainPipelineRequest
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if err := a.hotwordTrainer.StartPipeline(a.shutdownCtx, hotwordtrain.PipelineRequest{
+		Models: req.Models,
+	}); err != nil {
+		writeAPIError(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSONStatus(w, http.StatusAccepted, map[string]any{
+		"ok":     true,
+		"status": a.hotwordTrainer.TrainingStatus(),
+		"config": a.hotwordTrainConfigPayload(),
 	})
 }
 

@@ -128,6 +128,7 @@ type App struct {
 	workspaceWatches        *workspaceWatchTracker
 	reviewDispatches        *reviewDispatchTracker
 	workspaceAttention      *workspaceAttentionTracker
+	accountSyncs            *accountSyncTracker
 	emailRefreshes          *emailRefreshQueue
 	mailBackoffs            *mailBackoffTracker
 	tunnels                 *tunnelRegistry
@@ -342,6 +343,7 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 		workspaceWatches:        newWorkspaceWatchTracker(),
 		reviewDispatches:        newReviewDispatchTracker(),
 		workspaceAttention:      newProjectAttentionTracker(),
+		accountSyncs:            newAccountSyncTracker(),
 		emailRefreshes:          newEmailRefreshQueue(),
 		mailBackoffs:            newMailBackoffTracker(),
 		tunnels:                 newTunnelRegistry(),
@@ -385,8 +387,10 @@ func New(dataDir, localProjectDir, localMCPURL, appServerURL, model, ttsURL, spa
 	}
 	app.sourceSync = app.newSourceSyncRunner()
 	app.startItemResurfacer()
-	app.startSourcePush()
-	app.startSourcePoller()
+	if backgroundSourceSyncEnabled() {
+		app.startSourcePush()
+		app.startSourcePoller()
+	}
 	app.startPushScheduler()
 	app.resumeWorkspaceWatches()
 	return app, nil
@@ -401,6 +405,10 @@ func persistedDefaultChatModelAlias(s *store.Store) string {
 		return ""
 	}
 	return modelprofile.ResolveAlias(modelValue, modelprofile.AliasLocal)
+}
+
+func backgroundSourceSyncEnabled() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("TABURA_BACKGROUND_SYNC")), "off")
 }
 
 func randomToken() string {

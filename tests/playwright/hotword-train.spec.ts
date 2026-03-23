@@ -32,7 +32,7 @@ function wavBuffer() {
   return Buffer.from(buffer);
 }
 
-test('hotword training page captures retry feedback and deploys a live revision', async ({ page }) => {
+test('hotword training page saves guided config, captures retry feedback, and runs the guided pipeline', async ({ page }) => {
   await page.goto('/tests/playwright/hotword-train-harness.html');
 
   await expect(page.locator('#train-banner')).toContainText('Wake word assets are not fully deployed yet');
@@ -43,12 +43,11 @@ test('hotword training page captures retry feedback and deploys a live revision'
   });
 
   await expect(page.locator('#recording-list')).toContainText('.wav');
-  await page.locator('#generation-start').click();
-  await expect(page.locator('#generation-status')).toContainText('Generation complete.');
-
-  await page.locator('#training-start').click();
-  await expect(page.locator('#training-status')).toContainText('Training complete.');
-  await expect(page.locator('#model-list')).toContainText('sloppy.onnx');
+  await page.fill('#trainer-sample-count', '2000');
+  await page.fill('#generator-command-qwen3tts', '/opt/qwen3tts/bin/qwen3tts-hotword');
+  await page.fill('#trainer-negative-phrases', 'copy\nhappy\nsoppy');
+  await page.locator('#config-save').click();
+  await expect(page.locator('#pipeline-status')).toContainText('Trainer settings saved.');
 
   await page.setInputFiles('#testing-upload', {
     name: 'retry.wav',
@@ -59,16 +58,20 @@ test('hotword training page captures retry feedback and deploys a live revision'
   await page.getByRole('button', { name: 'This should have triggered' }).click();
   await expect(page.locator('#feedback-status')).toContainText('1 missed-trigger clip');
 
-  await page.getByRole('button', { name: 'Deploy' }).click();
-  await expect(page.locator('#deployment-status')).toContainText('Connected clients will reload revision');
+  await page.locator('#pipeline-start').click();
+  await expect(page.locator('#pipeline-progress-label')).toContainText('100%');
+  await expect(page.locator('#pipeline-status')).toContainText('Training complete and deployed sloppy.onnx.');
+  await expect(page.locator('#model-list')).toContainText('sloppy.onnx');
 
   const requests = await page.evaluate(() => (window as any).__hotwordTrainRequests);
   expect(requests).toEqual({
     uploads: 2,
     deletes: 0,
-    generate: 1,
-    train: 1,
+    config: 2,
+    generate: 0,
+    train: 0,
+    pipeline: 1,
     feedback: 1,
-    deploy: 1,
+    deploy: 0,
   });
 });

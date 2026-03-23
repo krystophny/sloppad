@@ -414,6 +414,15 @@ func (a *App) executeSyncTodoistAction() (string, map[string]interface{}, error)
 }
 
 func (a *App) syncTodoistAccount(ctx context.Context, account store.ExternalAccount) (int, error) {
+	if a != nil && a.accountSyncs != nil {
+		return a.accountSyncs.Do(ctx, account.ID, func(ctx context.Context) (int, error) {
+			return a.syncTodoistAccountDirect(ctx, account)
+		})
+	}
+	return a.syncTodoistAccountDirect(ctx, account)
+}
+
+func (a *App) syncTodoistAccountDirect(ctx context.Context, account store.ExternalAccount) (int, error) {
 	mappings, err := a.store.ListContainerMappings(store.ExternalProviderTodoist)
 	if err != nil {
 		return 0, err
