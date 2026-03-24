@@ -112,6 +112,7 @@ PIPER_SERVER_SCRIPT=""
 LLM_DIR=""
 LLM_MODEL_DIR=""
 LLM_VENV_DIR=""
+LLM_SOURCE_DIR=""
 LLM_SETUP_SCRIPT=""
 STT_SETUP_SCRIPT=""
 CODEX_PATH=""
@@ -279,6 +280,7 @@ resolve_paths() {
     LLM_DIR="${DATA_ROOT}/llm"
     LLM_MODEL_DIR="${LLM_DIR}/models"
     LLM_VENV_DIR="${LLM_DIR}/venv"
+    LLM_SOURCE_DIR="${LLM_DIR}/vllm-mlx"
     LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-llm.sh"
     STT_SETUP_SCRIPT="${SCRIPT_DIR}/setup-voxtype-stt.sh"
 }
@@ -286,6 +288,22 @@ resolve_paths() {
 require_codex_app_server() {
     CODEX_PATH="$(command -v codex || true)"
     [ -n "$CODEX_PATH" ] || fail "codex app-server is required but codex is not in PATH"
+}
+
+sync_vllm_mlx_source_checkout() {
+    local source_dir="$1"
+    local remote_url="git@github.com:computor-org/vllm-mlx.git"
+
+    run_cmd mkdir -p "$LLM_DIR"
+    if [ -d "${source_dir}/.git" ]; then
+        run_cmd git -C "$source_dir" remote set-url origin "$remote_url"
+        run_cmd git -C "$source_dir" fetch origin main --prune
+    else
+        run_cmd rm -rf "$source_dir"
+        run_cmd git clone --branch main "$remote_url" "$source_dir"
+    fi
+    run_cmd git -C "$source_dir" checkout main
+    run_cmd git -C "$source_dir" reset --hard origin/main
 }
 
 require_python_310() {
@@ -722,6 +740,7 @@ NOTICE
             fi
             have_cmd uv || run_cmd brew install uv
         fi
+        sync_vllm_mlx_source_checkout "$LLM_SOURCE_DIR"
     elif ! ensure_llama_server; then
         log "skipping local LLM setup"
         return
@@ -977,6 +996,7 @@ substitute_launchd_template() {
         -e "s|@@LLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
         -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
         -e "s|@@LLM_VENV_DIR@@|${LLM_VENV_DIR}|g" \
+        -e "s|@@LLM_SOURCE_DIR@@|${LLM_SOURCE_DIR}|g" \
         -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
         -e "s|@@STT_SETUP_SCRIPT@@|${STT_SETUP_SCRIPT}|g" \
         -e "s|@@VOXTYPE_BIN@@|${voxtype_bin}|g" \

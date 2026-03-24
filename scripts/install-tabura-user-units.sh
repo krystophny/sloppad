@@ -79,6 +79,22 @@ ensure_macos_vllm_prereqs() {
   fi
 }
 
+sync_macos_vllm_source_checkout() {
+  local source_dir="$1"
+  local remote_url="git@github.com:computor-org/vllm-mlx.git"
+
+  mkdir -p "$(dirname "$source_dir")"
+  if [ -d "${source_dir}/.git" ]; then
+    git -C "$source_dir" remote set-url origin "$remote_url"
+    git -C "$source_dir" fetch origin main --prune
+  else
+    rm -rf "$source_dir"
+    git clone --branch main "$remote_url" "$source_dir"
+  fi
+  git -C "$source_dir" checkout main
+  git -C "$source_dir" reset --hard origin/main
+}
+
 # --- Platform detection ---
 
 case "$PLATFORM" in
@@ -277,7 +293,7 @@ install_macos() {
   local plist_src="$REPO_ROOT/deploy/launchd"
   local plist_dst="$HOME/Library/LaunchAgents"
   local data_root="$HOME/Library/Application Support/tabura"
-  local piper_model_dir piper_venv_dir
+  local piper_model_dir piper_venv_dir llm_source_dir
   local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
   local web_host="${TABURA_WEB_HOST:-127.0.0.1}"
 
@@ -295,9 +311,13 @@ install_macos() {
   WEB_DATA_DIR="${data_root}/web-data"
   piper_model_dir="${HOME}/.local/share/tabura-piper-tts/models"
   piper_venv_dir="${HOME}/.local/share/tabura-piper-tts/venv"
+  llm_source_dir="${data_root}/llm/vllm-mlx"
 
   mkdir -p "$plist_dst" "$WEB_DATA_DIR"
   install_hotword_assets
+  if [ "$HAVE_LLAMA" = "1" ] && [ -z "$REUSE_LLM_URL" ]; then
+    sync_macos_vllm_source_checkout "$llm_source_dir"
+  fi
   if [ -n "$REUSE_LLM_URL" ]; then
     launchctl unload "$plist_dst/io.tabura.llm.plist" >/dev/null 2>&1 || true
     launchctl unload "$plist_dst/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
@@ -338,6 +358,7 @@ install_macos() {
       -e "s|@@LLM_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-local-llm.sh|g" \
       -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
       -e "s|@@LLM_VENV_DIR@@|${LLM_VENV_DIR}|g" \
+      -e "s|@@LLM_SOURCE_DIR@@|${llm_source_dir}|g" \
       -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
       -e "s|@@STT_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-voxtype-stt.sh|g" \
       -e "s|@@VOXTYPE_BIN@@|${VOXTYPE_PATH}|g" \

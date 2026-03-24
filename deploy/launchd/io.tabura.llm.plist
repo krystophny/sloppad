@@ -14,12 +14,10 @@
     <string>fast-qwen9b</string>
     <key>TABURA_LLM_VENV_DIR</key>
     <string>@@LLM_VENV_DIR@@</string>
+    <key>TABURA_VLLM_MLX_SOURCE_DIR</key>
+    <string>@@LLM_SOURCE_DIR@@</string>
     <key>TABURA_MLX_MODEL_REPO</key>
     <string>mlx-community/Qwen3.5-9B-4bit</string>
-    <key>TABURA_VLLM_MLX_GIT_URL</key>
-    <string>git+ssh://git@github.com/computor-org/vllm-mlx.git</string>
-    <key>TABURA_VLLM_MLX_GIT_REF</key>
-    <string>f1eadce4bdebc971f738bc3dfa7ecdbb14737929</string>
     <key>TABURA_VLLM_MLX_ENABLE_BATCHING</key>
     <string>1</string>
     <key>TABURA_VLLM_MLX_USE_PAGED_CACHE</key>

@@ -22,6 +22,16 @@ default_if_empty() {
 }
 
 build_vllm_mlx_install_spec() {
+  if [ -n "${TABURA_VLLM_MLX_SOURCE_DIR:-}" ]; then
+    local source_dir="${TABURA_VLLM_MLX_SOURCE_DIR}"
+    local source_head=""
+    if [ ! -d "$source_dir" ] || ! source_head="$(git -C "$source_dir" rev-parse HEAD 2>/dev/null)"; then
+      echo "TABURA_VLLM_MLX_SOURCE_DIR is not a valid git checkout: ${source_dir}" >&2
+      exit 1
+    fi
+    printf '%s@%s' "$source_dir" "$source_head"
+    return
+  fi
   if [ -n "${TABURA_VLLM_MLX_INSTALL_SPEC:-}" ]; then
     printf '%s' "$TABURA_VLLM_MLX_INSTALL_SPEC"
     return
@@ -35,9 +45,18 @@ build_vllm_mlx_install_spec() {
   printf '%s' "$git_url"
 }
 
+build_vllm_mlx_pip_target() {
+  if [ -n "${TABURA_VLLM_MLX_SOURCE_DIR:-}" ]; then
+    printf '%s' "${TABURA_VLLM_MLX_SOURCE_DIR}"
+    return
+  fi
+  printf '%s' "$1"
+}
+
 ensure_vllm_mlx_install() {
   local install_spec="$1"
-  local python_bin="$2"
+  local pip_target="$2"
+  local python_bin="$3"
   local marker_path="${VENV_DIR}/.tabura-vllm-mlx-install-spec"
   if [ -x "${VENV_DIR}/bin/python" ] && ! tabura_python_meets_min_version "${VENV_DIR}/bin/python" 3 10; then
     rm -rf "$VENV_DIR"
@@ -49,7 +68,7 @@ ensure_vllm_mlx_install() {
   if [ ! -x "${VENV_DIR}/bin/vllm-mlx" ] || [ ! -f "$marker_path" ] || [ "$(cat "$marker_path" 2>/dev/null)" != "$install_spec" ]; then
     "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null
     "${VENV_DIR}/bin/python" -m pip uninstall -y vllm-mlx >/dev/null 2>&1 || true
-    "${VENV_DIR}/bin/python" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps "$install_spec" >/dev/null
+    "${VENV_DIR}/bin/python" -m pip install --upgrade --force-reinstall --no-cache-dir --no-deps "$pip_target" >/dev/null
     printf '%s' "$install_spec" >"$marker_path"
   fi
 }
@@ -111,7 +130,8 @@ if [ "$PLATFORM" = "Darwin" ]; then
   fi
 
   install_spec="$(build_vllm_mlx_install_spec)"
-  ensure_vllm_mlx_install "$install_spec" "$PYTHON_BIN"
+  pip_target="$(build_vllm_mlx_pip_target "$install_spec")"
+  ensure_vllm_mlx_install "$install_spec" "$pip_target" "$PYTHON_BIN"
 
   echo "Starting local vllm-mlx runtime at http://$HOST:$PORT"
   args=(
