@@ -709,8 +709,8 @@ func TestRunAssistantTurnExecutesHighConfidenceLocalIntent(t *testing.T) {
 					"id":   "call-toggle",
 					"type": "function",
 					"function": map[string]any{
-						"name":      "system_action",
-						"arguments": `{"action":"toggle_silent"}`,
+						"name":      "action__toggle_silent",
+						"arguments": `{}`,
 					},
 				}},
 			}
@@ -757,8 +757,8 @@ func TestRunAssistantTurnExecutesHighConfidenceLocalIntentInProjectSession(t *te
 					"id":   "call-toggle",
 					"type": "function",
 					"function": map[string]any{
-						"name":      "system_action",
-						"arguments": `{"action":"toggle_silent"}`,
+						"name":      "action__toggle_silent",
+						"arguments": `{}`,
 					},
 				}},
 			}
@@ -830,18 +830,30 @@ func TestRunAssistantTurnPersistsLocalAnswer(t *testing.T) {
 	}
 }
 
-func TestRunAssistantTurnOpenReadmeUsesMultiActionPlanAndOpensCanvas(t *testing.T) {
+func TestRunAssistantTurnOpenReadmeUsesExplicitToolsAndOpensCanvas(t *testing.T) {
 	llmCalls := 0
 	llm := setupMockLocalAssistantServer(t, func(call int, payload map[string]any) map[string]any {
 		llmCalls++
 		if call == 1 {
 			return map[string]any{
 				"tool_calls": []map[string]any{{
+					"id":   "call-list",
+					"type": "function",
+					"function": map[string]any{
+						"name":      "shell",
+						"arguments": `{"command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"}`,
+					},
+				}},
+			}
+		}
+		if call == 2 {
+			return map[string]any{
+				"tool_calls": []map[string]any{{
 					"id":   "call-open-readme",
 					"type": "function",
 					"function": map[string]any{
-						"name":      "system_action",
-						"arguments": `{"actions":[{"action":"shell","command":"ls -1"},{"action":"shell","command":"find . -maxdepth 2 -type f -iname 'README*' | head -n 1"},{"action":"open_file_canvas","path":"$last_shell_path"}]}`,
+						"name":      "action__open_file_canvas",
+						"arguments": `{"path":"README.md"}`,
 					},
 				}},
 			}
@@ -947,8 +959,8 @@ func TestRunAssistantTurnUsesLocalAssistantSystemActionTool(t *testing.T) {
 					"id":   "call-toggle",
 					"type": "function",
 					"function": map[string]any{
-						"name":      "system_action",
-						"arguments": `{"action":"toggle_silent"}`,
+						"name":      "action__toggle_silent",
+						"arguments": `{}`,
 					},
 				}},
 			}
@@ -1006,8 +1018,8 @@ func TestRunAssistantTurnPreservesClarificationContextForLocalLLM(t *testing.T) 
 					"id":   "call-toggle",
 					"type": "function",
 					"function": map[string]any{
-						"name":      "system_action",
-						"arguments": `{"action":"toggle_silent"}`,
+						"name":      "action__toggle_silent",
+						"arguments": `{}`,
 					},
 				}},
 			}

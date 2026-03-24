@@ -42,6 +42,11 @@ func annotateLocalAssistantSafetyStop(raw string) string {
 	return clean + "\n\n[stopped at local safety limit]"
 }
 
+func localAssistantHiddenControlEnvelope(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	return strings.HasPrefix(trimmed, "<tool_call>")
+}
+
 func localAssistantVisibleStreamDelta(delta localIntentLLMStreamDelta, enableThinking bool) string {
 	content := stripLocalAssistantThinkingPreamble(delta.Content)
 	if content != "" || enableThinking {
@@ -146,7 +151,7 @@ func decodeLocalAssistantStreamingPayload(body io.Reader, enableThinking bool, o
 		}
 		if delta := localAssistantVisibleStreamDelta(choice.Delta, enableThinking); delta != "" {
 			message.Content += delta
-			if onDelta != nil {
+			if onDelta != nil && !localAssistantHiddenControlEnvelope(message.Content) {
 				onDelta(message.Content, delta)
 			}
 		}
@@ -220,7 +225,7 @@ func (a *App) requestLocalAssistantCompletionWithConfig(ctx context.Context, mes
 	if err != nil {
 		return localIntentLLMMessage{}, err
 	}
-	if onDelta != nil && strings.TrimSpace(message.Content) != "" {
+	if onDelta != nil && strings.TrimSpace(message.Content) != "" && !localAssistantHiddenControlEnvelope(message.Content) {
 		onDelta(message.Content, message.Content)
 	}
 	return message, nil

@@ -368,18 +368,13 @@ func (a *App) runCodexAssistantTurn(req *assistantTurnRequest) {
 	_ = assistantText
 }
 
-func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSession, userText string, cursorCtx *chatCursorContext, captureMode string, outputMode string, localOnly bool) bool {
-	if strings.TrimSpace(userText) == "" {
-		return false
+func (a *App) finalizeHandledLocalActionTurn(sessionID string, workspacePath string, outputMode string, turnStartedAt time.Time, actionMessage string, actionPayloads []map[string]interface{}) {
+	if a == nil {
+		return
 	}
-	turnStartedAt := time.Now()
-	actionMessage, actionPayloads, handled := a.classifyAndExecuteSystemActionForTurn(context.Background(), sessionID, session, userText, cursorCtx, captureMode)
-	if !handled && !localOnly {
-		return false
-	}
-	if handled && suppressLocalAssistantResponse(actionPayloads) {
+	if suppressLocalAssistantResponse(actionPayloads) {
 		a.finishCompanionPendingTurn(sessionID, "assistant_turn_suppressed")
-		return true
+		return
 	}
 	runID := randomToken()
 	a.broadcastChatEvent(sessionID, map[string]interface{}{
@@ -387,24 +382,20 @@ func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSe
 		"turn_id": runID,
 	})
 	assistantText := strings.TrimSpace(actionMessage)
-	if handled {
-		if assistantText == "" {
-			assistantText = "Done."
+	if assistantText == "" {
+		assistantText = "Done."
+	}
+	for _, actionPayload := range actionPayloads {
+		if actionPayload == nil {
+			continue
 		}
-		for _, actionPayload := range actionPayloads {
-			if actionPayload == nil {
-				continue
-			}
-			a.broadcastSystemActionEvent(sessionID, actionPayload)
-		}
-	} else {
-		assistantText = "I can only handle system actions in local-only mode."
+		a.broadcastSystemActionEvent(sessionID, actionPayload)
 	}
 	persistedAssistantID := int64(0)
 	persistedAssistantText := ""
 	a.finalizeAssistantResponseWithMetadata(
 		sessionID,
-		session.WorkspacePath,
+		workspacePath,
 		assistantText,
 		&persistedAssistantID,
 		&persistedAssistantText,
@@ -414,6 +405,25 @@ func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSe
 		outputMode,
 		newAssistantResponseMetadata(a.localAssistantProvider(), a.localAssistantModelLabel(), time.Since(turnStartedAt)),
 	)
+}
+
+func (a *App) tryRunLocalSystemActionTurn(sessionID string, session store.ChatSession, userText string, cursorCtx *chatCursorContext, captureMode string, outputMode string, localOnly bool) bool {
+	if strings.TrimSpace(userText) == "" {
+		return false
+	}
+	turnStartedAt := time.Now()
+	actionMessage, actionPayloads, handled := a.tryRunDirectLocalCanvasTextTurn(sessionID, session, userText)
+	if !handled {
+		actionMessage, actionPayloads, handled = a.classifyAndExecuteSystemActionForTurn(context.Background(), sessionID, session, userText, cursorCtx, captureMode)
+	}
+	if !handled && !localOnly {
+		return false
+	}
+	if !handled {
+		a.finalizeHandledLocalActionTurn(sessionID, session.WorkspacePath, outputMode, turnStartedAt, "I can only handle system actions in local-only mode.", nil)
+		return true
+	}
+	a.finalizeHandledLocalActionTurn(sessionID, session.WorkspacePath, outputMode, turnStartedAt, actionMessage, actionPayloads)
 	return true
 }
 

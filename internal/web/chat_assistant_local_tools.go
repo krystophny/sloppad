@@ -42,7 +42,9 @@ type localAssistantToolCall struct {
 
 type localAssistantToolResult struct {
 	ToolCallID        string           `json:"tool_call_id,omitempty"`
+	ModelName         string           `json:"model_name,omitempty"`
 	Name              string           `json:"name,omitempty"`
+	Kind              string           `json:"kind,omitempty"`
 	Arguments         map[string]any   `json:"arguments,omitempty"`
 	CWD               string           `json:"cwd,omitempty"`
 	Output            string           `json:"output,omitempty"`
@@ -56,90 +58,13 @@ type localAssistantToolResult struct {
 
 type localAssistantTurnState struct {
 	sessionID    string
+	canvasID     string
 	session      store.ChatSession
 	userText     string
 	workspace    store.Workspace
 	workspaceDir string
 	currentDir   string
 	mcpURL       string
-}
-
-func localAssistantToolDefinitions() []map[string]any {
-	return []map[string]any{
-		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "system_action",
-				"description": "Execute native Tabura actions such as runtime controls, canvas navigation, workspace actions, item capture, or file opening. Provide either a single action plus params or an actions array for multi-step plans.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"action": map[string]any{
-							"type":        "string",
-							"description": "Single native Tabura action name.",
-						},
-						"params": map[string]any{
-							"type":        "object",
-							"description": "Parameters for a single action.",
-						},
-						"actions": map[string]any{
-							"type":        "array",
-							"description": "Optional multi-step native Tabura action plan.",
-							"items": map[string]any{
-								"type": "object",
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "shell",
-				"description": "Run a shell command inside the active workspace and inspect the result.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"command": map[string]any{
-							"type":        "string",
-							"description": "Shell command to execute.",
-						},
-						"cwd": map[string]any{
-							"type":        "string",
-							"description": "Optional relative or absolute directory inside the workspace.",
-						},
-					},
-					"required": []string{"command"},
-				},
-			},
-		},
-		{
-			"type": "function",
-			"function": map[string]any{
-				"name":        "mcp",
-				"description": "Call an MCP tool on the active workspace MCP endpoint or the local fallback endpoint.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"name": map[string]any{
-							"type":        "string",
-							"description": "Tool name to call.",
-						},
-						"arguments": map[string]any{
-							"type":        "object",
-							"description": "Tool arguments.",
-						},
-						"mcp_url": map[string]any{
-							"type":        "string",
-							"description": "Optional MCP URL override.",
-						},
-					},
-					"required": []string{"name"},
-				},
-			},
-		},
-	}
 }
 
 func localAssistantThinkingEnabled(req *assistantTurnRequest) bool {
@@ -187,6 +112,9 @@ func parseLocalAssistantDecision(message localIntentLLMMessage) (localAssistantD
 	if content == "" {
 		return localAssistantDecision{}, errors.New("assistant llm returned empty content")
 	}
+	if calls, ok := parseLegacyLocalAssistantToolCalls(content); ok {
+		return localAssistantDecision{ToolCalls: calls}, nil
+	}
 	if localAssistantUnsupportedControlEnvelope(content) {
 		return localAssistantDecision{}, errLocalAssistantUnsupportedResponse
 	}
@@ -217,6 +145,164 @@ func parseLocalAssistantDecision(message localIntentLLMMessage) (localAssistantD
 		return localAssistantDecision{}, errors.New("assistant emitted malformed tool JSON")
 	}
 	return localAssistantDecision{FinalText: content}, nil
+}
+
+func parseLegacyLocalAssistantToolCalls(raw string) ([]localAssistantToolCall, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.Contains(trimmed, "<tool_call>") || !strings.Contains(trimmed, "</tool_call>") {
+		return nil, false
+	}
+	calls := []localAssistantToolCall{}
+	rest := trimmed
+	for {
+		start := strings.Index(rest, "<tool_call>")
+		if start < 0 {
+			break
+		}
+		rest = rest[start+len("<tool_call>"):]
+		end := strings.Index(rest, "</tool_call>")
+		if end < 0 {
+			return nil, false
+		}
+		call, ok := parseLegacyLocalAssistantToolCallBlock(rest[:end])
+		if !ok {
+			return nil, false
+		}
+		calls = append(calls, call)
+		rest = rest[end+len("</tool_call>"):]
+	}
+	return calls, len(calls) > 0
+}
+
+func parseLegacyLocalAssistantToolCallBlock(raw string) (localAssistantToolCall, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return localAssistantToolCall{}, false
+	}
+	functionStart := strings.Index(trimmed, "<function=")
+	if functionStart < 0 {
+		return localAssistantToolCall{}, false
+	}
+	functionBody := trimmed[functionStart+len("<function="):]
+	functionEnd := strings.Index(functionBody, ">")
+	if functionEnd < 0 {
+		return localAssistantToolCall{}, false
+	}
+	name := strings.TrimSpace(functionBody[:functionEnd])
+	rest := functionBody[functionEnd+1:]
+	args := map[string]any{}
+	for {
+		paramStart := strings.Index(rest, "<parameter=")
+		if paramStart < 0 {
+			break
+		}
+		rest = rest[paramStart+len("<parameter="):]
+		paramEnd := strings.Index(rest, ">")
+		if paramEnd < 0 {
+			break
+		}
+		key := strings.TrimSpace(rest[:paramEnd])
+		if key == "" {
+			rest = rest[paramEnd+1:]
+			continue
+		}
+		rest = rest[paramEnd+1:]
+		nextParam := strings.Index(rest, "<parameter=")
+		nextFunction := strings.Index(rest, "</function>")
+		nextBoundary := len(rest)
+		if nextParam >= 0 && nextParam < nextBoundary {
+			nextBoundary = nextParam
+		}
+		if nextFunction >= 0 && nextFunction < nextBoundary {
+			nextBoundary = nextFunction
+		}
+		value := rest[:nextBoundary]
+		if closeParam := strings.Index(value, "</parameter>"); closeParam >= 0 {
+			value = value[:closeParam]
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			args[key] = ""
+		} else if decoded, err := parseLocalAssistantToolArguments(value); err == nil {
+			args[key] = decoded
+		} else {
+			args[key] = value
+		}
+		rest = rest[nextBoundary:]
+	}
+	if strings.TrimSpace(name) == "" {
+		return localAssistantToolCall{}, false
+	}
+	return translateLegacyLocalAssistantToolCall(localAssistantToolCall{
+		ID:        randomToken(),
+		Name:      name,
+		Arguments: args,
+	}), true
+}
+
+func translateLegacyLocalAssistantToolCall(call localAssistantToolCall) localAssistantToolCall {
+	name := strings.ToLower(strings.TrimSpace(call.Name))
+	switch name {
+	case "system", "action":
+		name = "system_action"
+	case "mcp_tool", "mcp_call":
+		name = "mcp"
+	}
+	switch name {
+	case "mcp":
+		toolName := strings.TrimSpace(fmt.Sprint(call.Arguments["name"]))
+		if toolName == "" || toolName == "<nil>" {
+			return call
+		}
+		toolArgs, err := parseLocalAssistantToolArguments(call.Arguments["arguments"])
+		if err != nil {
+			return call
+		}
+		call.Name = localAssistantMCPModelName(toolName)
+		call.Arguments = toolArgs
+		return call
+	case "system_action":
+		action := strings.ToLower(strings.TrimSpace(fmt.Sprint(call.Arguments["action"])))
+		if action == "create_text_artifact" {
+			params, err := parseLocalAssistantToolArguments(call.Arguments["params"])
+			if err != nil {
+				return call
+			}
+			body := ""
+			for _, key := range []string{"markdown_or_text", "body", "text", "content"} {
+				value := strings.TrimSpace(fmt.Sprint(params[key]))
+				if value == "" || value == "<nil>" {
+					continue
+				}
+				body = value
+				break
+			}
+			call.Name = localAssistantMCPModelName("canvas_artifact_show")
+			call.Arguments = map[string]any{
+				"kind":             "text",
+				"title":            strings.TrimSpace(fmt.Sprint(params["title"])),
+				"markdown_or_text": body,
+			}
+			return call
+		}
+		if normalized := normalizeSystemActionName(action); normalized != "" {
+			params, err := parseLocalAssistantToolArguments(call.Arguments["params"])
+			if err != nil {
+				params = map[string]any{}
+			}
+			for key, value := range call.Arguments {
+				if key == "action" || key == "params" {
+					continue
+				}
+				params[key] = value
+			}
+			call.Name = "action__" + normalized
+			call.Arguments = params
+			return call
+		}
+	}
+	call.Name = name
+	return call
 }
 
 func decodeLocalAssistantEnvelope(raw string) (any, bool) {
@@ -295,9 +381,9 @@ func parseLocalAssistantToolCallsAny(raw any) ([]localAssistantToolCall, error) 
 func parseLocalAssistantToolCalls(raw []localAssistantLLMToolCall) ([]localAssistantToolCall, error) {
 	calls := make([]localAssistantToolCall, 0, len(raw))
 	for _, item := range raw {
-		name := normalizeLocalAssistantToolName(item.Function.Name)
+		name := strings.TrimSpace(item.Function.Name)
 		if name == "" {
-			return nil, errors.New("tool call is missing a supported name")
+			return nil, errors.New("tool call is missing a name")
 		}
 		args, err := parseLocalAssistantToolArguments(item.Function.Arguments)
 		if err != nil {
@@ -317,18 +403,18 @@ func parseLocalAssistantToolCalls(raw []localAssistantLLMToolCall) ([]localAssis
 }
 
 func parseLocalAssistantToolCallMap(obj map[string]any) (localAssistantToolCall, error) {
-	name := normalizeLocalAssistantToolName(fmt.Sprint(obj["name"]))
+	name := strings.TrimSpace(fmt.Sprint(obj["name"]))
 	argsValue := obj["arguments"]
 	if function, ok := obj["function"].(map[string]any); ok {
 		if name == "" {
-			name = normalizeLocalAssistantToolName(fmt.Sprint(function["name"]))
+			name = strings.TrimSpace(fmt.Sprint(function["name"]))
 		}
 		if argsValue == nil {
 			argsValue = function["arguments"]
 		}
 	}
 	if name == "" {
-		return localAssistantToolCall{}, errors.New("tool call is missing a supported name")
+		return localAssistantToolCall{}, errors.New("tool call is missing a name")
 	}
 	args, err := parseLocalAssistantToolArguments(argsValue)
 	if err != nil {
@@ -370,19 +456,6 @@ func parseLocalAssistantToolArguments(raw any) (map[string]any, error) {
 	}
 }
 
-func normalizeLocalAssistantToolName(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "system_action", "system", "action":
-		return "system_action"
-	case "shell":
-		return "shell"
-	case "mcp", "mcp_tool", "mcp_call":
-		return "mcp"
-	default:
-		return ""
-	}
-}
-
 func localAssistantAssistantMessage(message localIntentLLMMessage) map[string]any {
 	payload := map[string]any{
 		"role":    "assistant",
@@ -402,6 +475,69 @@ func localAssistantRepairPrompt(err error) string {
 		"Your last tool response could not be executed: %s. Return a valid tool call or a valid {\"final\":\"...\"} object now.",
 		strings.TrimSpace(err.Error()),
 	)
+}
+
+func localAssistantToolRequiredPrompt() string {
+	return "A tool is required for the user's request. Do not describe a plan. Call the correct explicit tool now, then finish with a short final reply."
+}
+
+func localAssistantRequiresToolExecution(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	actionPhrases := []string{
+		"use tool",
+		"use tools",
+		"show ",
+		"open ",
+		"display ",
+		"draw ",
+		"render ",
+		"create ",
+		"make ",
+		"list ",
+		"archive ",
+		"delete ",
+		"move ",
+	}
+	for _, phrase := range actionPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	nouns := []string{"canvas", "file", "folder", "directory", "workspace", "calendar", "event", "mail", "email", "inbox", "item", "task"}
+	for _, noun := range nouns {
+		if strings.Contains(lower, noun) {
+			return true
+		}
+	}
+	return false
+}
+
+func localAssistantLooksLikeToolPlanning(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	markers := []string{
+		"i need to",
+		"let me",
+		"i'll",
+		"i will",
+		"first,",
+		"first ",
+		"i should",
+		"search for",
+		"find a",
+		"find the",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func stripLocalAssistantThinkingPreamble(raw string) string {
@@ -430,8 +566,23 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 	if err != nil {
 		return "", err
 	}
+	toolText := strings.TrimSpace(req.userText)
+	if toolText == "" {
+		toolText = strings.TrimSpace(req.promptText)
+	}
+	catalog := localAssistantToolCatalog{
+		Definitions: nil,
+		ToolsByName: map[string]localAssistantExecutableTool{},
+	}
+	if localAssistantNeedsTools(toolText) {
+		fullCatalog, err := a.buildLocalAssistantToolCatalog(state)
+		if err != nil {
+			return "", err
+		}
+		catalog = pruneLocalAssistantToolCatalog(fullCatalog, toolText)
+	}
 	conversation := []map[string]any{
-		{"role": "system", "content": strings.TrimSpace(strings.Join([]string{localAssistantDialoguePrompt, localAssistantReasoningHint(req)}, "\n"))},
+		{"role": "system", "content": buildLocalAssistantDialoguePrompt(buildLocalAssistantToolPolicy(catalog), localAssistantReasoningHint(req))},
 		{"role": "user", "content": buildLocalAssistantUserContent(prompt, visual)},
 	}
 	enableThinking := localAssistantThinkingEnabled(req)
@@ -452,6 +603,8 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		return strings.TrimSpace(message.Content), nil
 	}
 	malformedRetries := 0
+	toolRequired := localAssistantRequiresToolExecution(toolText) && len(catalog.Definitions) > 0
+	toolPlanRetries := 0
 	for round := 0; round < assistantLLMMaxToolRounds; round++ {
 		maxTokens := assistantLLMDirectMaxTokens
 		if round > 0 {
@@ -461,7 +614,7 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		if round > 0 {
 			emitDelta = nil
 		}
-		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, conversation, localAssistantToolDefinitions(), "auto", enableThinking, maxTokens, emitDelta)
+		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, conversation, catalog.Definitions, "auto", enableThinking, maxTokens, emitDelta)
 		if err != nil {
 			return "", err
 		}
@@ -482,6 +635,15 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 			continue
 		}
 		if text := strings.TrimSpace(decision.FinalText); text != "" {
+			if toolRequired && toolPlanRetries == 0 && localAssistantLooksLikeToolPlanning(text) {
+				toolPlanRetries++
+				conversation = append(conversation, localAssistantAssistantMessage(message))
+				conversation = append(conversation, map[string]any{
+					"role":    "user",
+					"content": localAssistantToolRequiredPrompt(),
+				})
+				continue
+			}
 			return text, nil
 		}
 		if len(decision.ToolCalls) == 0 {
@@ -490,7 +652,7 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		malformedRetries = 0
 		conversation = append(conversation, localAssistantAssistantMessage(message))
 		for _, call := range decision.ToolCalls {
-			result, execErr := a.executeLocalAssistantToolCall(ctx, &state, call)
+			result, execErr := a.executeLocalAssistantToolCall(ctx, &state, catalog, call)
 			if execErr != nil {
 				return "", execErr
 			}
@@ -525,6 +687,7 @@ func (a *App) newLocalAssistantTurnState(req *assistantTurnRequest) (localAssist
 	}
 	return localAssistantTurnState{
 		sessionID:    req.sessionID,
+		canvasID:     strings.TrimSpace(a.canvasSessionIDForWorkspace(workspace)),
 		session:      req.session,
 		userText:     req.userText,
 		workspace:    workspace,
@@ -534,39 +697,94 @@ func (a *App) newLocalAssistantTurnState(req *assistantTurnRequest) (localAssist
 	}, nil
 }
 
-func (a *App) executeLocalAssistantToolCall(ctx context.Context, state *localAssistantTurnState, call localAssistantToolCall) (localAssistantToolResult, error) {
+func (a *App) executeLocalAssistantToolCall(ctx context.Context, state *localAssistantTurnState, catalog localAssistantToolCatalog, call localAssistantToolCall) (localAssistantToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return localAssistantToolResult{}, err
 	}
-	switch call.Name {
-	case "system_action":
-		return a.executeLocalAssistantSystemActionTool(state, call)
-	case "shell":
-		return executeLocalAssistantShellTool(state, call), nil
-	case "mcp":
-		return a.executeLocalAssistantMCPTool(ctx, state, call)
-	default:
+	executable, ok := catalog.ToolsByName[strings.TrimSpace(call.Name)]
+	if !ok {
 		return localAssistantToolResult{
 			ToolCallID: call.ID,
+			ModelName:  call.Name,
 			Name:       call.Name,
 			Arguments:  call.Arguments,
 			IsError:    true,
 			Error:      "unsupported local assistant tool",
 		}, nil
 	}
+	args := mergeLocalAssistantToolArguments(executable.DefaultArgs, call.Arguments)
+	switch executable.Kind {
+	case localAssistantToolKindShell:
+		toolCall := call
+		toolCall.Name = executable.InternalName
+		toolCall.Arguments = args
+		result := executeLocalAssistantShellTool(state, toolCall)
+		result.ModelName = executable.ModelName
+		result.Kind = string(executable.Kind)
+		return result, nil
+	case localAssistantToolKindSystemAction:
+		return a.executeLocalAssistantExplicitSystemActionTool(state, executable, call, args)
+	case localAssistantToolKindCanvasText:
+		return a.executeLocalAssistantCanvasTextTool(ctx, state, executable, call, args)
+	case localAssistantToolKindMCP:
+		return a.executeLocalAssistantBoundMCPTool(ctx, state, executable, call, args)
+	case localAssistantToolKindWebSearchUnavailable:
+		return executeLocalAssistantWebSearchUnavailableTool(executable, call, args), nil
+	default:
+		return localAssistantToolResult{
+			ToolCallID: call.ID,
+			ModelName:  executable.ModelName,
+			Name:       executable.InternalName,
+			Kind:       string(executable.Kind),
+			Arguments:  args,
+			IsError:    true,
+			Error:      "unsupported local assistant tool",
+		}, nil
+	}
 }
 
-func (a *App) executeLocalAssistantSystemActionTool(state *localAssistantTurnState, call localAssistantToolCall) (localAssistantToolResult, error) {
+func (a *App) executeLocalAssistantCanvasTextTool(ctx context.Context, state *localAssistantTurnState, tool localAssistantExecutableTool, call localAssistantToolCall, args map[string]any) (localAssistantToolResult, error) {
+	text := strings.TrimSpace(fmt.Sprint(args["text"]))
+	if text == "" || text == "<nil>" {
+		return localAssistantToolResult{
+			ToolCallID: call.ID,
+			ModelName:  tool.ModelName,
+			Name:       tool.InternalName,
+			Kind:       string(tool.Kind),
+			Arguments:  args,
+			IsError:    true,
+			Error:      "canvas text is required",
+		}, nil
+	}
+	mcpArgs := map[string]any{
+		"title":            strings.TrimSpace(fmt.Sprint(args["title"])),
+		"markdown_or_text": text,
+	}
+	for key, value := range tool.DefaultArgs {
+		mcpArgs[key] = value
+	}
+	alias := localAssistantExecutableTool{
+		ModelName:    tool.ModelName,
+		Kind:         localAssistantToolKindMCP,
+		InternalName: tool.InternalName,
+	}
+	return a.executeLocalAssistantBoundMCPTool(ctx, state, alias, call, mcpArgs)
+}
+
+func (a *App) executeLocalAssistantExplicitSystemActionTool(state *localAssistantTurnState, tool localAssistantExecutableTool, call localAssistantToolCall, args map[string]any) (localAssistantToolResult, error) {
 	result := localAssistantToolResult{
 		ToolCallID: call.ID,
-		Name:       call.Name,
-		Arguments:  call.Arguments,
+		ModelName:  tool.ModelName,
+		Name:       tool.InternalName,
+		Kind:       string(tool.Kind),
+		Arguments:  args,
 	}
-	actions, err := parseLocalAssistantSystemActionArgs(call.Arguments)
-	if err != nil {
-		result.IsError = true
-		result.Error = err.Error()
-		return result, nil
+	actions := []*SystemAction{{
+		Action: tool.InternalName,
+		Params: map[string]interface{}{},
+	}}
+	for key, value := range args {
+		actions[0].Params[key] = value
 	}
 	message, payloads, err := a.executeSystemActionPlan(state.sessionID, state.session, state.userText, actions)
 	if err != nil {
@@ -580,73 +798,6 @@ func (a *App) executeLocalAssistantSystemActionTool(state *localAssistantTurnSta
 		"actions": len(actions),
 	}
 	return result, nil
-}
-
-func parseLocalAssistantSystemActionArgs(args map[string]any) ([]*SystemAction, error) {
-	if len(args) == 0 {
-		return nil, errors.New("system_action arguments are required")
-	}
-	if rawPlan, ok := args["actions"]; ok {
-		actions, err := parseLocalAssistantSystemActionPlan(rawPlan)
-		if err != nil {
-			return nil, err
-		}
-		if len(actions) == 0 {
-			return nil, errors.New("system_action plan is empty")
-		}
-		return actions, nil
-	}
-	action, err := parseLocalAssistantSystemActionItem(args)
-	if err != nil {
-		return nil, err
-	}
-	return []*SystemAction{action}, nil
-}
-
-func parseLocalAssistantSystemActionPlan(raw any) ([]*SystemAction, error) {
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, errors.New("system_action actions must be an array")
-	}
-	actions := make([]*SystemAction, 0, len(items))
-	for _, item := range items {
-		action, err := parseLocalAssistantSystemActionItem(item)
-		if err != nil {
-			return nil, err
-		}
-		actions = append(actions, action)
-	}
-	return actions, nil
-}
-
-func parseLocalAssistantSystemActionItem(raw any) (*SystemAction, error) {
-	obj, ok := raw.(map[string]any)
-	if !ok || obj == nil {
-		return nil, errors.New("system_action entry must be an object")
-	}
-	action := normalizeSystemActionName(fmt.Sprint(obj["action"]))
-	if action == "" {
-		if parsed := parseSystemActionObject(obj); parsed != nil {
-			return parsed, nil
-		}
-		return nil, errors.New("system_action entry is missing a supported action")
-	}
-	params := map[string]interface{}{}
-	if rawParams, ok := obj["params"].(map[string]any); ok && rawParams != nil {
-		for key, value := range rawParams {
-			params[key] = value
-		}
-	}
-	for key, value := range obj {
-		trimmed := strings.TrimSpace(key)
-		switch trimmed {
-		case "", "action", "actions", "params":
-			continue
-		default:
-			params[trimmed] = value
-		}
-	}
-	return &SystemAction{Action: action, Params: params}, nil
 }
 
 func executeLocalAssistantShellTool(state *localAssistantTurnState, call localAssistantToolCall) localAssistantToolResult {
@@ -695,37 +846,29 @@ func executeLocalAssistantShellTool(state *localAssistantTurnState, call localAs
 	return result
 }
 
-func (a *App) executeLocalAssistantMCPTool(ctx context.Context, state *localAssistantTurnState, call localAssistantToolCall) (localAssistantToolResult, error) {
+func (a *App) executeLocalAssistantBoundMCPTool(ctx context.Context, state *localAssistantTurnState, tool localAssistantExecutableTool, call localAssistantToolCall, args map[string]any) (localAssistantToolResult, error) {
 	result := localAssistantToolResult{
 		ToolCallID: call.ID,
-		Name:       call.Name,
-		Arguments:  call.Arguments,
+		ModelName:  tool.ModelName,
+		Name:       tool.InternalName,
+		Kind:       string(tool.Kind),
+		Arguments:  args,
 	}
-	mcpURL := strings.TrimSpace(fmt.Sprint(call.Arguments["mcp_url"]))
-	if mcpURL == "" || mcpURL == "<nil>" {
-		mcpURL = state.mcpURL
+	mcpURL := state.mcpURL
+	if strings.HasPrefix(tool.InternalName, "canvas_") && strings.TrimSpace(state.canvasID) != "" {
+		if port, ok := a.tunnels.getPort(state.canvasID); ok && port > 0 {
+			mcpURL = fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+		}
 	}
 	if mcpURL == "" {
 		result.IsError = true
 		result.Error = "MCP URL is not configured"
 		return result, nil
 	}
-	toolName := strings.TrimSpace(fmt.Sprint(call.Arguments["name"]))
-	if toolName == "" || toolName == "<nil>" {
-		result.IsError = true
-		result.Error = "MCP tool name is required"
-		return result, nil
-	}
-	toolArgs, err := parseLocalAssistantToolArguments(call.Arguments["arguments"])
-	if err != nil {
-		result.IsError = true
-		result.Error = err.Error()
-		return result, nil
-	}
 	if err := ctx.Err(); err != nil {
 		return localAssistantToolResult{}, err
 	}
-	structuredContent, err := mcpToolsCallURL(mcpURL, toolName, toolArgs)
+	structuredContent, err := mcpToolsCallURL(mcpURL, tool.InternalName, args)
 	if err != nil {
 		result.IsError = true
 		result.Error = err.Error()
@@ -735,14 +878,32 @@ func (a *App) executeLocalAssistantMCPTool(ctx context.Context, state *localAssi
 	return result, nil
 }
 
+func executeLocalAssistantWebSearchUnavailableTool(tool localAssistantExecutableTool, call localAssistantToolCall, args map[string]any) localAssistantToolResult {
+	return localAssistantToolResult{
+		ToolCallID: call.ID,
+		ModelName:  tool.ModelName,
+		Name:       tool.InternalName,
+		Kind:       string(tool.Kind),
+		Arguments:  args,
+		IsError:    true,
+		Error:      "Local mode cannot browse websites or run web search yet. Explain that limitation and continue with local files, MCP tools, canvas, mail, calendar, or workspace actions when possible.",
+		StructuredContent: map[string]any{
+			"available":  false,
+			"capability": "web_search",
+			"message":    "Local mode cannot browse websites or run web search yet.",
+			"query":      strings.TrimSpace(fmt.Sprint(args["query"])),
+		},
+	}
+}
+
 func localAssistantToolPayloads(result localAssistantToolResult, workspaceID int64) []map[string]any {
-	if strings.TrimSpace(result.Name) == "" {
+	if strings.TrimSpace(result.Kind) == "" {
 		return nil
 	}
-	switch result.Name {
-	case "system_action":
+	switch result.Kind {
+	case string(localAssistantToolKindSystemAction):
 		return result.Payloads
-	case "shell":
+	case string(localAssistantToolKindShell):
 		return []map[string]any{{
 			"type":         "shell",
 			"command":      strings.TrimSpace(fmt.Sprint(result.Arguments["command"])),
@@ -754,11 +915,11 @@ func localAssistantToolPayloads(result localAssistantToolResult, workspaceID int
 			"error":        result.Error,
 			"workspace_id": workspaceID,
 		}}
-	case "mcp":
+	case string(localAssistantToolKindMCP):
 		return []map[string]any{{
 			"type":         "mcp_tool",
-			"name":         strings.TrimSpace(fmt.Sprint(result.Arguments["name"])),
-			"arguments":    result.Arguments["arguments"],
+			"name":         result.Name,
+			"arguments":    result.Arguments,
 			"result":       result.StructuredContent,
 			"is_error":     result.IsError,
 			"error":        result.Error,

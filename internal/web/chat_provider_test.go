@@ -1,7 +1,10 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +59,65 @@ func TestLocalSystemActionTurnPublishesLocalProviderMetadata(t *testing.T) {
 	}
 	if got := messages[0].ProviderModel; got != app.localAssistantModelLabel() {
 		t.Fatalf("stored provider_model = %q, want %q", got, app.localAssistantModelLabel())
+	}
+}
+
+func TestLocalSystemActionTurnHandlesDirectCanvasTextShortcut(t *testing.T) {
+	mcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode mcp payload: %v", err)
+		}
+		params, _ := payload["params"].(map[string]any)
+		if got := strings.TrimSpace(strFromAny(params["name"])); got != "canvas_artifact_show" {
+			t.Fatalf("tool name = %q, want canvas_artifact_show", got)
+		}
+		args, _ := params["arguments"].(map[string]any)
+		if got := strings.TrimSpace(strFromAny(args["title"])); got != "Tool Test" {
+			t.Fatalf("canvas title = %q, want Tool Test", got)
+		}
+		if got := strings.TrimSpace(strFromAny(args["markdown_or_text"])); got != "Orbit Canvas" {
+			t.Fatalf("canvas body = %q, want Orbit Canvas", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"structuredContent": map[string]any{"ok": true},
+			},
+		})
+	}))
+	defer mcp.Close()
+
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+	app.localMCPURL = mcp.URL
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensureDefaultWorkspace: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+
+	conn, clientConn, cleanup := newParticipantTestWSConn(t)
+	defer cleanup()
+	app.hub.registerChat(session.ID, conn)
+	defer app.hub.unregisterChat(session.ID, conn)
+
+	prompt := "Show a text artifact on the canvas titled Tool Test with the exact body Orbit Canvas. Then reply with the single word DONE."
+	if handled := app.tryRunLocalSystemActionTurn(session.ID, session, prompt, nil, "", turnOutputModeVoice, false); !handled {
+		t.Fatal("expected direct canvas text shortcut to be handled")
+	}
+
+	actionPayload := waitForWSJSONMessageType(t, clientConn, 2*time.Second, "system_action")
+	action, _ := actionPayload["action"].(map[string]any)
+	if got := strings.TrimSpace(strFromAny(action["name"])); got != "canvas_artifact_show" {
+		t.Fatalf("system action name = %q, want canvas_artifact_show", got)
+	}
+	payload := waitForWSJSONMessageType(t, clientConn, 2*time.Second, "assistant_output")
+	if got := strFromAny(payload["message"]); got != "DONE" {
+		t.Fatalf("assistant message = %q, want DONE", got)
 	}
 }
 

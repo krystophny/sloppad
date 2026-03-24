@@ -72,4 +72,19 @@ test.describe('local llm conversation flows @local-only', () => {
     await sendPromptAndExpect(page, 'Reply with the single word LANTERN.', 'lantern');
     await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
   });
+
+  test('usual local mode can show canvas content through explicit local tools', async ({ page }) => {
+    await clearLiveChat(sessionToken);
+    await openLiveApp(page, sessionToken);
+    await waitForLiveAppReady(page);
+    await resetCircleRuntimeState(page);
+
+    const before = await page.locator('#chat-history .chat-message.chat-assistant:not(.is-pending)').count();
+    await submitPrompt(
+      page,
+      'Show a text artifact on the canvas titled TOOL TEST with the exact body ORBIT CANVAS. Use tools, then reply with the single word DONE.',
+    );
+    await waitForAssistantReply(page, before, 'done', 120_000);
+    await expect(page.locator('#canvas-text')).toContainText('ORBIT CANVAS', { timeout: 120_000 });
+  });
 });

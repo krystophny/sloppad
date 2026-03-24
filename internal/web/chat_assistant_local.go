@@ -10,18 +10,18 @@ import (
 )
 
 const (
-	assistantModeAuto            = "auto"
-	assistantModeLocal           = "local"
-	assistantModeCodex           = "codex"
-	DefaultAssistantMode         = assistantModeAuto
-	defaultAssistantLLMTimeout   = 2 * time.Minute
-	assistantLLMFastMaxTokens    = 512
-	assistantLLMDirectMaxTokens  = 1024
-	assistantLLMToolMaxTokens    = 1024
-	assistantLLMResponseLimit    = 256 * 1024
-	assistantLLMMaxToolRounds    = 6
-	assistantLLMMalformedRetries = 2
-	localAssistantDialoguePrompt = "You are Tabura's local assistant. Available tools are declared in the request. Use native tool calls only when needed; otherwise answer directly. Default to plain text, not markdown. Do not use headings, bullets, numbered lists, or tables unless the user explicitly asks for them. Keep replies brief: default to 1-3 short sentences. If a single word or short phrase answers the request, reply with exactly that. No markdown fences. No <think> tags."
+	assistantModeAuto                = "auto"
+	assistantModeLocal               = "local"
+	assistantModeCodex               = "codex"
+	DefaultAssistantMode             = assistantModeAuto
+	defaultAssistantLLMTimeout       = 2 * time.Minute
+	assistantLLMFastMaxTokens        = 512
+	assistantLLMDirectMaxTokens      = 1024
+	assistantLLMToolMaxTokens        = 1024
+	assistantLLMResponseLimit        = 256 * 1024
+	assistantLLMMaxToolRounds        = 6
+	assistantLLMMalformedRetries     = 2
+	localAssistantDialoguePromptBase = "You are Tabura's local assistant. Use the explicit tools in this request instead of inventing plans or wrapper calls. Answer directly when no tool is needed. Default to plain text, not markdown. Do not use headings, bullets, numbered lists, or tables unless the user explicitly asks for them. Keep replies brief: default to 1-3 short sentences. If a single word or short phrase answers the request, reply with exactly that. No markdown fences. No <think> tags."
 )
 
 func assistantLLMRequestTimeout() time.Duration {
@@ -84,6 +84,17 @@ func (a *App) localAssistantLLMModel() string {
 	return a.localIntentLLMModel()
 }
 
+func buildLocalAssistantDialoguePrompt(toolPolicy string, reasoningHint string) string {
+	parts := []string{localAssistantDialoguePromptBase}
+	if strings.TrimSpace(toolPolicy) != "" {
+		parts = append(parts, strings.TrimSpace(toolPolicy))
+	}
+	if strings.TrimSpace(reasoningHint) != "" {
+		parts = append(parts, strings.TrimSpace(reasoningHint))
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
 func (a *App) buildLocalAssistantPrompt(sessionID string, session store.ChatSession, messages []store.ChatMessage, cursorCtx *chatCursorContext, inkCtx []*chatCanvasInkEvent, positionCtx []*chatCanvasPositionEvent, outputMode string) (string, error) {
 	var workspaceRef *store.Workspace
 	if workspace, err := a.effectiveWorkspaceForChatSession(session); err == nil {
@@ -110,6 +121,10 @@ func (a *App) buildLocalAssistantPrompt(sessionID string, session store.ChatSess
 
 func (a *App) runLocalAssistantTurn(req *assistantTurnRequest) {
 	if a == nil || req == nil {
+		return
+	}
+	if actionMessage, actionPayloads, handled := a.tryRunDirectLocalCanvasTextTurn(req.sessionID, req.session, req.userText); handled {
+		a.finalizeHandledLocalActionTurn(req.sessionID, req.session.WorkspacePath, req.outputMode, time.Now(), actionMessage, actionPayloads)
 		return
 	}
 	if strings.TrimSpace(a.assistantLLMBaseURL()) == "" {

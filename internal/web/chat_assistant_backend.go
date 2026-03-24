@@ -74,12 +74,15 @@ func (a *App) assistantBackendForTurn(req *assistantTurnRequest) assistantTurnBa
 	if req.localOnly {
 		return &localAssistantBackend{app: a}
 	}
-	if req.searchTurn || (req.turnModel != "" && req.turnModel != modelprofile.AliasLocal) {
+	if req.turnModel != "" && req.turnModel != modelprofile.AliasLocal {
 		return &codexAssistantBackend{app: a}
 	}
 	localConfigured := strings.TrimSpace(a.assistantLLMURL) != "" || a.appServerClient == nil || a.assistantRoutingMode() == assistantModeLocal
 	if modelprofile.ResolveAlias(req.baseProfile.Alias, modelprofile.AliasLocal) == modelprofile.AliasLocal && localConfigured {
 		return &localAssistantBackend{app: a}
+	}
+	if req.searchTurn {
+		return &codexAssistantBackend{app: a}
 	}
 	switch a.assistantRoutingMode() {
 	case assistantModeLocal:

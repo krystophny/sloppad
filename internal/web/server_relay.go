@@ -70,6 +70,63 @@ func (a *App) mcpToolsCall(port int, name string, arguments map[string]interface
 	return mcpToolsCallURL(fmt.Sprintf("http://127.0.0.1:%d/mcp", port), name, arguments)
 }
 
+type mcpListedTool struct {
+	Name        string
+	Description string
+	InputSchema map[string]any
+}
+
+func mcpToolsListURL(mcpURL string) ([]mcpListedTool, error) {
+	payload := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]interface{}{}}
+	b, _ := json.Marshal(payload)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpToolsCallTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, mcpURL, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		var netErr net.Error
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+			return nil, fmt.Errorf("MCP list timed out after %s", mcpToolsCallTimeout)
+		}
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("MCP list failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if e, ok := out["error"].(map[string]any); ok {
+		return nil, fmt.Errorf("MCP error: %v", e["message"])
+	}
+	result, _ := out["result"].(map[string]any)
+	if result == nil {
+		return nil, errors.New("MCP list failed: missing result")
+	}
+	rawTools, _ := result["tools"].([]any)
+	tools := make([]mcpListedTool, 0, len(rawTools))
+	for _, raw := range rawTools {
+		obj, _ := raw.(map[string]any)
+		if obj == nil {
+			continue
+		}
+		schema, _ := obj["inputSchema"].(map[string]any)
+		tools = append(tools, mcpListedTool{
+			Name:        strings.TrimSpace(fmt.Sprint(obj["name"])),
+			Description: strings.TrimSpace(fmt.Sprint(obj["description"])),
+			InputSchema: schema,
+		})
+	}
+	return tools, nil
+}
+
 func mcpToolsCallURL(mcpURL, name string, arguments map[string]interface{}) (map[string]interface{}, error) {
 	payload := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]interface{}{"name": name, "arguments": arguments}}
 	b, _ := json.Marshal(payload)

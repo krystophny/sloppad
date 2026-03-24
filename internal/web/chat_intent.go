@@ -308,13 +308,85 @@ func systemActionStringParam(params map[string]interface{}, key string) string {
 	return strings.TrimSpace(fmt.Sprint(params[key]))
 }
 
-func normalizeSystemActionName(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "switch_workspace", "focus_workspace", "clear_focus", "list_workspace_items", "list_workspaces", "create_workspace", "create_workspace_from_git", "rename_workspace", "delete_workspace", "show_workspace_details", "workspace_watch_start", "workspace_watch_stop", "workspace_watch_status", "batch_work", "batch_configure", "review_policy", "batch_limit", "batch_status", "link_workspace_artifact", "list_linked_artifacts", "toggle_silent", "toggle_live_dialogue", "cancel_work", "show_busy_state", "show_status", "navigate_canvas", "shell", "open_file_canvas", "show_calendar", "create_calendar_event", "update_calendar_event", "delete_calendar_event", "show_briefing", "make_item", "delegate_item", "snooze_item", "split_items", "reassign_workspace", "clear_workspace", "capture_idea", "refine_idea_note", "promote_idea", "apply_idea_promotion", "create_github_issue", "create_github_issue_split", "print_item", "review_someday", "triage_someday", "promote_someday", "toggle_someday_review_nudge", "show_filtered_items", "sync_sources", "map_todoist_project", "sync_todoist", "create_todoist_task", "sync_evernote", "sync_bear", "promote_bear_checklist", "sync_zotero", "cursor_open_item", "cursor_triage_item", "cursor_open_path":
-		return strings.ToLower(strings.TrimSpace(raw))
-	default:
-		return ""
+var supportedSystemActionNames = []string{
+	"switch_workspace",
+	"focus_workspace",
+	"clear_focus",
+	"list_workspace_items",
+	"list_workspaces",
+	"create_workspace",
+	"create_workspace_from_git",
+	"rename_workspace",
+	"delete_workspace",
+	"show_workspace_details",
+	"workspace_watch_start",
+	"workspace_watch_stop",
+	"workspace_watch_status",
+	"batch_work",
+	"batch_configure",
+	"review_policy",
+	"batch_limit",
+	"batch_status",
+	"link_workspace_artifact",
+	"list_linked_artifacts",
+	"toggle_silent",
+	"toggle_live_dialogue",
+	"cancel_work",
+	"show_busy_state",
+	"show_status",
+	"navigate_canvas",
+	"shell",
+	"open_file_canvas",
+	"show_calendar",
+	"create_calendar_event",
+	"update_calendar_event",
+	"delete_calendar_event",
+	"show_briefing",
+	"make_item",
+	"delegate_item",
+	"snooze_item",
+	"split_items",
+	"reassign_workspace",
+	"clear_workspace",
+	"capture_idea",
+	"refine_idea_note",
+	"promote_idea",
+	"apply_idea_promotion",
+	"create_github_issue",
+	"create_github_issue_split",
+	"print_item",
+	"review_someday",
+	"triage_someday",
+	"promote_someday",
+	"toggle_someday_review_nudge",
+	"show_filtered_items",
+	"sync_sources",
+	"map_todoist_project",
+	"sync_todoist",
+	"create_todoist_task",
+	"sync_evernote",
+	"sync_bear",
+	"promote_bear_checklist",
+	"sync_zotero",
+	"cursor_open_item",
+	"cursor_triage_item",
+	"cursor_open_path",
+}
+
+var supportedSystemActionSet = func() map[string]struct{} {
+	out := make(map[string]struct{}, len(supportedSystemActionNames))
+	for _, name := range supportedSystemActionNames {
+		out[name] = struct{}{}
 	}
+	return out
+}()
+
+func normalizeSystemActionName(raw string) string {
+	clean := strings.ToLower(strings.TrimSpace(raw))
+	if _, ok := supportedSystemActionSet[clean]; ok {
+		return clean
+	}
+	return ""
 }
 
 func systemActionShellCommand(params map[string]interface{}) string {
