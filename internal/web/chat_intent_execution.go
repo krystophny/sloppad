@@ -154,7 +154,7 @@ func executeShellCommand(command string, cwd string) shellCommandExecution {
 	commandCtx, cancel := context.WithTimeout(context.Background(), systemActionShellTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(commandCtx, "bash", "-lc", command)
+	cmd := exec.CommandContext(commandCtx, "bash", "-c", command)
 	cmd.Dir = cwd
 
 	var output bytes.Buffer

@@ -13,15 +13,15 @@ func TestHotwordCatalogDownloadAndDeploy(t *testing.T) {
 		case "/official.py":
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			_, _ = w.Write([]byte(`MODELS = {
-    "alexa": {
-        "download_url": "` + mockCatalogPlaceholder + `/downloads/alexa_v0.1.tflite"
+    "computer": {
+        "download_url": "` + mockCatalogPlaceholder + `/downloads/computer_v0.1.tflite"
     }
 }
 model_class_mappings = {}`))
 		case "/community.json":
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"tree":[{"path":"en/computer/computer_v2.onnx","type":"blob"}]}`))
-		case "/downloads/alexa_v0.1.onnx":
+		case "/downloads/computer_v0.1.onnx":
 			_, _ = w.Write([]byte("official"))
 		case "/raw/en/computer/computer_v2.onnx":
 			_, _ = w.Write([]byte("community"))

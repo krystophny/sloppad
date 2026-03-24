@@ -15,10 +15,10 @@ from qwen_tts import Qwen3TTSModel
 DEFAULT_MODEL_ID = os.environ.get("TABURA_HOTWORD_QWEN3TTS_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
 DEFAULT_LANGUAGE = os.environ.get("TABURA_HOTWORD_QWEN3TTS_LANGUAGE", "English")
 TARGET_VARIANTS = (
-    "Sloppy",
-    "Sloppy.",
-    "Sloppy!",
-    "Sloppy?",
+    "Computer",
+    "Computer.",
+    "Computer!",
+    "Computer?",
 )
 
 
@@ -74,7 +74,7 @@ def build_prompts(model: Qwen3TTSModel, recordings: list[dict]) -> list[dict]:
     for recording in hotword_first:
         path = str(recording["path"])
         kind = recording["kind"]
-        ref_text = "Sloppy" if kind == "hotword" else None
+        ref_text = "Computer" if kind == "hotword" else None
         x_vector_only = kind != "hotword"
         prompt = model.create_voice_clone_prompt(
             ref_audio=path,

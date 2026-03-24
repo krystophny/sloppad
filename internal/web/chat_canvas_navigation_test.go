@@ -17,7 +17,7 @@ func TestParseInlineCanvasNavigationIntent(t *testing.T) {
 	}{
 		{name: "next slide", text: "next slide", wantAction: "navigate_canvas", wantScope: "page_or_artifact", wantDirection: "next"},
 		{name: "go back", text: "go back one slide", wantAction: "navigate_canvas", wantScope: "page_or_artifact", wantDirection: "previous"},
-		{name: "german next", text: "Sloppy, zur nächsten Folie", wantAction: "navigate_canvas", wantScope: "page_or_artifact", wantDirection: "next"},
+		{name: "german next", text: "Computer, zur nächsten Folie", wantAction: "navigate_canvas", wantScope: "page_or_artifact", wantDirection: "next"},
 		{name: "german previous", text: "noch einmal zurück", wantAction: "navigate_canvas", wantScope: "page_or_artifact", wantDirection: "previous"},
 		{name: "next document", text: "next document", wantAction: "navigate_canvas", wantScope: "artifact", wantDirection: "next"},
 		{name: "german previous document", text: "zum vorigen Dokument", wantAction: "navigate_canvas", wantScope: "artifact", wantDirection: "previous"},
@@ -124,7 +124,7 @@ func TestClassifyAndExecuteSystemActionCanvasNavigationBypassesIntentLLM(t *test
 	defer server.Close()
 	app.intentLLMURL = server.URL
 
-	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Sloppy, next slide")
+	message, payloads, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "Computer, next slide")
 	if !handled {
 		t.Fatal("expected navigation fast path to handle next slide")
 	}

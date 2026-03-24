@@ -24,14 +24,14 @@ const (
 )
 
 // ---------------------------------------------------------------------------
-// LLM — llama.cpp (port 8081)
+// LLM — local OpenAI-compatible runtime (port 8081)
 // ---------------------------------------------------------------------------
 
 func TestLLMHealth(t *testing.T) {
 	resp := requireServiceHealth(t, "LLM", llmURL+"/health")
 	status, _ := resp["status"].(string)
-	if status != "ok" {
-		t.Fatalf("LLM health status=%q, want ok", status)
+	if status != "ok" && status != "healthy" {
+		t.Fatalf("LLM health status=%q, want ok or healthy", status)
 	}
 }
 

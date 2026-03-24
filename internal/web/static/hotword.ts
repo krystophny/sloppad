@@ -9,8 +9,6 @@ async function loadOrt() {
   return ort;
 }
 
-let keywordDataAvailability: boolean | null = null;
-
 export function resolveOrtWasmPaths() {
   return {
     mjs: ORT_WASM_MODULE_URL,
@@ -30,8 +28,8 @@ const HOTWORD_VENDOR_BASE = staticURL('vendor/openwakeword');
 const HOTWORD_MODEL_FILES = {
   mel: `${HOTWORD_VENDOR_BASE}/melspectrogram.onnx`,
   embedding: `${HOTWORD_VENDOR_BASE}/embedding_model.onnx`,
-  keyword: `${HOTWORD_VENDOR_BASE}/sloppy.onnx`,
-  keywordData: `${HOTWORD_VENDOR_BASE}/sloppy.onnx.data`,
+  keyword: `${HOTWORD_VENDOR_BASE}/keyword.onnx`,
+  keywordData: `${HOTWORD_VENDOR_BASE}/keyword.onnx.data`,
 };
 const HOTWORD_DEFAULT_THRESHOLD = 0.3;
 const HOTWORD_DETECTION_COOLDOWN_MS = 800;
@@ -431,14 +429,18 @@ async function initOnnxModel() {
 
   const melSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.mel, sessionOptions);
   const embeddingSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.embedding, sessionOptions);
-  const keywordOptions: Record<string, any> = { ...sessionOptions };
-  if (await keywordDataFileExists()) {
+  let keywordSession;
+  try {
+    keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, sessionOptions);
+  } catch (err) {
+    const keywordOptions: Record<string, any> = { ...sessionOptions };
     keywordOptions.externalData = [{
-      path: 'sloppy.onnx.data',
+      path: 'keyword.onnx.data',
       data: HOTWORD_MODEL_FILES.keywordData,
     }];
+    keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, keywordOptions);
+    void err;
   }
-  const keywordSession = await ort.InferenceSession.create(HOTWORD_MODEL_FILES.keyword, keywordOptions);
 
   state.model = {
     melSession,
@@ -459,7 +461,6 @@ export async function initHotword(options: Record<string, any> = {}) {
     state.mock = null;
     state.model = null;
     state.lastDetectionAt = 0;
-    keywordDataAvailability = null;
   }
 
   state.initialized = true;
@@ -497,17 +498,6 @@ export async function initHotword(options: Record<string, any> = {}) {
     console.warn('Hotword initialization failed:', err);
     return false;
   }
-}
-
-async function keywordDataFileExists() {
-  if (keywordDataAvailability !== null) return keywordDataAvailability;
-  try {
-    const resp = await fetch(HOTWORD_MODEL_FILES.keywordData, { method: 'HEAD', cache: 'no-store' });
-    keywordDataAvailability = resp.ok;
-  } catch (_) {
-    keywordDataAvailability = false;
-  }
-  return keywordDataAvailability;
 }
 
 export async function startHotwordMonitor(micStream) {

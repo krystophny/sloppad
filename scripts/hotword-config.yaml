@@ -1,7 +1,7 @@
-model_name: "sloppy"
+model_name: "computer"
 
 target_phrase:
-  - "slop ee"
+  - "computer"
 
 custom_negative_phrases:
   - "copy"

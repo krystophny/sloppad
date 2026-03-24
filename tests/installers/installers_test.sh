@@ -143,9 +143,10 @@ run_install_ps1_static_checks() {
 }
 
 run_local_llm_profile_static_checks() {
-    assert_contains "${ROOT_DIR}/scripts/setup-local-llm.sh" 'CTX_SIZE="$(default_if_empty "$CTX_SIZE" "32768")"'
-    assert_contains "${ROOT_DIR}/deploy/launchd/io.tabura.llm.plist" "<string>32768</string>"
-    assert_contains "${ROOT_DIR}/scripts/install.sh" "Environment=TABURA_LLM_CTX=32768"
+    assert_contains "${ROOT_DIR}/scripts/setup-local-llm.sh" 'VLLM_MLX_MODEL_REPO="$(default_if_empty "$VLLM_MLX_MODEL_REPO" "mlx-community/Qwen3.5-9B-4bit")"'
+    assert_contains "${ROOT_DIR}/scripts/setup-local-llm.sh" 'args+=(--continuous-batching)'
+    assert_contains "${ROOT_DIR}/deploy/launchd/io.tabura.llm.plist" "TABURA_MLX_MODEL_REPO"
+    assert_contains "${ROOT_DIR}/deploy/launchd/io.tabura.llm.plist" "mlx-community/Qwen3.5-9B-4bit"
 }
 
 run_setup_codex_mcp_checks() {
@@ -162,14 +163,38 @@ run_setup_codex_mcp_checks() {
     assert_contains "$config_path" "[mcp_servers.tabura]"
     assert_contains "$config_path" "url = \"http://127.0.0.1:9420/mcp\""
     assert_contains "$config_path" "[model_providers.local]"
-    assert_contains "$config_path" "base_url = \"http://127.0.0.1:8080/v1\""
+    if [ "$(uname -s)" = "Darwin" ]; then
+        assert_contains "$config_path" "name = \"Local vLLM-MLX\""
+        assert_contains "$config_path" "base_url = \"http://127.0.0.1:8081/v1\""
+    else
+        assert_contains "$config_path" "name = \"Local llama.cpp\""
+        assert_contains "$config_path" "base_url = \"http://127.0.0.1:8080/v1\""
+    fi
     assert_contains "$config_path" "[model_providers.fast]"
     assert_contains "$config_path" "base_url = \"http://127.0.0.1:8081/v1\""
+    if [ "$(uname -s)" = "Darwin" ]; then
+        assert_contains "$config_path" "name = \"Fast vLLM-MLX\""
+    else
+        assert_contains "$config_path" "name = \"Fast llama.cpp\""
+    fi
     assert_contains "$config_path" "[profiles.local]"
-    assert_contains "$config_path" "model = \"gpt-oss-120b\""
+    if [ "$(uname -s)" = "Darwin" ]; then
+        assert_contains "$config_path" "model = \"qwen3.5-9b\""
+    else
+        assert_contains "$config_path" "model = \"gpt-oss-120b\""
+    fi
     assert_contains "$config_path" "[profiles.fast]"
     assert_contains "$config_path" "model = \"qwen3.5-9b\""
     assert_contains "$config_path" "wire_api = \"responses\""
+}
+
+run_hotword_bootstrap_checks() {
+    local script
+    script="${ROOT_DIR}/scripts/fetch-hotword-assets.sh"
+    assert_contains "$script" 'keyword.onnx'
+    assert_contains "$script" 'Computer V2'
+    assert_contains "${ROOT_DIR}/scripts/install.sh" 'install_hotword_assets'
+    assert_contains "${ROOT_DIR}/scripts/install-tabura-user-units.sh" 'install_hotword_assets'
 }
 
 main() {
@@ -178,6 +203,7 @@ main() {
     run_install_ps1_static_checks
     run_local_llm_profile_static_checks
     run_setup_codex_mcp_checks
+    run_hotword_bootstrap_checks
     "${ROOT_DIR}/tests/installers/distribution_artifacts_test.sh"
     echo "installer tests passed"
 }

@@ -20,7 +20,8 @@ import (
 )
 
 const (
-	defaultModelName        = "sloppy"
+	defaultModelName        = "computer"
+	runtimeModelFileName    = "keyword.onnx"
 	defaultGeneratedSamples = 250
 	defaultPreferredModel   = "qwen3tts"
 	recordingsDirName       = "recordings"
@@ -238,7 +239,7 @@ func (m *Manager) settingsPath() string {
 }
 
 func (m *Manager) vendorModelPath() string {
-	return filepath.Join(m.projectRoot, "internal", "web", "static", "vendor", "openwakeword", defaultModelName+".onnx")
+	return filepath.Join(m.dataDir, "hotword-runtime", runtimeModelFileName)
 }
 
 func (m *Manager) activeModelMetadataPath() string {

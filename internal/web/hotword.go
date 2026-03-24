@@ -12,13 +12,12 @@ import (
 )
 
 const (
-	hotwordModelFileName = "sloppy.onnx"
+	hotwordModelFileName = "keyword.onnx"
 )
 
-var hotwordRuntimeAssetFiles = []string{
+var hotwordSharedAssetFiles = []string{
 	"melspectrogram.onnx",
 	"embedding_model.onnx",
-	hotwordModelFileName,
 }
 
 func (a *App) hotwordProjectRoot() string {
@@ -37,8 +36,12 @@ func hotwordVendorDir(root string) string {
 	return filepath.Join(root, "internal", "web", "static", "vendor", "openwakeword")
 }
 
-func hotwordVendorModelPath(root string) string {
-	return filepath.Join(hotwordVendorDir(root), hotwordModelFileName)
+func hotwordRuntimeDir(dataDir string) string {
+	return filepath.Join(strings.TrimSpace(dataDir), "hotword-runtime")
+}
+
+func hotwordRuntimeModelPath(dataDir string) string {
+	return filepath.Join(hotwordRuntimeDir(dataDir), hotwordModelFileName)
 }
 
 func hotwordModelDataPath(path string) string {
@@ -53,16 +56,19 @@ func fileExists(path string) bool {
 	return !info.IsDir()
 }
 
-func checkHotwordStatus(root string) map[string]interface{} {
-	vendorDir := hotwordVendorDir(root)
-	missing := make([]string, 0, len(hotwordRuntimeAssetFiles))
-	for _, file := range hotwordRuntimeAssetFiles {
+func checkHotwordStatus(projectRoot string, dataDir string) map[string]interface{} {
+	vendorDir := hotwordVendorDir(projectRoot)
+	missing := make([]string, 0, len(hotwordSharedAssetFiles)+1)
+	for _, file := range hotwordSharedAssetFiles {
 		if !fileExists(filepath.Join(vendorDir, file)) {
 			missing = append(missing, file)
 		}
 	}
+	modelPath := hotwordRuntimeModelPath(dataDir)
+	if !fileExists(modelPath) {
+		missing = append(missing, hotwordModelFileName)
+	}
 	ready := len(missing) == 0
-	modelPath := hotwordVendorModelPath(root)
 	model := map[string]interface{}{
 		"exists":   false,
 		"file":     hotwordModelFileName,
@@ -89,7 +95,7 @@ func checkHotwordStatus(root string) map[string]interface{} {
 }
 
 func (a *App) hotwordStatusPayload() map[string]interface{} {
-	status := checkHotwordStatus(a.hotwordProjectRoot())
+	status := checkHotwordStatus(a.hotwordProjectRoot(), a.dataDir)
 	if a.hotwordTrainer == nil {
 		return status
 	}
@@ -119,7 +125,7 @@ func (a *App) hotwordStatusPayload() map[string]interface{} {
 	}
 	hasExternalData := a.hotwordTrainer.ActiveModelHasExternalData()
 	model["has_external_data"] = hasExternalData
-	if hasExternalData && !fileExists(hotwordModelDataPath(hotwordVendorModelPath(a.hotwordProjectRoot()))) {
+	if hasExternalData && !fileExists(hotwordModelDataPath(hotwordRuntimeModelPath(a.dataDir))) {
 		missing, _ := status["missing"].([]string)
 		missing = append(missing, hotwordModelFileName+".data")
 		status["missing"] = missing

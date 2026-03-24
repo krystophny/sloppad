@@ -38,7 +38,7 @@
           <div class="manage-hotword-tools">
             <label class="manage-search">
               <span>Search wake words</span>
-              <input id="manage-hotword-filter" type="search" placeholder="computer, jarvis, alexa">
+              <input id="manage-hotword-filter" type="search" placeholder="computer, jarvis, wake word">
             </label>
             <p id="manage-hotword-feedback" class="manage-feedback" hidden></p>
             <div id="manage-hotword-catalog" class="manage-stack"></div>
@@ -66,7 +66,7 @@
         hotword: {
           ready: true,
           missing: [],
-          model: { file: 'sloppy.onnx', display_name: 'Sloppy', phrase: 'sloppy', source: 'Custom trained', revision: 'rev-1' },
+          model: { file: 'keyword.onnx', display_name: 'Computer V2', phrase: 'computer', source: 'Home Assistant Community', revision: 'rev-1' },
         },
         catalog: [
           {
@@ -83,18 +83,18 @@
             active: false,
           },
           {
-            key: 'openwakeword:alexa',
-            display_name: 'Alexa',
-            phrase: 'alexa',
+            key: 'openwakeword:computer',
+            display_name: 'Computer',
+            phrase: 'computer',
             source: 'openwakeword',
             source_label: 'Official openWakeWord',
             source_url: 'https://example.invalid/openwakeword',
             readme_url: 'https://example.invalid/openwakeword/readme',
-            download_url: 'https://example.invalid/openwakeword/alexa.onnx',
-            upstream_file: 'alexa_v0.1.onnx',
+            download_url: 'https://example.invalid/openwakeword/computer.onnx',
+            upstream_file: 'computer_v0.1.onnx',
             installed: true,
             installed_model: {
-              file_name: 'openwakeword-alexa-v0-1-2026-03-23_12-00-00Z.onnx',
+              file_name: 'openwakeword-computer-v0-1-2026-03-23_12-00-00Z.onnx',
               created_at: '2026-03-23T12:00:00Z',
               size_bytes: 2048,
               production: false,
@@ -142,10 +142,10 @@
           }
           const active = state.catalog.find((item) => item.active);
           state.hotword.model = {
-            file: 'sloppy.onnx',
-            display_name: active?.display_name || 'Sloppy',
-            phrase: active?.phrase || 'sloppy',
-            source: active?.source_label || 'Custom trained',
+            file: 'keyword.onnx',
+            display_name: active?.display_name || 'Computer V2',
+            phrase: active?.phrase || 'computer',
+            source: active?.source_label || 'Home Assistant Community',
             revision: 'rev-2',
           };
           return jsonResponse({ ok: true, hotword_status: state.hotword });

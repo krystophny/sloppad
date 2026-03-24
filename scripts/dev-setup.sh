@@ -7,10 +7,20 @@ ARCH="$(uname -m)"
 ASSUME_YES="${TABURA_ASSUME_YES:-0}"
 # shellcheck source=scripts/lib/llama.sh
 source "${REPO_ROOT}/scripts/lib/llama.sh"
+# shellcheck source=scripts/lib/python.sh
+source "${REPO_ROOT}/scripts/lib/python.sh"
 
 log()  { printf '[dev-setup] %s\n' "$*"; }
 warn() { printf '[dev-setup] WARNING: %s\n' "$*"; }
 fail() { printf '[dev-setup] ERROR: %s\n' "$*" >&2; exit 1; }
+
+codex_local_url_default() {
+    if [ "$PLATFORM" = "Darwin" ]; then
+        printf '%s' "http://127.0.0.1:8081/v1"
+        return
+    fi
+    printf '%s' "http://127.0.0.1:8080/v1"
+}
 
 print_help() {
     cat <<USAGE
@@ -22,7 +32,7 @@ Steps performed:
   1. Detect platform and architecture
   2. Build tabura binary from source
   3. Set up Piper TTS (venv + voice models)
-  4. Detect existing llama-server or prepare LLM service
+  4. Detect existing local LLM or prepare LLM service
   5. Check for voxtype (STT)
   6. Install and start service definitions (systemd/launchd)
   7. Bootstrap a default project directory
@@ -34,7 +44,7 @@ Options:
 
 Environment:
   TABURA_ASSUME_YES=1         Same as --yes
-  TABURA_INTENT_LLM_URL=<url> Reuse an existing llama-server (skip LLM setup)
+  TABURA_INTENT_LLM_URL=<url> Reuse an existing local LLM (skip LLM setup)
   TABURA_INTENT_LLM_URL=off   Disable intent LLM entirely
 USAGE
 }
@@ -60,9 +70,13 @@ log "Platform: $PLATFORM ($ARCH)"
 # --- Step 2: Required prerequisites ---
 
 command -v go >/dev/null 2>&1 || fail "go not found (https://go.dev/dl/)"
-command -v python3 >/dev/null 2>&1 || fail "python3 not found"
 command -v curl >/dev/null 2>&1 || fail "curl not found"
 command -v codex >/dev/null 2>&1 || fail "codex not found (npm install -g @openai/codex)"
+if [ "$PLATFORM" = "Darwin" ]; then
+    tabura_find_python3 3 10 >/dev/null 2>&1 || fail "python3 3.10+ not found"
+else
+    command -v python3 >/dev/null 2>&1 || fail "python3 not found"
+fi
 
 # --- Step 3: Build tabura binary ---
 
@@ -89,25 +103,25 @@ fi
 # --- Step 5: LLM detection ---
 
 if [ -z "${TABURA_INTENT_LLM_URL:-}" ]; then
-    for port in 8080 8081 8081; do
+    for port in 8081 8080; do
         if curl -fsS --max-time 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then
             export TABURA_INTENT_LLM_URL="http://127.0.0.1:${port}"
-            log "Detected existing llama-server at $TABURA_INTENT_LLM_URL"
+            log "Detected existing local LLM at $TABURA_INTENT_LLM_URL"
             break
         fi
     done
 fi
 
 if [ -z "${TABURA_INTENT_LLM_URL:-}" ]; then
-    if ! LLAMA_SERVER_BIN="$(tabura_find_llama_server)"; then
+    if [ "$PLATFORM" = "Darwin" ]; then
+        export TABURA_INTENT_LLM_URL="http://127.0.0.1:8081"
+    elif ! LLAMA_SERVER_BIN="$(tabura_find_llama_server)"; then
         if [ -n "${TABURA_LLAMA_LAST_ERROR:-}" ]; then
             warn "llama-server not usable (${TABURA_LLAMA_LAST_ERROR}); intent LLM will be disabled"
         else
             warn "llama-server not found; intent LLM will be disabled"
         fi
-        if [ "$PLATFORM" = "Darwin" ]; then
-            warn "  Install: brew install llama.cpp"
-        else
+        if [ "$PLATFORM" != "Darwin" ]; then
             warn "  Build llama.cpp and place llama-server in ~/.local/bin"
         fi
         export TABURA_INTENT_LLM_URL="off"
@@ -145,7 +159,7 @@ log "Bootstrapping project at $PROJECT_DIR"
 
 if [ -n "${TABURA_INTENT_LLM_URL:-}" ] && [ "${TABURA_INTENT_LLM_URL}" != "off" ]; then
     TABURA_CODEX_FAST_URL="${TABURA_INTENT_LLM_URL}/v1" \
-    TABURA_CODEX_LOCAL_URL="http://127.0.0.1:8080/v1" \
+    TABURA_CODEX_LOCAL_URL="$(codex_local_url_default)" \
     "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
 else
     "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
@@ -167,7 +181,7 @@ Endpoints:
   MCP:     http://127.0.0.1:9420/mcp
   TTS:     http://127.0.0.1:8424/v1/audio/speech
   LLM:     $EFFECTIVE_LLM_URL
-  Codex:   http://127.0.0.1:8080/v1
+  Codex:   $(codex_local_url_default)
   STT:     http://127.0.0.1:8427/v1/audio/transcriptions
 
 SUMMARY
@@ -179,7 +193,6 @@ Log files:
   /tmp/tabura-codex-app-server.log
   /tmp/tabura-piper-tts.log
   /tmp/tabura-llm.log
-  /tmp/tabura-codex-llm.log
   /tmp/tabura-stt.log
 LOGS
 else
@@ -189,7 +202,6 @@ Logs:
   journalctl --user -u tabura-codex-app-server.service
   journalctl --user -u tabura-piper-tts.service
   journalctl --user -u tabura-llm.service
-  journalctl --user -u tabura-codex-llm.service
   journalctl --user -u tabura-stt.service
 LOGS
 fi

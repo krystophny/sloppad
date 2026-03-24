@@ -163,7 +163,7 @@ function renderHotwordStatus(hotword: Record<string, any>) {
   const activeName = String(hotword?.model?.display_name || hotword?.model?.file || 'Unknown');
   const phrase = String(hotword?.model?.phrase || '').trim();
   const source = String(hotword?.model?.source || '').trim();
-  const modelFile = String(hotword?.model?.file || 'sloppy.onnx');
+  const modelFile = String(hotword?.model?.file || 'keyword.onnx');
   const summary = [phrase, source].filter(Boolean).join(' · ');
   host.replaceChildren(
     row('Runtime status', hotword?.ready ? 'The browser hotword runtime can start immediately.' : `Missing: ${missing}`),

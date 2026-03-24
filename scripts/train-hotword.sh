@@ -104,7 +104,11 @@ fi
 
 TRAIN_CMD=("$VENV_DIR/bin/python" "$TRAINER_DIR/train_wakeword.py")
 
-"${TRAIN_CMD[@]}" --config "$CONFIG_PATH" "${ARGS[@]}"
+if [[ ${#ARGS[@]} -gt 0 ]]; then
+  "${TRAIN_CMD[@]}" --config "$CONFIG_PATH" "${ARGS[@]}"
+else
+  "${TRAIN_CMD[@]}" --config "$CONFIG_PATH"
+fi
 
 if [[ "$EXPECT_MODEL" != "1" ]]; then
   echo "trainer step complete: ${REQUESTED_STEP:-verify-only}"

@@ -95,9 +95,10 @@ Tabura runs as one Go runtime plus five local services:
 2. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
    - default: Piper
 3. `tabura-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
-4. `tabura-llm.service` (Qwen3.5 9B GGUF local coordinator at `127.0.0.1:8081/v1/chat/completions`)
-   - macOS default: `Qwen3.5-9B-Q4_K_M.gguf` with `65536` context
-5. `tabura-codex-app-server.service` and `tabura-codex-llm.service` for non-unplugged Codex profiles
+4. `tabura-llm.service` (local OpenAI-compatible LLM endpoint at `127.0.0.1:8081/v1/chat/completions`)
+   - macOS default: `vllm-mlx` serving `mlx-community/Qwen3.5-9B-4bit`
+   - Linux default: `llama.cpp` serving Qwen3.5 9B GGUF
+5. `tabura-codex-app-server.service`
 
 Voice commit still uses built-in browser VAD auto-stop, then sends audio to the local voxtype STT service.
 
@@ -115,13 +116,14 @@ Why TTS remains an HTTP sidecar:
 - TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
 - Voxtype STT endpoint: `http://127.0.0.1:8427/v1/audio/transcriptions`
 - Intent LLM endpoint: `http://127.0.0.1:8081/v1/chat/completions` (`TABURA_INTENT_LLM_URL`, set `off` to disable)
-- Local Codex llama.cpp endpoint: `http://127.0.0.1:8080/v1/responses`
+- Codex local profile endpoint on macOS: `http://127.0.0.1:8081/v1/responses`
+- Codex local profile endpoint on Linux: `http://127.0.0.1:8080/v1/responses`
 - Intent/delegator request model id: `TABURA_INTENT_LLM_MODEL` (default `local`)
 - Intent/delegator profile selection: `TABURA_INTENT_LLM_PROFILE` (default `qwen3.5-9b`)
 - Intent/delegator profile options: `TABURA_INTENT_LLM_PROFILE_OPTIONS` (macOS unplugged default: `qwen3.5-9b`)
 - Assistant routing mode: `TABURA_ASSISTANT_MODE` (macOS unplugged default: `local`)
-- Codex local profiles written by `scripts/setup-codex-mcp.sh`: `tabura_local_agentic` and `tabura_local_fast`
-- Codex local wrapper for current CLI builds: `scripts/codex-local.sh fast ...` or `scripts/codex-local.sh agentic ...`
+- Codex local profiles written by `scripts/setup-codex-mcp.sh`: `local` and `fast`
+- Codex local wrapper for current CLI builds: `scripts/codex-local.sh fast ...` or `scripts/codex-local.sh local ...`
 - Local canvas session id: `local`
 - Spark thinking budget for Spark model (fast path): `TABURA_APP_SERVER_SPARK_REASONING_EFFORT=low` (`low`/`medium`/`high`/`xhigh`)
 

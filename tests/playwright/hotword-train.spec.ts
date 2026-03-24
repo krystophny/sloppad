@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const trainedModelFile = 'sloppy-2026-03-23_21-03-09Z.onnx';
+const trainedModelFile = 'computer-2026-03-23_21-03-09Z.onnx';
 
 function wavBuffer() {
   const samples = new Int16Array([0, 1200, -1200, 600, -600, 0]);

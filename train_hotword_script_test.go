@@ -40,7 +40,7 @@ func TestTrainHotwordScriptPublishesConfiguredModel(t *testing.T) {
 	}
 
 	configPath := filepath.Join(tempDir, "hotword-config.yaml")
-	if err := os.WriteFile(configPath, []byte("model_name: \"sloppy\"\noutput_dir: \"output\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte("model_name: \"computer\"\noutput_dir: \"output\"\n"), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -57,7 +57,7 @@ model = re.search(r'^\s*model_name\s*:\s*"?(.*?)"?\s*$', config, re.M).group(1)
 output_dir = re.search(r'^\s*output_dir\s*:\s*"?(.*?)"?\s*$', config, re.M).group(1)
 output_path = Path(__file__).resolve().parent / output_dir / f"{model}.onnx"
 output_path.parent.mkdir(parents=True, exist_ok=True)
-output_path.write_bytes(b"sloppy-model")
+output_path.write_bytes(b"computer-model")
 `
 	if err := os.WriteFile(filepath.Join(trainerDir, "train_wakeword.py"), []byte(trainerScript), 0o755); err != nil {
 		t.Fatalf("write trainer script: %v", err)
@@ -79,7 +79,7 @@ output_path.write_bytes(b"sloppy-model")
 		t.Fatalf("train-hotword.sh failed: %v\n%s", err, out)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(outputDir, "sloppy-*.onnx"))
+	matches, err := filepath.Glob(filepath.Join(outputDir, "computer-*.onnx"))
 	if err != nil {
 		t.Fatalf("glob published model: %v", err)
 	}
@@ -91,8 +91,8 @@ output_path.write_bytes(b"sloppy-model")
 	if err != nil {
 		t.Fatalf("read published model: %v", err)
 	}
-	if string(data) != "sloppy-model" {
-		t.Fatalf("published model contents = %q, want %q", string(data), "sloppy-model")
+	if string(data) != "computer-model" {
+		t.Fatalf("published model contents = %q, want %q", string(data), "computer-model")
 	}
 	if !strings.Contains(string(out), "trained model: "+modelPath) {
 		t.Fatalf("stdout = %q, want trained model path %q", string(out), modelPath)

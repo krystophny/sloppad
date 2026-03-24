@@ -29,12 +29,7 @@ var expectedPlists = []struct {
 	{
 		file:   "io.tabura.llm.plist",
 		label:  "io.tabura.llm",
-		tokens: []string{"@@LLM_SETUP_SCRIPT@@", "@@LLM_MODEL_DIR@@", "@@LLAMA_SERVER_BIN@@"},
-	},
-	{
-		file:   "io.tabura.codex-llm.plist",
-		label:  "io.tabura.codex-llm",
-		tokens: []string{"@@LLM_SETUP_SCRIPT@@", "@@LLAMA_SERVER_BIN@@"},
+		tokens: []string{"@@LLM_SETUP_SCRIPT@@", "@@LLM_VENV_DIR@@"},
 	},
 	{
 		file:   "io.tabura.stt.plist",
@@ -156,6 +151,7 @@ func TestLaunchdTemplateTokenSubstitution(t *testing.T) {
 		"@@PIPER_MODEL_DIR@@":       "/tmp/models",
 		"@@LLM_SETUP_SCRIPT@@":      "/tmp/setup-llm.sh",
 		"@@LLM_MODEL_DIR@@":         "/tmp/llm-models",
+		"@@LLM_VENV_DIR@@":          "/tmp/llm-venv",
 		"@@LLAMA_SERVER_BIN@@":      "/tmp/llama-server",
 		"@@STT_SETUP_SCRIPT@@":      "/tmp/setup-stt.sh",
 		"@@VOXTYPE_BIN@@":           "/tmp/voxtype",
@@ -224,7 +220,6 @@ func TestSystemdAndLaunchdServiceParity(t *testing.T) {
 
 	launchdServices := map[string]bool{
 		"codex-app-server": false,
-		"codex-llm":        false,
 		"piper-tts":        false,
 		"llm":              false,
 		"stt":              false,

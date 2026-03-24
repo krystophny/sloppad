@@ -3,10 +3,20 @@ set -euo pipefail
 
 MCP_URL="${1:-http://127.0.0.1:9420/mcp}"
 CONFIG_PATH="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
+PLATFORM="$(uname -s)"
 FAST_URL="${TABURA_CODEX_FAST_URL:-http://127.0.0.1:8081/v1}"
 FAST_MODEL="${TABURA_CODEX_FAST_MODEL:-qwen3.5-9b}"
-LOCAL_URL="${TABURA_CODEX_LOCAL_URL:-http://127.0.0.1:8080/v1}"
-LOCAL_MODEL="${TABURA_CODEX_LOCAL_MODEL:-gpt-oss-120b}"
+if [[ "$PLATFORM" == "Darwin" ]]; then
+  LOCAL_URL="${TABURA_CODEX_LOCAL_URL:-http://127.0.0.1:8081/v1}"
+  LOCAL_MODEL="${TABURA_CODEX_LOCAL_MODEL:-qwen3.5-9b}"
+  LOCAL_PROVIDER_NAME="Local vLLM-MLX"
+  FAST_PROVIDER_NAME="Fast vLLM-MLX"
+else
+  LOCAL_URL="${TABURA_CODEX_LOCAL_URL:-http://127.0.0.1:8080/v1}"
+  LOCAL_MODEL="${TABURA_CODEX_LOCAL_MODEL:-gpt-oss-120b}"
+  LOCAL_PROVIDER_NAME="Local llama.cpp"
+  FAST_PROVIDER_NAME="Fast llama.cpp"
+fi
 MCP_MARKER_BEGIN="# BEGIN TABURA MCP"
 MCP_MARKER_END="# END TABURA MCP"
 MODELS_MARKER_BEGIN="# BEGIN TABURA LOCAL MODELS"
@@ -56,12 +66,12 @@ fi
   echo
   echo "$MODELS_MARKER_BEGIN"
   echo "[model_providers.local]"
-  echo 'name = "Local llama.cpp"'
+  printf 'name = "%s"\n' "$LOCAL_PROVIDER_NAME"
   printf 'base_url = "%s"\n' "$LOCAL_URL"
   echo 'wire_api = "responses"'
   echo
   echo "[model_providers.fast]"
-  echo 'name = "Fast llama.cpp"'
+  printf 'name = "%s"\n' "$FAST_PROVIDER_NAME"
   printf 'base_url = "%s"\n' "$FAST_URL"
   echo 'wire_api = "responses"'
   echo

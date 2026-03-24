@@ -69,12 +69,18 @@ func TestHotwordStatusReportsReadyWhenAllAssetsPresent(t *testing.T) {
 	if err := os.MkdirAll(vendorDir, 0o755); err != nil {
 		t.Fatalf("mkdir vendor dir: %v", err)
 	}
-	for _, file := range hotwordRuntimeAssetFiles {
+	for _, file := range hotwordSharedAssetFiles {
 		if err := os.WriteFile(filepath.Join(vendorDir, file), []byte("x"), 0o644); err != nil {
 			t.Fatalf("write vendor file %s: %v", file, err)
 		}
 	}
-	modelPath := filepath.Join(vendorDir, hotwordModelFileName)
+	if err := os.MkdirAll(hotwordRuntimeDir(app.dataDir), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	modelPath := hotwordRuntimeModelPath(app.dataDir)
+	if err := os.WriteFile(modelPath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write runtime model %s: %v", hotwordModelFileName, err)
+	}
 	modifiedAt := time.Date(2026, time.March, 21, 12, 34, 56, 0, time.UTC)
 	if err := os.Chtimes(modelPath, modifiedAt, modifiedAt); err != nil {
 		t.Fatalf("chtimes %s: %v", hotwordModelFileName, err)

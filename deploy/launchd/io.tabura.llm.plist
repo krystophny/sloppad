@@ -12,18 +12,24 @@
   <dict>
     <key>TABURA_LLM_PRESET</key>
     <string>fast-qwen9b</string>
-    <key>TABURA_LLM_MODEL_DIR</key>
-    <string>@@LLM_MODEL_DIR@@</string>
-    <key>TABURA_LLM_MODEL_FILE</key>
-    <string>Qwen3.5-9B-Q4_K_M.gguf</string>
-    <key>TABURA_LLM_MODEL_URL</key>
-    <string>https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true</string>
-    <key>TABURA_LLM_CTX</key>
-    <string>32768</string>
-    <key>TABURA_LLM_THREADS</key>
-    <string>8</string>
-    <key>LLAMA_SERVER_BIN</key>
-    <string>@@LLAMA_SERVER_BIN@@</string>
+    <key>TABURA_LLM_VENV_DIR</key>
+    <string>@@LLM_VENV_DIR@@</string>
+    <key>TABURA_MLX_MODEL_REPO</key>
+    <string>mlx-community/Qwen3.5-9B-4bit</string>
+    <key>TABURA_VLLM_MLX_GIT_URL</key>
+    <string>git+ssh://git@github.com/waybarrios/vllm-mlx.git</string>
+    <key>TABURA_VLLM_MLX_GIT_REF</key>
+    <string>v0.2.6</string>
+    <key>TABURA_VLLM_MLX_ENABLE_BATCHING</key>
+    <string>1</string>
+    <key>TABURA_VLLM_MLX_USE_PAGED_CACHE</key>
+    <string>1</string>
+    <key>TABURA_VLLM_MLX_CACHE_MEMORY_PERCENT</key>
+    <string>0.20</string>
+    <key>TABURA_VLLM_MLX_TOOL_CALL_PARSER</key>
+    <string>qwen</string>
+    <key>TABURA_VLLM_MLX_REASONING_PARSER</key>
+    <string>qwen3</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

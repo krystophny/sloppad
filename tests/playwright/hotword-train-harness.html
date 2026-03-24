@@ -12,7 +12,7 @@
     <header class="train-header">
       <div class="train-header-copy">
         <p class="train-kicker">Wake Word</p>
-        <h1>Train Sloppy</h1>
+        <h1>Train Computer</h1>
         <p class="train-copy">Harness for the streamlined hotword training workflow.</p>
       </div>
       <div class="train-header-actions">
@@ -203,7 +203,7 @@
 
   <script>
     (() => {
-      const trainedModelFile = 'sloppy-2026-03-23_21-03-09Z.onnx';
+      const trainedModelFile = 'computer-2026-03-23_21-03-09Z.onnx';
       const state = {
         recordings: [],
         models: [],
@@ -288,7 +288,7 @@
         const method = String(init.method || 'GET').toUpperCase();
 
         if (url.endsWith('/api/hotword/status')) {
-          return jsonResponse({ ok: true, ready: false, missing: ['sloppy.onnx'] });
+          return jsonResponse({ ok: true, ready: false, missing: ['keyword.onnx'] });
         }
         if (url.endsWith('/api/hotword/train/recordings') && method === 'GET') {
           syncDataset();
@@ -367,7 +367,7 @@
             latest_model: trainedModelFile,
           };
           state.models = [{
-            name: 'sloppy',
+            name: 'computer',
             file_name: trainedModelFile,
             path: `/tmp/${trainedModelFile}`,
             created_at: '2026-03-22T10:05:00Z',
@@ -388,7 +388,7 @@
             progress: 100,
           };
           state.models = [{
-            name: 'sloppy',
+            name: 'computer',
             file_name: trainedModelFile,
             path: `/tmp/${trainedModelFile}`,
             created_at: '2026-03-22T10:05:00Z',
@@ -397,7 +397,7 @@
           }];
           state.config.dataset.generated_samples = 2000;
           state.config.dataset.latest_model = trainedModelFile;
-          state.config.dataset.production_model = 'sloppy.onnx';
+          state.config.dataset.production_model = 'keyword.onnx';
           notify('training');
           return jsonResponse({ ok: true, status: state.trainingStatus, config: state.config }, 202);
         }
@@ -425,14 +425,14 @@
         if (url.endsWith('/api/hotword/train/deploy') && method === 'POST') {
           requests.deploy += 1;
           state.models = state.models.map((model) => ({ ...model, production: true }));
-          state.config.dataset.production_model = 'sloppy.onnx';
+          state.config.dataset.production_model = 'keyword.onnx';
           return jsonResponse({
             ok: true,
             model: state.models[0] || null,
             hotword_status: {
               ok: true,
               ready: true,
-              model: { file: 'sloppy.onnx', exists: true, revision: '2026-03-22T10:05:00Z:413' },
+              model: { file: 'keyword.onnx', exists: true, revision: '2026-03-22T10:05:00Z:413' },
             },
           });
         }

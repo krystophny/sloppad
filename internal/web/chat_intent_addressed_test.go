@@ -297,7 +297,7 @@ func TestClassifyAndExecuteSystemActionForTurnStripsHotwordPrefix(t *testing.T) 
 		t.Fatalf("project session: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Hey Alexa, be quiet", nil, "")
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Hey Computer, be quiet", nil, "")
 	if !handled {
 		t.Fatal("expected wake-word-prefixed command to be handled")
 	}
@@ -323,7 +323,7 @@ func TestClassifyAndExecuteSystemActionForTurnSuppressesStandaloneHotword(t *tes
 		t.Fatalf("project session: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Alexa", nil, "")
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Computer", nil, "")
 	if !handled {
 		t.Fatal("expected standalone wake word to be handled locally")
 	}

@@ -5,13 +5,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLATFORM="$(uname -s)"
 # shellcheck source=scripts/lib/llama.sh
 source "${REPO_ROOT}/scripts/lib/llama.sh"
+# shellcheck source=scripts/lib/python.sh
+source "${REPO_ROOT}/scripts/lib/python.sh"
 
 log() { printf '[tabura-units] %s\n' "$*"; }
 fail() { printf '[tabura-units] ERROR: %s\n' "$*" >&2; exit 1; }
 
 detect_llama_server() {
     local port url
-    for port in 8080 8081 8081; do
+    for port in 8081 8080; do
         url="http://127.0.0.1:${port}"
         if curl -fsS --max-time 2 "${url}/health" >/dev/null 2>&1; then
             printf '%s' "$url"
@@ -34,6 +36,7 @@ confirm_default_yes() {
 
 REUSE_LLM_URL=""
 LLAMA_SERVER_BIN_RESOLVED=""
+LLM_VENV_DIR=""
 CODEX_PATH=""
 VOXTYPE_PATH=""
 BIN_PATH=""
@@ -44,14 +47,36 @@ configure_codex_cli() {
   if [ -n "$REUSE_LLM_URL" ]; then
     fast_url="${REUSE_LLM_URL}/v1"
     agentic_url="${REUSE_LLM_URL}/v1"
+  elif [ "$PLATFORM" = "Darwin" ]; then
+    fast_url="http://127.0.0.1:8081/v1"
+    agentic_url="http://127.0.0.1:8081/v1"
   else
     fast_url="http://127.0.0.1:8081/v1"
     agentic_url="http://127.0.0.1:8080/v1"
   fi
 
   TABURA_CODEX_FAST_URL="$fast_url" \
+  TABURA_CODEX_LOCAL_URL="$agentic_url" \
   TABURA_CODEX_AGENTIC_URL="$agentic_url" \
   "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
+}
+
+install_hotword_assets() {
+  local script_path="${REPO_ROOT}/scripts/fetch-hotword-assets.sh"
+  [ -x "$script_path" ] || fail "hotword asset bootstrap missing: $script_path"
+  TABURA_WEB_DATA_DIR="$WEB_DATA_DIR" "$script_path"
+}
+
+ensure_macos_vllm_prereqs() {
+  command -v brew >/dev/null 2>&1 || fail "brew not in PATH. Install Homebrew first."
+  if ! tabura_find_python3 3 10 >/dev/null 2>&1; then
+    log "Installing python via Homebrew"
+    brew install python
+  fi
+  if ! command -v uv >/dev/null 2>&1; then
+    log "Installing uv via Homebrew"
+    brew install uv
+  fi
 }
 
 # --- Platform detection ---
@@ -66,18 +91,20 @@ esac
 
 if [ "$PLATFORM" = "Darwin" ]; then
   LLM_MODEL_DIR="${HOME}/Library/Application Support/tabura/llm/models"
+  LLM_VENV_DIR="${HOME}/Library/Application Support/tabura/llm/venv"
 else
   LLM_MODEL_DIR="${HOME}/.local/share/tabura-llm/models"
+  LLM_VENV_DIR="${HOME}/.local/share/tabura-llm/venv"
 fi
 
-# --- Detect existing llama-server ---
+# --- Detect existing local LLM ---
 
 if [ -n "${TABURA_INTENT_LLM_URL:-}" ]; then
   REUSE_LLM_URL="$TABURA_INTENT_LLM_URL"
   log "TABURA_INTENT_LLM_URL set to ${REUSE_LLM_URL}; skipping LLM setup"
 elif existing_url="$(detect_llama_server)"; then
-  log "Existing llama-server detected at ${existing_url}"
-  if confirm_default_yes "Reuse existing llama-server at ${existing_url}?"; then
+  log "Existing local LLM detected at ${existing_url}"
+  if confirm_default_yes "Reuse existing local LLM at ${existing_url}?"; then
     REUSE_LLM_URL="$existing_url"
     log "TABURA_INTENT_LLM_URL will point to ${REUSE_LLM_URL}"
   fi
@@ -98,6 +125,9 @@ fi
 
 if [ -n "$REUSE_LLM_URL" ]; then
   HAVE_LLAMA=0
+elif [ "$PLATFORM" = "Darwin" ]; then
+  ensure_macos_vllm_prereqs
+  HAVE_LLAMA=1
 elif LLAMA_SERVER_BIN_RESOLVED="$(tabura_find_llama_server)"; then
   HAVE_LLAMA=1
 else
@@ -273,6 +303,7 @@ install_macos() {
   piper_venv_dir="${HOME}/.local/share/tabura-piper-tts/venv"
 
   mkdir -p "$plist_dst" "$WEB_DATA_DIR"
+  install_hotword_assets
   if [ -n "$REUSE_LLM_URL" ]; then
     launchctl unload "$plist_dst/io.tabura.llm.plist" >/dev/null 2>&1 || true
     launchctl unload "$plist_dst/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
@@ -312,6 +343,7 @@ install_macos() {
       -e "s|@@PIPER_MODEL_DIR@@|${piper_model_dir}|g" \
       -e "s|@@LLM_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-local-llm.sh|g" \
       -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
+      -e "s|@@LLM_VENV_DIR@@|${LLM_VENV_DIR}|g" \
       -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
       -e "s|@@STT_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-voxtype-stt.sh|g" \
       -e "s|@@VOXTYPE_BIN@@|${VOXTYPE_PATH}|g" \
@@ -389,13 +421,7 @@ activate_direct() {
         ;;
       llm)
         TABURA_LLM_MODEL_DIR="$LLM_MODEL_DIR" \
-        LLAMA_SERVER_BIN="$LLAMA_SERVER_BIN_RESOLVED" \
-        nohup "$REPO_ROOT/scripts/setup-local-llm.sh" \
-          >"$logfile" 2>&1 &
-        ;;
-      codex-llm)
-        TABURA_LLM_PRESET=codex-gpt-oss-120b \
-        LLAMA_SERVER_BIN="$LLAMA_SERVER_BIN_RESOLVED" \
+        TABURA_LLM_VENV_DIR="$LLM_VENV_DIR" \
         nohup "$REPO_ROOT/scripts/setup-local-llm.sh" \
           >"$logfile" 2>&1 &
         ;;

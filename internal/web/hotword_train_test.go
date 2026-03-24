@@ -33,7 +33,7 @@ func TestHotwordTrainPageRequiresAuthAndServesShell(t *testing.T) {
 	body := authed.Body.String()
 	for _, needle := range []string{
 		"<title>Hotword Training | Tabura</title>",
-		"Train Sloppy",
+		"Train Computer",
 		`src="./static/hotword-train.js`,
 	} {
 		if !strings.Contains(body, needle) {
@@ -150,9 +150,9 @@ echo "generated sample"
 	if err := os.WriteFile(trainingScript, []byte(`#!/usr/bin/env bash
 set -euo pipefail
 mkdir -p "$TABURA_HOTWORD_OUTPUT_DIR"
-printf 'trained-model' >"$TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx"
-printf 'trained-data' >"$TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx.data"
-echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx"
+printf 'trained-model' >"$TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx"
+printf 'trained-data' >"$TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx.data"
+echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx"
 `), 0o755); err != nil {
 		t.Fatalf("write training script: %v", err)
 	}
@@ -226,7 +226,7 @@ echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx
 	if strFromAny(modelPayload["revision"]) == "" {
 		t.Fatalf("deploy hotword revision missing from payload: %#v", modelPayload)
 	}
-	vendorPath := filepath.Join(root, "internal", "web", "static", "vendor", "openwakeword", "sloppy.onnx")
+	vendorPath := filepath.Join(app.dataDir, "hotword-runtime", "keyword.onnx")
 	data, err := os.ReadFile(vendorPath)
 	if err != nil {
 		t.Fatalf("read deployed model: %v", err)
@@ -314,9 +314,9 @@ echo "generated sample"
 	if err := os.WriteFile(trainingScript, []byte(`#!/usr/bin/env bash
 set -euo pipefail
 mkdir -p "$TABURA_HOTWORD_OUTPUT_DIR"
-printf 'trained-model' >"$TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx"
-printf 'trained-data' >"$TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx.data"
-echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/sloppy-2026-03-23_21-03-09Z.onnx"
+printf 'trained-model' >"$TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx"
+printf 'trained-data' >"$TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx.data"
+echo "trained model: $TABURA_HOTWORD_OUTPUT_DIR/computer-2026-03-23_21-03-09Z.onnx"
 `), 0o755); err != nil {
 		t.Fatalf("write training script: %v", err)
 	}

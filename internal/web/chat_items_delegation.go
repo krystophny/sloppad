@@ -73,8 +73,6 @@ func normalizeKnownDelegationActorName(raw string) string {
 		return "Codex"
 	case "gpt", "chatgpt", "gpt5", "gpt54", "gpt53", "gpt52", "gpt51":
 		return "GPT"
-	case "sloppy":
-		return "Sloppy"
 	default:
 		return ""
 	}

@@ -2,8 +2,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/llama.sh
-source "${SCRIPT_DIR}/lib/llama.sh"
+PLATFORM="$(uname -s)"
+
+if [ "$PLATFORM" != "Darwin" ]; then
+  # shellcheck source=lib/llama.sh
+  source "${SCRIPT_DIR}/lib/llama.sh"
+fi
+# shellcheck source=lib/python.sh
+source "${SCRIPT_DIR}/lib/python.sh"
 
 default_if_empty() {
   local value="$1"
@@ -13,6 +19,38 @@ default_if_empty() {
     return
   fi
   printf '%s' "$fallback"
+}
+
+build_vllm_mlx_install_spec() {
+  if [ -n "${TABURA_VLLM_MLX_INSTALL_SPEC:-}" ]; then
+    printf '%s' "$TABURA_VLLM_MLX_INSTALL_SPEC"
+    return
+  fi
+  local git_url="${TABURA_VLLM_MLX_GIT_URL:-git+ssh://git@github.com/waybarrios/vllm-mlx.git}"
+  local git_ref="${TABURA_VLLM_MLX_GIT_REF:-v0.2.6}"
+  if [ -n "$git_ref" ]; then
+    printf '%s@%s' "$git_url" "$git_ref"
+    return
+  fi
+  printf '%s' "$git_url"
+}
+
+ensure_vllm_mlx_install() {
+  local install_spec="$1"
+  local python_bin="$2"
+  local marker_path="${VENV_DIR}/.tabura-vllm-mlx-install-spec"
+  if [ -x "${VENV_DIR}/bin/python" ] && ! tabura_python_meets_min_version "${VENV_DIR}/bin/python" 3 10; then
+    rm -rf "$VENV_DIR"
+  fi
+  if [ ! -x "${VENV_DIR}/bin/python" ]; then
+    mkdir -p "$(dirname "$VENV_DIR")"
+    "$python_bin" -m venv "$VENV_DIR"
+  fi
+  if [ ! -x "${VENV_DIR}/bin/vllm-mlx" ] || [ ! -f "$marker_path" ] || [ "$(cat "$marker_path" 2>/dev/null)" != "$install_spec" ]; then
+    "${VENV_DIR}/bin/python" -m pip install --upgrade pip setuptools wheel >/dev/null
+    "${VENV_DIR}/bin/python" -m pip install --upgrade "$install_spec" >/dev/null
+    printf '%s' "$install_spec" >"$marker_path"
+  fi
 }
 
 PROFILE_PRESET="${TABURA_LLM_PRESET:-}"
@@ -28,21 +66,80 @@ NGL="${TABURA_LLM_NGL:-}"
 PARALLEL="${TABURA_LLM_PARALLEL:-}"
 ALIAS="${TABURA_LLM_ALIAS:-}"
 REASONING_BUDGET="${TABURA_LLM_REASONING_BUDGET:-}"
-PLATFORM="$(uname -s)"
+VENV_DIR="${TABURA_LLM_VENV_DIR:-}"
+VLLM_MLX_MODEL_REPO="${TABURA_MLX_MODEL_REPO:-}"
+VLLM_MLX_ENABLE_BATCHING="${TABURA_VLLM_MLX_ENABLE_BATCHING:-}"
+VLLM_MLX_USE_PAGED_CACHE="${TABURA_VLLM_MLX_USE_PAGED_CACHE:-}"
+VLLM_MLX_CACHE_MEMORY_PERCENT="${TABURA_VLLM_MLX_CACHE_MEMORY_PERCENT:-}"
+VLLM_MLX_TOOL_CALL_PARSER="${TABURA_VLLM_MLX_TOOL_CALL_PARSER:-}"
+VLLM_MLX_REASONING_PARSER="${TABURA_VLLM_MLX_REASONING_PARSER:-}"
+VLLM_MLX_CHUNKED_PREFILL_TOKENS="${TABURA_VLLM_MLX_CHUNKED_PREFILL_TOKENS:-${TABURA_VLLM_MLX_PREFILL_STEP_SIZE:-}}"
+VLLM_MLX_MAX_TOKENS="${TABURA_VLLM_MLX_MAX_TOKENS:-}"
+
+if [ "$PLATFORM" = "Darwin" ]; then
+  PYTHON_BIN="$(tabura_find_python3 3 10 || true)"
+  VENV_DIR="$(default_if_empty "$VENV_DIR" "$HOME/Library/Application Support/tabura/llm/venv")"
+  case "$PROFILE_PRESET" in
+    "" | "fast-qwen9b" | "codex-gpt-oss-120b")
+      VLLM_MLX_MODEL_REPO="$(default_if_empty "$VLLM_MLX_MODEL_REPO" "mlx-community/Qwen3.5-9B-4bit")"
+      HOST="$(default_if_empty "$HOST" "127.0.0.1")"
+      PORT="$(default_if_empty "$PORT" "8081")"
+      VLLM_MLX_ENABLE_BATCHING="$(default_if_empty "$VLLM_MLX_ENABLE_BATCHING" "1")"
+      VLLM_MLX_USE_PAGED_CACHE="$(default_if_empty "$VLLM_MLX_USE_PAGED_CACHE" "1")"
+      VLLM_MLX_CACHE_MEMORY_PERCENT="$(default_if_empty "$VLLM_MLX_CACHE_MEMORY_PERCENT" "0.20")"
+      VLLM_MLX_TOOL_CALL_PARSER="$(default_if_empty "$VLLM_MLX_TOOL_CALL_PARSER" "qwen")"
+      VLLM_MLX_REASONING_PARSER="$(default_if_empty "$VLLM_MLX_REASONING_PARSER" "qwen3")"
+      VLLM_MLX_CHUNKED_PREFILL_TOKENS="$(default_if_empty "$VLLM_MLX_CHUNKED_PREFILL_TOKENS" "2048")"
+      VLLM_MLX_MAX_TOKENS="$(default_if_empty "$VLLM_MLX_MAX_TOKENS" "32768")"
+      ;;
+    *)
+      echo "Unknown TABURA_LLM_PRESET on macOS: ${PROFILE_PRESET}" >&2
+      exit 1
+      ;;
+  esac
+
+  if curl -fsS --max-time 2 "http://${HOST}:${PORT}/health" >/dev/null 2>&1; then
+    echo "vllm-mlx already running at http://${HOST}:${PORT}; exiting"
+    exit 0
+  fi
+
+  if [ -z "$PYTHON_BIN" ]; then
+    echo "python3 3.10+ is required to start vllm-mlx." >&2
+    exit 1
+  fi
+
+  install_spec="$(build_vllm_mlx_install_spec)"
+  ensure_vllm_mlx_install "$install_spec" "$PYTHON_BIN"
+
+  echo "Starting local vllm-mlx runtime at http://$HOST:$PORT"
+  args=(
+    serve "$VLLM_MLX_MODEL_REPO"
+    --host "$HOST"
+    --port "$PORT"
+    --max-tokens "$VLLM_MLX_MAX_TOKENS"
+    --chunked-prefill-tokens "$VLLM_MLX_CHUNKED_PREFILL_TOKENS"
+    --enable-auto-tool-choice
+    --tool-call-parser "$VLLM_MLX_TOOL_CALL_PARSER"
+    --reasoning-parser "$VLLM_MLX_REASONING_PARSER"
+  )
+  if [ "$VLLM_MLX_ENABLE_BATCHING" = "1" ]; then
+    args+=(--continuous-batching)
+  fi
+  if [ "$VLLM_MLX_USE_PAGED_CACHE" = "1" ]; then
+    args+=(--use-paged-cache)
+  fi
+  if [ -n "$VLLM_MLX_CACHE_MEMORY_PERCENT" ]; then
+    args+=(--cache-memory-percent "$VLLM_MLX_CACHE_MEMORY_PERCENT")
+  fi
+  exec "${VENV_DIR}/bin/vllm-mlx" "${args[@]}"
+fi
 
 case "$PROFILE_PRESET" in
   "" | "fast-qwen9b")
-    if [ "$PLATFORM" = "Darwin" ]; then
-      MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
-      MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
-      THREADS="$(default_if_empty "$THREADS" "8")"
-      CTX_SIZE="$(default_if_empty "$CTX_SIZE" "65536")"
-    else
-      MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
-      MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
-      THREADS="$(default_if_empty "$THREADS" "4")"
-      CTX_SIZE="$(default_if_empty "$CTX_SIZE" "65536")"
-    fi
+    MODEL_FILE="$(default_if_empty "$MODEL_FILE" "Qwen3.5-9B-Q4_K_M.gguf")"
+    MODEL_URL="$(default_if_empty "$MODEL_URL" "https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true")"
+    THREADS="$(default_if_empty "$THREADS" "4")"
+    CTX_SIZE="$(default_if_empty "$CTX_SIZE" "65536")"
     HOST="$(default_if_empty "$HOST" "127.0.0.1")"
     PORT="$(default_if_empty "$PORT" "8081")"
     NGL="$(default_if_empty "$NGL" "99")"

@@ -218,6 +218,10 @@ func (a *App) Router() http.Handler {
 	r.Get("/canvas", a.serveCanvas)
 	r.Get("/capture", a.serveCapture)
 	r.Get("/hotword-train", a.serveHotwordTrain)
+	r.Get("/static/vendor/openwakeword/keyword.onnx", a.serveHotwordRuntimeAsset)
+	r.Get("/static/vendor/openwakeword/keyword.onnx.data", a.serveHotwordRuntimeAsset)
+	r.Head("/static/vendor/openwakeword/keyword.onnx", a.serveHotwordRuntimeAsset)
+	r.Head("/static/vendor/openwakeword/keyword.onnx.data", a.serveHotwordRuntimeAsset)
 	staticHandler := withNoStore(http.StripPrefix("/static/", http.FileServer(http.FS(staticSubFS()))))
 	if a.devRuntime {
 		diskDir := filepath.Join(a.localProjectDir, "internal", "web", "static")
@@ -225,6 +229,34 @@ func (a *App) Router() http.Handler {
 	}
 	r.Handle("/static/*", staticHandler)
 	return securityHeaders(r)
+}
+
+func (a *App) serveHotwordRuntimeAsset(w http.ResponseWriter, r *http.Request) {
+	name := filepath.Base(strings.TrimSpace(r.URL.Path))
+	if name != hotwordModelFileName && name != hotwordModelFileName+".data" {
+		http.NotFound(w, r)
+		return
+	}
+	modelPath := hotwordRuntimeModelPath(a.dataDir)
+	targetPath := modelPath
+	contentType := "application/octet-stream"
+	if name == hotwordModelFileName+".data" {
+		targetPath = hotwordModelDataPath(modelPath)
+	}
+	file, err := os.Open(targetPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", contentType)
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 func withNoStore(next http.Handler) http.Handler {

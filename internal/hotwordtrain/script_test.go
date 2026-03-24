@@ -54,7 +54,7 @@ exit 1
 
 	configPath := filepath.Join(t.TempDir(), "hotword.yaml")
 	config := strings.Join([]string{
-		`model_name: "sloppy"`,
+		`model_name: "computer"`,
 		`output_dir: "output"`,
 		"",
 	}, "\n")
@@ -78,7 +78,7 @@ exit 1
 	if !strings.Contains(string(out), "trainer step complete: resolve-config") {
 		t.Fatalf("resolve-config output = %q, want completion marker", string(out))
 	}
-	if _, err := os.Stat(filepath.Join(outputDir, "sloppy.onnx")); err == nil {
+	if _, err := os.Stat(filepath.Join(outputDir, "computer.onnx")); err == nil {
 		t.Fatalf("resolve-config unexpectedly created model")
 	}
 }
@@ -116,11 +116,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 mkdir -p "` + trainerOutput + `"
-printf 'trained-model' >"` + trainerOutput + `/sloppy.onnx"
-printf 'trained-data' >"` + trainerOutput + `/sloppy.onnx.data"
-touch -t 202603232103.09 "` + trainerOutput + `/sloppy.onnx"
-touch -t 202603232103.09 "` + trainerOutput + `/sloppy.onnx.data"
-echo "trained model: ` + trainerOutput + `/sloppy.onnx"
+printf 'trained-model' >"` + trainerOutput + `/computer.onnx"
+printf 'trained-data' >"` + trainerOutput + `/computer.onnx.data"
+touch -t 202603232103.09 "` + trainerOutput + `/computer.onnx"
+touch -t 202603232103.09 "` + trainerOutput + `/computer.onnx.data"
+echo "trained model: ` + trainerOutput + `/computer.onnx"
 `
 	if err := os.WriteFile(pythonStub, []byte(pythonScript), 0o755); err != nil {
 		t.Fatalf("write python stub: %v", err)
@@ -128,7 +128,7 @@ echo "trained model: ` + trainerOutput + `/sloppy.onnx"
 
 	configPath := filepath.Join(t.TempDir(), "hotword.yaml")
 	config := strings.Join([]string{
-		`model_name: "sloppy"`,
+		`model_name: "computer"`,
 		`output_dir: "` + trainerOutput + `"`,
 		"",
 	}, "\n")
@@ -149,7 +149,7 @@ echo "trained model: ` + trainerOutput + `/sloppy.onnx"
 	if err != nil {
 		t.Fatalf("train-hotword failed: %v\n%s", err, string(out))
 	}
-	matches, err := filepath.Glob(filepath.Join(modelsDir, "sloppy-*.onnx"))
+	matches, err := filepath.Glob(filepath.Join(modelsDir, "computer-*.onnx"))
 	if err != nil {
 		t.Fatalf("glob dated models: %v", err)
 	}

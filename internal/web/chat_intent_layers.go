@@ -138,8 +138,8 @@ For calendar scheduling requests use {"kind":"system_command","action":"create_c
 To update an existing calendar event use {"kind":"system_command","action":"update_calendar_event","event_id":"...","summary":"new title","start":"...","description":"..."}. Include only the fields that change. The event_id comes from a previously shown calendar view. German examples: "verschiebe den Termin auf 17 Uhr", "ändere den Titel", "füge eine Beschreibung hinzu".
 To delete a calendar event use {"kind":"system_command","action":"delete_calendar_event","event_id":"..."}. German: "lösche den Termin", "Termin absagen".
 For showing the calendar use show_calendar with view=day|week|agenda|availability and optional date. German: "Was für Termine habe ich heute/morgen/diese Woche?", "Welche Slots sind frei?".
-For delegation/dispatch to an actor use {"kind":"canonical_action","action":"delegate_actor","actor":"Codex|GPT|Sloppy"}.
-Normalize actor aliases before deciding: "codex" -> Codex, "gpt", "chatgpt", and "gpt-5" variants -> GPT, "sloppy" -> Sloppy.
+For delegation/dispatch to an actor use {"kind":"canonical_action","action":"delegate_actor","actor":"Codex|GPT"}.
+Normalize actor aliases before deciding: "codex" -> Codex, "gpt", "chatgpt", and "gpt-5" variants -> GPT.
 German delegation examples: "sag gpt es soll den code reviewen", "gpt soll das implementieren", "lass codex das machen", "bitte gpt darum das zu fixen", "frag gpt ob es das kann", "gpt, mach das", "codex soll das übernehmen".
 English delegation examples: "ask gpt to implement this", "let codex review the code", "tell gpt to fix this", "have codex handle this".
 For open/show/display file requests, end with {"action":"open_file_canvas","path":"..."} inside an actions plan.

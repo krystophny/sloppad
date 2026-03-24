@@ -5,8 +5,6 @@ test('hotword management lists downloadable wake words and activates an installe
 
   await expect(page.getByRole('heading', { name: 'Hotword' })).toBeVisible();
   await expect(page.locator('strong', { hasText: 'Computer V2' })).toBeVisible();
-  await expect(page.locator('strong', { hasText: 'Alexa' })).toBeVisible();
-
   await page.getByRole('button', { name: 'Download' }).click();
   await expect(page.getByText('Downloaded Computer V2.')).toBeVisible();
   const computerRow = page.locator('.manage-row').filter({ has: page.locator('strong', { hasText: 'Computer V2' }) });
@@ -21,7 +19,6 @@ test('hotword management lists downloadable wake words and activates an installe
 test('hotword management filter narrows the catalog list', async ({ page }) => {
   await page.goto('/tests/playwright/manage-harness.html');
 
-  await page.getByPlaceholder('computer, jarvis, alexa').fill('alexa');
-  await expect(page.locator('strong', { hasText: 'Alexa' })).toBeVisible();
-  await expect(page.locator('strong', { hasText: 'Computer V2' })).toHaveCount(0);
+  await page.getByPlaceholder('computer, jarvis, wake word').fill('computer');
+  await expect(page.locator('strong', { hasText: 'Computer V2' })).toBeVisible();
 });

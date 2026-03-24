@@ -799,7 +799,7 @@ async function bootstrap() {
   try {
     const hotwordStatus = await loadJSON('hotword/status');
     if (hotwordStatus?.ready === false) {
-      setBanner('Wake word assets are not fully deployed yet. Use the guided trainer here to record, clone, train, and deploy a better Sloppy model.');
+      setBanner('Wake word assets are not fully deployed yet. Use the guided trainer here to record, clone, train, and deploy a better Computer model.');
     }
   } catch (_) {}
 

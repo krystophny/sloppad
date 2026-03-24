@@ -35,6 +35,58 @@ else
         return 1
     }
 fi
+if [ -f "${SCRIPT_ROOT}/lib/python.sh" ]; then
+    # shellcheck source=scripts/lib/python.sh
+    source "${SCRIPT_ROOT}/lib/python.sh"
+else
+    tabura_python_meets_min_version() {
+        local candidate="$1"
+        local min_major="$2"
+        local min_minor="$3"
+
+        [ -x "$candidate" ] || return 1
+
+        "$candidate" - "$min_major" "$min_minor" <<'PY' >/dev/null 2>&1
+import sys
+
+min_major = int(sys.argv[1])
+min_minor = int(sys.argv[2])
+raise SystemExit(0 if sys.version_info >= (min_major, min_minor) else 1)
+PY
+    }
+
+    tabura_find_python3() {
+        local min_major="${1:-3}"
+        local min_minor="${2:-10}"
+        local candidate resolved
+        local -a candidates=()
+        local seen=""
+
+        if [ -n "${TABURA_PYTHON3_BIN:-}" ]; then
+            candidates+=("${TABURA_PYTHON3_BIN}")
+        fi
+        if resolved="$(command -v python3 2>/dev/null)"; then
+            candidates+=("$resolved")
+        fi
+        candidates+=(/opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3)
+
+        for candidate in "${candidates[@]}"; do
+            [ -n "$candidate" ] || continue
+            if [ ! -x "$candidate" ] && resolved="$(command -v "$candidate" 2>/dev/null)"; then
+                candidate="$resolved"
+            fi
+            case ":$seen:" in
+                *":$candidate:"*) continue ;;
+            esac
+            seen="${seen:+${seen}:}${candidate}"
+            if tabura_python_meets_min_version "$candidate" "$min_major" "$min_minor"; then
+                printf '%s' "$candidate"
+                return 0
+            fi
+        done
+        return 1
+    }
+fi
 REPO_OWNER="${TABURA_REPO_OWNER:-krystophny}"
 REPO_NAME="${TABURA_REPO_NAME:-tabura}"
 RELEASE_API_BASE="${TABURA_RELEASE_API_BASE:-https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases}"
@@ -59,11 +111,13 @@ SCRIPT_DIR=""
 PIPER_SERVER_SCRIPT=""
 LLM_DIR=""
 LLM_MODEL_DIR=""
+LLM_VENV_DIR=""
 LLM_SETUP_SCRIPT=""
 STT_SETUP_SCRIPT=""
 CODEX_PATH=""
 REUSE_LLM_URL=""
 LLAMA_SERVER_BIN_RESOLVED=""
+PYTHON3_BIN=""
 
 log() {
     printf '[tabura-install] %s\n' "$*"
@@ -120,7 +174,7 @@ voxtype_supports_stt_service() {
 
 detect_llama_server() {
     local port url
-    for port in 8080 8081 8081; do
+    for port in 8081 8080; do
         url="http://127.0.0.1:${port}"
         if curl -fsS --max-time 2 "${url}/health" >/dev/null 2>&1; then
             printf '%s' "$url"
@@ -146,7 +200,7 @@ Environment overrides:
   TABURA_INSTALL_SKIP_BROWSER=1
   TABURA_INSTALL_SKIP_STT=1
   TABURA_INSTALL_SKIP_LLM=1
-  TABURA_INTENT_LLM_URL=<url>   Reuse an existing llama-server (skip download/service)
+  TABURA_INTENT_LLM_URL=<url>   Reuse an existing local LLM (skip download/service)
   TABURA_REPO_OWNER / TABURA_REPO_NAME / TABURA_RELEASE_API_BASE
 USAGE
 }
@@ -224,6 +278,7 @@ resolve_paths() {
     PIPER_SERVER_SCRIPT="${SCRIPT_DIR}/piper_tts_server.py"
     LLM_DIR="${DATA_ROOT}/llm"
     LLM_MODEL_DIR="${LLM_DIR}/models"
+    LLM_VENV_DIR="${LLM_DIR}/venv"
     LLM_SETUP_SCRIPT="${SCRIPT_DIR}/setup-local-llm.sh"
     STT_SETUP_SCRIPT="${SCRIPT_DIR}/setup-voxtype-stt.sh"
 }
@@ -234,12 +289,8 @@ require_codex_app_server() {
 }
 
 require_python_310() {
-    have_cmd python3 || fail "python3 is required"
-    python3 - <<'PY' >/dev/null || fail "python3 3.10+ is required"
-import sys
-if sys.version_info < (3, 10):
-    raise SystemExit(1)
-PY
+    PYTHON3_BIN="$(tabura_find_python3 3 10 || true)"
+    [ -n "$PYTHON3_BIN" ] || fail "python3 3.10+ is required"
 }
 
 require_base_tools() {
@@ -493,6 +544,9 @@ configure_codex_cli() {
     if [ -n "$REUSE_LLM_URL" ]; then
         fast_url="${REUSE_LLM_URL}/v1"
         agentic_url="${REUSE_LLM_URL}/v1"
+    elif [ "$TABURA_OS" = "darwin" ]; then
+        fast_url="http://127.0.0.1:8081/v1"
+        agentic_url="http://127.0.0.1:8081/v1"
     else
         fast_url="http://127.0.0.1:8081/v1"
         agentic_url="http://127.0.0.1:8080/v1"
@@ -505,7 +559,28 @@ configure_codex_cli() {
 
     TABURA_CODEX_FAST_URL="$fast_url" \
     TABURA_CODEX_AGENTIC_URL="$agentic_url" \
+    TABURA_CODEX_LOCAL_URL="$agentic_url" \
     bash "$script_path" "http://127.0.0.1:9420/mcp" >/dev/null
+}
+
+install_hotword_assets() {
+    local staging_dir="${1:-}"
+    local script_path=""
+
+    if [ -n "$staging_dir" ] && [ -f "${staging_dir}/scripts/fetch-hotword-assets.sh" ]; then
+        script_path="${staging_dir}/scripts/fetch-hotword-assets.sh"
+    elif [ -f "scripts/fetch-hotword-assets.sh" ]; then
+        script_path="scripts/fetch-hotword-assets.sh"
+    fi
+
+    [ -n "$script_path" ] || fail "fetch-hotword-assets.sh not available"
+
+    if [ "$DRY_RUN" = "1" ]; then
+        log "[dry-run] install default hotword assets via ${script_path}"
+        return
+    fi
+
+    TABURA_WEB_DATA_DIR="$WEB_DATA_DIR" bash "$script_path"
 }
 
 piper_notice() {
@@ -558,7 +633,7 @@ setup_piper_tts() {
 
     run_cmd mkdir -p "$MODEL_DIR"
     if [ "$DRY_RUN" = "0" ] && [ ! -x "${VENV_DIR}/bin/python" ]; then
-        python3 -m venv "$VENV_DIR"
+        "$PYTHON3_BIN" -m venv "$VENV_DIR"
     fi
     if [ "$DRY_RUN" = "0" ]; then
         "${VENV_DIR}/bin/python" -m pip install --upgrade pip
@@ -612,30 +687,46 @@ setup_local_llm() {
 
     local existing_url
     if existing_url="$(detect_llama_server)"; then
-        log "existing llama-server detected at ${existing_url}"
-        if confirm_default_yes "Reuse existing llama-server at ${existing_url}?"; then
+        log "existing local LLM detected at ${existing_url}"
+        if confirm_default_yes "Reuse existing local LLM at ${existing_url}?"; then
             REUSE_LLM_URL="$existing_url"
             log "TABURA_INTENT_LLM_URL will point to ${REUSE_LLM_URL}"
             return
         fi
     fi
 
-    cat <<NOTICE
+    if [ "$TABURA_OS" = "darwin" ]; then
+        cat <<NOTICE
+=== Local LLM (vLLM-MLX, default on macOS) ===
+A Qwen3.5 9B MLX runtime runs on port 8081 for Tabura routing, replies, and local Codex profiles.
+Dependencies: python3, uv, git.
+NOTICE
+    else
+        cat <<NOTICE
 === Local LLMs (llama.cpp, optional) ===
 A fast Qwen3.5 9B coordinator runs on port 8081 for Tabura routing and replies.
 A Codex-focused gpt-oss-120b runtime runs on port 8080 for local Codex agent profiles.
 Requires llama.cpp (llama-server binary).
 NOTICE
+    fi
     if ! confirm_default_yes "Install local LLM service?"; then
         log "skipping local LLM setup"
         return
     fi
 
-    if ! ensure_llama_server; then
+    if [ "$TABURA_OS" = "darwin" ]; then
+        if [ "$DRY_RUN" = "0" ]; then
+            have_cmd brew || fail "Homebrew is required on macOS"
+            if ! tabura_find_python3 3 10 >/dev/null 2>&1; then
+                run_cmd brew install python
+            fi
+            have_cmd uv || run_cmd brew install uv
+        fi
+    elif ! ensure_llama_server; then
         log "skipping local LLM setup"
         return
     fi
-    run_cmd mkdir -p "$LLM_MODEL_DIR" "$SCRIPT_DIR"
+    run_cmd mkdir -p "$LLM_MODEL_DIR" "$LLM_VENV_DIR" "$SCRIPT_DIR"
 
     local staging_llm="${1:-}"
     if [ -n "$staging_llm" ] && [ -f "${staging_llm}/setup-local-llm.sh" ]; then
@@ -643,25 +734,21 @@ NOTICE
         run_cmd chmod +x "$LLM_SETUP_SCRIPT"
     fi
 
-    local model_file model_url model_size
-    if [ "$TABURA_OS" = "darwin" ]; then
+    if [ "$TABURA_OS" != "darwin" ]; then
+        local model_file model_url model_size
         model_file="Qwen3.5-9B-Q4_K_M.gguf"
         model_url="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
         model_size="~5.9 GB"
-    else
-        model_file="Qwen3.5-9B-Q4_K_M.gguf"
-        model_url="https://huggingface.co/lmstudio-community/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true"
-        model_size="~5.9 GB"
-    fi
-    local model_path="${LLM_MODEL_DIR}/${model_file}"
-    if [ -f "$model_path" ]; then
-        log "LLM model already present: ${model_file}"
-    elif confirm_default_yes "Download Qwen3.5 9B GGUF model (${model_size})?"; then
-        if [ "$DRY_RUN" = "1" ]; then
-            run_cmd curl -fL -o "$model_path" "$model_url"
-        else
-            curl -fL --retry 3 --retry-delay 2 -o "${model_path}.tmp" "$model_url"
-            mv "${model_path}.tmp" "$model_path"
+        local model_path="${LLM_MODEL_DIR}/${model_file}"
+        if [ -f "$model_path" ]; then
+            log "LLM model already present: ${model_file}"
+        elif confirm_default_yes "Download Qwen3.5 9B GGUF model (${model_size})?"; then
+            if [ "$DRY_RUN" = "1" ]; then
+                run_cmd curl -fL -o "$model_path" "$model_url"
+            else
+                curl -fL --retry 3 --retry-delay 2 -o "${model_path}.tmp" "$model_url"
+                mv "${model_path}.tmp" "$model_path"
+            fi
         fi
     fi
 }
@@ -889,6 +976,7 @@ substitute_launchd_template() {
         -e "s|@@PIPER_MODEL_DIR@@|${MODEL_DIR}|g" \
         -e "s|@@LLM_SETUP_SCRIPT@@|${LLM_SETUP_SCRIPT}|g" \
         -e "s|@@LLM_MODEL_DIR@@|${LLM_MODEL_DIR}|g" \
+        -e "s|@@LLM_VENV_DIR@@|${LLM_VENV_DIR}|g" \
         -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
         -e "s|@@STT_SETUP_SCRIPT@@|${STT_SETUP_SCRIPT}|g" \
         -e "s|@@VOXTYPE_BIN@@|${voxtype_bin}|g" \
@@ -922,9 +1010,6 @@ write_launchd_plists() {
         run_cmd launchctl unload "${agent_dir}/io.tabura.llm.plist" >/dev/null 2>&1 || true
         run_cmd rm -f "${agent_dir}/io.tabura.llm.plist"
     fi
-    run_cmd launchctl unload "${agent_dir}/io.tabura.codex-llm.plist" >/dev/null 2>&1 || true
-    run_cmd rm -f "${agent_dir}/io.tabura.codex-llm.plist"
-
     if [ -x "$STT_SETUP_SCRIPT" ]; then
         substitute_launchd_template "${template_dir}/io.tabura.stt.plist" "${agent_dir}/io.tabura.stt.plist"
     fi
@@ -992,7 +1077,7 @@ Install complete
   Intent LLM:    ${effective_llm_url}
 SUMMARY
     if [ -n "$REUSE_LLM_URL" ]; then
-        log "using existing llama-server at ${REUSE_LLM_URL} (no tabura-llm service created)"
+        log "using existing local LLM at ${REUSE_LLM_URL} (no tabura-llm service created)"
     fi
 }
 
@@ -1029,7 +1114,7 @@ remove_linux_services() {
 remove_macos_services() {
     local agent_dir plist
     agent_dir="${HOME}/Library/LaunchAgents"
-    for plist in io.tabura.web io.tabura.stt io.tabura.llm io.tabura.codex-llm io.tabura.piper-tts io.tabura.codex-app-server; do
+    for plist in io.tabura.web io.tabura.stt io.tabura.llm io.tabura.piper-tts io.tabura.codex-app-server; do
         run_cmd launchctl unload "${agent_dir}/${plist}.plist" >/dev/null 2>&1 || true
     done
     run_cmd rm -f \
@@ -1037,8 +1122,7 @@ remove_macos_services() {
         "${agent_dir}/io.tabura.stt.plist" \
         "${agent_dir}/io.tabura.piper-tts.plist" \
         "${agent_dir}/io.tabura.codex-app-server.plist" \
-        "${agent_dir}/io.tabura.llm.plist" \
-        "${agent_dir}/io.tabura.codex-llm.plist"
+        "${agent_dir}/io.tabura.llm.plist"
 }
 
 uninstall_flow() {
@@ -1077,6 +1161,7 @@ install_flow() {
     setup_piper_tts
     setup_local_llm "$tmpdir"
     install_voxtype_stt "$tmpdir"
+    install_hotword_assets "$tmpdir"
     if [ "$TABURA_OS" = "darwin" ]; then
         install_services_macos "$tmpdir"
     else

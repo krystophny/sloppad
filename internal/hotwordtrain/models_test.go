@@ -17,12 +17,12 @@ func TestDeployModelCopiesDataAndArchivesActiveProduction(t *testing.T) {
 	if err := os.MkdirAll(modelsDir, 0o755); err != nil {
 		t.Fatalf("mkdir models dir: %v", err)
 	}
-	vendorDir := filepath.Join(projectRoot, "internal", "web", "static", "vendor", "openwakeword")
+	vendorDir := filepath.Join(dataDir, "hotword-runtime")
 	if err := os.MkdirAll(vendorDir, 0o755); err != nil {
 		t.Fatalf("mkdir vendor dir: %v", err)
 	}
 
-	activePath := filepath.Join(vendorDir, "sloppy.onnx")
+	activePath := filepath.Join(vendorDir, "keyword.onnx")
 	if err := os.WriteFile(activePath, []byte("old-model"), 0o644); err != nil {
 		t.Fatalf("write active model: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestDeployModelCopiesDataAndArchivesActiveProduction(t *testing.T) {
 		t.Fatalf("chtimes active model: %v", err)
 	}
 
-	candidateName := "sloppy-2026-03-23_21-03-09Z.onnx"
+	candidateName := "computer-2026-03-23_21-03-09Z.onnx"
 	candidatePath := filepath.Join(modelsDir, candidateName)
 	if err := os.WriteFile(candidatePath, []byte("new-model"), 0o644); err != nil {
 		t.Fatalf("write candidate model: %v", err)
@@ -50,8 +50,8 @@ func TestDeployModelCopiesDataAndArchivesActiveProduction(t *testing.T) {
 	if !model.Production {
 		t.Fatalf("deployed model production = false, want true")
 	}
-	if model.FileName != "sloppy.onnx" {
-		t.Fatalf("deployed model file name = %q, want sloppy.onnx", model.FileName)
+	if model.FileName != "keyword.onnx" {
+		t.Fatalf("deployed model file name = %q, want keyword.onnx", model.FileName)
 	}
 
 	deployed, err := os.ReadFile(activePath)
@@ -76,7 +76,7 @@ func TestDeployModelCopiesDataAndArchivesActiveProduction(t *testing.T) {
 
 	archived := ""
 	for _, entry := range models {
-		if strings.HasPrefix(entry.FileName, "sloppy-production-2026-03-22_10-05-00Z") {
+		if strings.HasPrefix(entry.FileName, "keyword-production-2026-03-22_10-05-00Z") {
 			archived = entry.FileName
 			break
 		}

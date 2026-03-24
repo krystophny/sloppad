@@ -86,7 +86,7 @@ const COMMAND_CENTER_COMMANDS: Array<{ id: string; title: string; detail: string
     title: 'Train Wake Word',
     detail: 'Open the dedicated wake-word training page.',
     shortcut: 'Hotword',
-    keywords: 'wake word hotword train sloppy model',
+    keywords: 'wake word hotword train computer model',
     run: () => openManagementPage('hotword-train'),
   },
   {

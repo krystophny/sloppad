@@ -8,17 +8,24 @@ import (
 
 func TestCheckHotwordStatusDoesNotRequireDataSidecarByDefault(t *testing.T) {
 	root := t.TempDir()
+	dataDir := t.TempDir()
 	vendorDir := hotwordVendorDir(root)
 	if err := os.MkdirAll(vendorDir, 0o755); err != nil {
 		t.Fatalf("mkdir vendor dir: %v", err)
 	}
-	for _, name := range []string{"melspectrogram.onnx", "embedding_model.onnx", hotwordModelFileName} {
+	for _, name := range hotwordSharedAssetFiles {
 		if err := os.WriteFile(filepath.Join(vendorDir, name), []byte("x"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
+	if err := os.MkdirAll(hotwordRuntimeDir(dataDir), 0o755); err != nil {
+		t.Fatalf("mkdir runtime dir: %v", err)
+	}
+	if err := os.WriteFile(hotwordRuntimeModelPath(dataDir), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write active model: %v", err)
+	}
 
-	status := checkHotwordStatus(root)
+	status := checkHotwordStatus(root, dataDir)
 	if ready, _ := status["ready"].(bool); !ready {
 		t.Fatalf("ready = false, want true for single-file model: %#v", status)
 	}
@@ -54,7 +61,7 @@ func TestHotwordStatusPayloadRequiresDataSidecarWhenActiveModelUsesExternalData(
 	if _, err := app.hotwordTrainer.DeployModel("candidate.onnx"); err != nil {
 		t.Fatalf("DeployModel: %v", err)
 	}
-	if err := os.Remove(filepath.Join(vendorDir, hotwordModelFileName+".data")); err != nil {
+	if err := os.Remove(hotwordRuntimeModelPath(app.dataDir) + ".data"); err != nil {
 		t.Fatalf("remove deployed data: %v", err)
 	}
 

@@ -42,7 +42,7 @@ func TestShouldAttemptSilentLiveEdit(t *testing.T) {
 	}{
 		{name: "dialogue edit", policy: LivePolicyDialogue, captureMode: chatCaptureModeVoice, text: "Let's rewrite this paragraph.", want: true},
 		{name: "meeting unaddressed edit", policy: LivePolicyMeeting, captureMode: chatCaptureModeVoice, text: "Fügen wir hier noch einen Satz hinzu.", want: true},
-		{name: "meeting addressed companion", policy: LivePolicyMeeting, captureMode: chatCaptureModeVoice, text: "Sloppy, rewrite this paragraph.", want: false},
+		{name: "meeting addressed companion", policy: LivePolicyMeeting, captureMode: chatCaptureModeVoice, text: "Computer, rewrite this paragraph.", want: false},
 		{name: "text never silent edit", policy: LivePolicyDialogue, captureMode: chatCaptureModeText, text: "Rewrite this paragraph.", want: false},
 		{name: "non edit text", policy: LivePolicyDialogue, captureMode: chatCaptureModeVoice, text: "Tell me what this means.", want: false},
 	}
