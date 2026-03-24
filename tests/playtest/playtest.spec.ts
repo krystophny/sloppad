@@ -16,9 +16,9 @@ import {
 } from '../e2e/live-ui';
 
 async function openTopEdge(page: Parameters<typeof openLiveApp>[0]) {
-  await page.mouse.move(160, 2);
+  await page.locator('#edge-top-tap').evaluate((node: HTMLElement) => node.click());
   const edgeTop = page.locator('#edge-top');
-  await expect(edgeTop).toHaveClass(/edge-active/);
+  await expect(edgeTop).toHaveClass(/edge-pinned/);
   await expect(page.locator('#edge-top-projects')).toBeVisible();
   await expect(page.locator('#edge-top-models')).toBeVisible();
 }

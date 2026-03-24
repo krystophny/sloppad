@@ -694,9 +694,9 @@ func (a *App) runAssistantTurnLegacy(sessionID string, session store.ChatSession
 	_ = assistantText
 }
 
-// finalizeAssistantResponse handles post-processing shared by both turn paths:
-// voice mode stays chat-first, but explicit file-backed canvas output is still
-// honored; silent mode can additionally mirror plain assistant text to canvas.
+// finalizeAssistantResponse handles post-processing shared by both turn paths.
+// Assistant prose remains chat-first in every mode; only explicit file-backed
+// artifact output is allowed onto the canvas.
 func (a *App) finalizeAssistantResponse(
 	sessionID, workspacePath, text string,
 	persistedID *int64, persistedText *string,
@@ -753,45 +753,18 @@ func (a *App) finalizeAssistantResponseWithMetadata(
 
 	outputMode = normalizeTurnOutputMode(outputMode)
 	canvasSessionID := a.resolveCanvasSessionID(workspacePath)
-	autoCanvas := false
 	renderOnCanvas := false
 	content := strings.TrimSpace(text)
 	blocks, cleaned := parseFileBlocks(content)
-	if isVoiceOutputMode(outputMode) {
-		if len(blocks) > 0 && canvasSessionID != "" {
-			if a.isResearchTurn(sessionID) {
-				blocks = normalizeResearchFileBlocks(blocks, researchArtifactRoot(sessionID))
-			}
-			renderOnCanvas = a.executeFileBlocks(workspacePath, canvasSessionID, blocks)
+	if len(blocks) > 0 && canvasSessionID != "" {
+		if a.isResearchTurn(sessionID) {
+			blocks = normalizeResearchFileBlocks(blocks, researchArtifactRoot(sessionID))
 		}
-		text = cleaned
-	} else {
-		canvasCtx := a.resolveCanvasContext(workspacePath)
-		if len(blocks) > 0 && canvasSessionID != "" {
-			if a.isResearchTurn(sessionID) {
-				blocks = normalizeResearchFileBlocks(blocks, researchArtifactRoot(sessionID))
-			}
-			renderOnCanvas = a.executeFileBlocks(workspacePath, canvasSessionID, blocks)
-			text = cleaned
-		} else if content != "" && canvasSessionID != "" {
-			block := fileBlock{
-				Path:    "",
-				Content: content,
-			}
-			if canOverwriteSilentAutoCanvasArtifact(canvasCtx) {
-				block.Path = canvasCtx.ArtifactTitle
-			}
-			autoCanvas = a.writeCanvasFileBlock(workspacePath, canvasSessionID, block)
-			if !autoCanvas && strings.TrimSpace(block.Path) != "" {
-				block.Path = ""
-				autoCanvas = a.writeCanvasFileBlock(workspacePath, canvasSessionID, block)
-			}
-			text = content
-		}
-		renderOnCanvas = renderOnCanvas || autoCanvas
+		renderOnCanvas = a.executeFileBlocks(workspacePath, canvasSessionID, blocks)
 	}
+	text = cleaned
 	text = stripLangTags(text)
-	chatMarkdown, chatPlain, renderFormat := assistantFinalChatContent(text, renderOnCanvas, autoCanvas)
+	chatMarkdown, chatPlain, renderFormat := assistantFinalChatContent(text, renderOnCanvas, false)
 
 	a.refreshCanvasFromDisk(workspacePath)
 
@@ -828,26 +801,11 @@ func (a *App) finalizeAssistantResponseWithMetadata(
 		"render_on_canvas": renderOnCanvas,
 	}
 	metadata.applyToPayload(payload)
-	if autoCanvas {
-		payload["auto_canvas"] = true
-	}
 	a.finishCompanionPendingTurn(sessionID, "assistant_turn_completed")
 	a.broadcastChatEvent(sessionID, payload)
 	if renderCommand := assistantRenderChatCommand(tid, outputMode, chatMarkdown); renderCommand != nil {
 		metadata.applyToPayload(renderCommand)
 		a.broadcastChatEvent(sessionID, renderCommand)
-	}
-	if renderOnCanvas || autoCanvas {
-		if renderCommand := assistantRenderCanvasCommand(tid, outputMode, "", "", chatMarkdown); renderCommand != nil {
-			if autoCanvas {
-				renderCommand["auto_canvas"] = true
-			}
-			if renderOnCanvas {
-				renderCommand["render_on_canvas"] = true
-			}
-			metadata.applyToPayload(renderCommand)
-			a.broadcastChatEvent(sessionID, renderCommand)
-		}
 	}
 	a.maybeNotifyCompletedTurn(sessionID, workspacePath, chatPlain)
 	if strings.TrimSpace(positionPrompt) != "" {

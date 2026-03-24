@@ -209,7 +209,7 @@ test.describe('silent mode mobile', () => {
     await expect(edgeRight).not.toHaveClass(/edge-pinned/);
   });
 
-  test('non-autoCanvas response mirrors to canvas and keeps chat panel focused', async ({ page }) => {
+  test('non-autoCanvas response stays in chat and keeps chat panel focused', async ({ page }) => {
     const edgeRight = page.locator('#edge-right');
     await expect(edgeRight).toHaveClass(/edge-pinned/);
 
@@ -230,13 +230,13 @@ test.describe('silent mode mobile', () => {
     });
     await page.waitForTimeout(200);
 
-    // Chat pane should remain open/focused for mirrored text responses
+    // Chat pane should remain open/focused for chat-only responses
     await expect(edgeRight).toHaveClass(/edge-pinned/);
 
-    // Canvas should show the response
+    // Assistant prose stays out of the canvas
     const canvasText = page.locator('#canvas-text');
-    await expect(canvasText).toBeVisible();
-    await expect(canvasText).toContainText('Short answer shown on canvas');
+    await expect(canvasText).toBeHidden();
+    await expect(edgeRight).toContainText('Short answer shown on canvas');
   });
 });
 

@@ -788,32 +788,54 @@ export function companionStatusCopy(runtimeState) {
   }
 }
 
-export function hasVisibleCanvasArtifact() {
-  const activePane = document.querySelector('#canvas-viewport .canvas-pane.is-active');
-  if (!(activePane instanceof HTMLElement)) return false;
-  return window.getComputedStyle(activePane).display !== 'none';
+export function hasVisibleRealCanvasArtifact() {
+  if (!state.hasArtifact) return false;
+  if (Boolean(state.currentCanvasArtifact?.realArtifact)) return true;
+  const kind = String(state.currentCanvasArtifact?.kind || '').trim().toLowerCase();
+  if (kind === 'image_artifact' || kind === 'image' || kind === 'pdf_artifact' || kind === 'pdf') {
+    return true;
+  }
+  const ref = String(state.currentCanvasArtifact?.path || state.currentCanvasArtifact?.title || '')
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .toLowerCase();
+  if (!ref) return false;
+  return !ref.startsWith('.tabura/artifacts/tmp/')
+    && !ref.startsWith('tabura/artifacts/tmp/');
 }
 
 export function shouldShowCompanionIdleSurface() {
+  const assistantActive = state.ttsPlaying
+    || state.voiceAwaitingTurn
+    || hasLocalStopCapableWork()
+    || state.assistantRemoteActiveCount > 0
+    || state.assistantRemoteQueuedCount > 0
+    || normalizeCompanionRuntimeState(state.companionRuntimeState) !== COMPANION_RUNTIME_STATES.IDLE;
   const liveCompanionActive = state.liveSessionActive
     && (state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE || state.liveSessionMode === LIVE_SESSION_MODE_MEETING);
-  if (!state.companionEnabled && !liveCompanionActive) return false;
-  if (hasVisibleCanvasArtifact()) return false;
+  if (!state.companionEnabled && !liveCompanionActive && !assistantActive) return false;
+  if (hasVisibleRealCanvasArtifact()) return false;
   return true;
 }
 
-function dialogueCompanionState() {
-  if (!state.liveSessionActive || state.liveSessionMode !== LIVE_SESSION_MODE_DIALOGUE) return '';
+function companionRuntimeVisualState() {
+  if (state.ttsPlaying) return COMPANION_RUNTIME_STATES.TALKING;
+  if (!state.liveSessionActive || state.liveSessionMode !== LIVE_SESSION_MODE_DIALOGUE) {
+    if (state.voiceAwaitingTurn || hasLocalStopCapableWork() || state.assistantRemoteActiveCount > 0 || state.assistantRemoteQueuedCount > 0) {
+      return COMPANION_RUNTIME_STATES.THINKING;
+    }
+    return normalizeCompanionRuntimeState(state.companionRuntimeState);
+  }
   const capture = state.chatVoiceCapture;
   if (capture && (capture.speechDetected === true || capture.stopping === true)) {
     return COMPANION_RUNTIME_STATES.LISTENING;
   }
-  if (state.ttsPlaying) return COMPANION_RUNTIME_STATES.TALKING;
   if (state.voiceAwaitingTurn || hasLocalStopCapableWork()) return COMPANION_RUNTIME_STATES.THINKING;
   if (Number(state.dialogueSpeechRecognizedAt) > 0 && (Date.now() - Number(state.dialogueSpeechRecognizedAt)) < 1800) {
     return COMPANION_RUNTIME_STATES.THINKING;
   }
-  return COMPANION_RUNTIME_STATES.IDLE;
+  return normalizeCompanionRuntimeState(state.companionRuntimeState);
 }
 
 function shouldUseBlackScreenMode(idleSurface = normalizeCompanionIdleSurface(state.companionIdleSurface)) {
@@ -826,26 +848,15 @@ function shouldUseBlackScreenMode(idleSurface = normalizeCompanionIdleSurface(st
 export function updateCompanionIdleSurface() {
   const surface = companionIdleSurfaceEl();
   const visible = shouldShowCompanionIdleSurface();
-  const dialogueState = dialogueCompanionState();
-  const runtimeState = dialogueState || normalizeCompanionRuntimeState(state.companionRuntimeState);
+  const runtimeState = companionRuntimeVisualState();
   const idleSurface = normalizeCompanionIdleSurface(state.companionIdleSurface);
   const blackScreenActive = shouldUseBlackScreenMode(idleSurface);
   document.body.classList.toggle('black-screen', blackScreenActive);
   if (!(surface instanceof HTMLElement)) return;
-  const copy = companionStatusCopy(runtimeState);
   surface.dataset.state = runtimeState;
   surface.dataset.surface = idleSurface;
   surface.setAttribute('aria-hidden', visible && !blackScreenActive ? 'false' : 'true');
   surface.style.display = visible && !blackScreenActive ? 'block' : 'none';
-  const statusNode = surface.querySelector('.companion-idle-status');
-  if (statusNode) statusNode.textContent = copy.label;
-  const detailNode = surface.querySelector('.companion-idle-detail');
-  if (detailNode) {
-    const runtimeDetail = String(state.companionRuntimeReason || '').trim();
-    detailNode.textContent = runtimeDetail && runtimeState !== COMPANION_RUNTIME_STATES.IDLE
-      ? runtimeDetail.replaceAll('_', ' ')
-      : copy.detail;
-  }
 }
 
 export function syncCompanionIdleSurface() {

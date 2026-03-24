@@ -1,13 +1,10 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,65 +140,6 @@ func localAssistantToolDefinitions() []map[string]any {
 			},
 		},
 	}
-}
-
-func (a *App) requestLocalAssistantCompletionWithConfig(ctx context.Context, messages []map[string]any, tools []map[string]any, toolChoice string, enableThinking bool, maxTokens int) (localIntentLLMMessage, error) {
-	baseURL := a.assistantLLMBaseURL()
-	if baseURL == "" {
-		return localIntentLLMMessage{}, errLocalAssistantNotConfigured
-	}
-	if maxTokens <= 0 {
-		maxTokens = assistantLLMToolMaxTokens
-	}
-	request := map[string]any{
-		"model":       a.localAssistantLLMModel(),
-		"temperature": 0,
-		"max_tokens":  maxTokens,
-		"chat_template_kwargs": map[string]any{
-			"enable_thinking": enableThinking,
-		},
-		"messages": messages,
-	}
-	if len(tools) > 0 {
-		request["tools"] = tools
-		request["tool_choice"] = firstNonEmptyCursorText(strings.TrimSpace(toolChoice), "auto")
-	}
-	requestBody, _ := json.Marshal(request)
-	requestCtx, cancel := context.WithTimeout(ctx, assistantLLMRequestTimeout())
-	defer cancel()
-	req, err := http.NewRequestWithContext(
-		requestCtx,
-		http.MethodPost,
-		baseURL+"/v1/chat/completions",
-		bytes.NewReader(requestBody),
-	)
-	if err != nil {
-		return localIntentLLMMessage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return localIntentLLMMessage{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, assistantLLMResponseLimit))
-		return localIntentLLMMessage{}, fmt.Errorf("assistant llm HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var payload localIntentLLMChatCompletionResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, assistantLLMResponseLimit)).Decode(&payload); err != nil {
-		return localIntentLLMMessage{}, err
-	}
-	if len(payload.Choices) == 0 {
-		return localIntentLLMMessage{}, errors.New("assistant llm returned no choices")
-	}
-	choice := payload.Choices[0]
-	message := choice.Message
-	message.Content = stripLocalAssistantThinkingPreamble(message.Content)
-	if strings.EqualFold(strings.TrimSpace(choice.FinishReason), "length") {
-		message.Content = normalizeTruncatedAssistantText(message.Content)
-	}
-	return message, nil
 }
 
 func localAssistantThinkingEnabled(req *assistantTurnRequest) bool {
@@ -482,29 +420,7 @@ func stripLocalAssistantThinkingPreamble(raw string) string {
 	return strings.TrimSpace(clean)
 }
 
-func normalizeTruncatedAssistantText(raw string) string {
-	clean := strings.TrimSpace(raw)
-	if clean == "" {
-		return "..."
-	}
-	trimmed := strings.TrimRight(clean, " \n\t")
-	if strings.ContainsAny(trimmed[len(trimmed)-1:], ".!?…") {
-		return trimmed
-	}
-	if lastSpace := strings.LastIndexAny(trimmed, " \n\t"); lastSpace >= 0 {
-		candidate := strings.TrimSpace(trimmed[:lastSpace])
-		if candidate != "" {
-			trimmed = candidate
-		}
-	}
-	trimmed = strings.TrimRight(trimmed, ",;:-")
-	if trimmed == "" {
-		return "..."
-	}
-	return trimmed + "..."
-}
-
-func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnRequest, prompt string, visual *chatVisualAttachment) (string, error) {
+func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnRequest, prompt string, visual *chatVisualAttachment, onDelta func(fullText string, delta string)) (string, error) {
 	if a == nil || req == nil {
 		return "", errors.New("assistant turn request is required")
 	}
@@ -520,7 +436,7 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 	if req.fastMode {
 		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, []map[string]any{
 			{"role": "user", "content": strings.TrimSpace(req.promptText)},
-		}, nil, "", enableThinking, assistantLLMFastMaxTokens)
+		}, nil, "", enableThinking, assistantLLMFastMaxTokens, onDelta)
 		if err != nil {
 			return "", err
 		}
@@ -535,7 +451,11 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		if round > 0 {
 			maxTokens = assistantLLMToolMaxTokens
 		}
-		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, conversation, localAssistantToolDefinitions(), "auto", enableThinking, maxTokens)
+		emitDelta := onDelta
+		if round > 0 {
+			emitDelta = nil
+		}
+		message, err := a.requestLocalAssistantCompletionWithConfig(ctx, conversation, localAssistantToolDefinitions(), "auto", enableThinking, maxTokens, emitDelta)
 		if err != nil {
 			return "", err
 		}

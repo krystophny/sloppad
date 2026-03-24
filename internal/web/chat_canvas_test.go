@@ -727,22 +727,11 @@ func TestFinalizeAssistantResponse_SilentOverwritesScratchArtifact(t *testing.T)
 		turnOutputModeSilent,
 	)
 
-	if got := atomic.LoadInt32(&mock.artifactShow); got == 0 {
-		t.Fatal("expected silent response to push canvas_artifact_show for scratch artifact")
+	if got := atomic.LoadInt32(&mock.artifactShow); got != 0 {
+		t.Fatalf("expected silent response to stay chat-only, got %d canvas_artifact_show calls", got)
 	}
-	if strings.TrimSpace(mock.lastShownTitle) != ".tabura/artifacts/tmp/reply.md" {
-		t.Fatalf("expected overwrite same scratch artifact title, got %q", mock.lastShownTitle)
-	}
-	if strings.TrimSpace(mock.lastShownContent) != "second response" {
-		t.Fatalf("expected updated canvas content, got %q", mock.lastShownContent)
-	}
-	scratchPath := filepath.Join(project.RootPath, filepath.FromSlash(".tabura/artifacts/tmp/reply.md"))
-	b, err := os.ReadFile(scratchPath)
-	if err != nil {
-		t.Fatalf("expected scratch file written: %v", err)
-	}
-	if strings.TrimSpace(string(b)) != "second response" {
-		t.Fatalf("expected scratch file content updated, got %q", string(b))
+	if strings.TrimSpace(persistedText) != "second response" {
+		t.Fatalf("expected persisted chat response, got %q", persistedText)
 	}
 }
 
@@ -848,17 +837,8 @@ func TestFinalizeAssistantResponse_SilentFallsBackToScratchForWorkspaceArtifact(
 		turnOutputModeSilent,
 	)
 
-	if got := atomic.LoadInt32(&mock.artifactShow); got != 1 {
-		t.Fatalf("expected one canvas_artifact_show for workspace artifact fallback, got %d", got)
-	}
-	if strings.TrimSpace(mock.lastShownTitle) == "docs/notes.md" {
-		t.Fatalf("expected fallback scratch artifact title, got %q", mock.lastShownTitle)
-	}
-	if !strings.HasPrefix(strings.TrimSpace(mock.lastShownTitle), ".tabura/artifacts/tmp/") {
-		t.Fatalf("expected scratch artifact title, got %q", mock.lastShownTitle)
-	}
-	if strings.TrimSpace(mock.lastShownContent) != "assistant follow-up" {
-		t.Fatalf("expected fallback scratch artifact content, got %q", mock.lastShownContent)
+	if got := atomic.LoadInt32(&mock.artifactShow); got != 0 {
+		t.Fatalf("expected silent response to stay off canvas, got %d canvas_artifact_show calls", got)
 	}
 	b, err := os.ReadFile(workspaceFile)
 	if err != nil {
@@ -867,13 +847,8 @@ func TestFinalizeAssistantResponse_SilentFallsBackToScratchForWorkspaceArtifact(
 	if strings.TrimSpace(string(b)) != "user-owned" {
 		t.Fatalf("workspace file should remain untouched, got %q", string(b))
 	}
-	scratchPath := filepath.Join(project.RootPath, filepath.FromSlash(strings.TrimSpace(mock.lastShownTitle)))
-	scratchBytes, err := os.ReadFile(scratchPath)
-	if err != nil {
-		t.Fatalf("read scratch artifact file: %v", err)
-	}
-	if strings.TrimSpace(string(scratchBytes)) != "assistant follow-up" {
-		t.Fatalf("expected scratch artifact file content updated, got %q", string(scratchBytes))
+	if strings.TrimSpace(persistedText) != "assistant follow-up" {
+		t.Fatalf("expected chat response to persist, got %q", persistedText)
 	}
 }
 
@@ -915,17 +890,11 @@ func TestFinalizeAssistantResponse_SilentFallsBackWhenOverwritePathEscapesProjec
 		turnOutputModeSilent,
 	)
 
-	if got := atomic.LoadInt32(&mock.artifactShow); got != 1 {
-		t.Fatalf("expected one successful fallback canvas_artifact_show call, got %d", got)
+	if got := atomic.LoadInt32(&mock.artifactShow); got != 0 {
+		t.Fatalf("expected silent response to stay off canvas, got %d canvas_artifact_show calls", got)
 	}
-	if strings.TrimSpace(mock.lastShownTitle) == "/tmp/other-project/.tabura/artifacts/tmp/reply.md" {
-		t.Fatalf("expected fallback to new local scratch artifact, got %q", mock.lastShownTitle)
-	}
-	if !strings.HasPrefix(strings.TrimSpace(mock.lastShownTitle), ".tabura/artifacts/tmp/") {
-		t.Fatalf("expected local scratch artifact title, got %q", mock.lastShownTitle)
-	}
-	if strings.TrimSpace(mock.lastShownContent) != "fresh response" {
-		t.Fatalf("expected fallback scratch artifact content, got %q", mock.lastShownContent)
+	if strings.TrimSpace(persistedText) != "fresh response" {
+		t.Fatalf("expected chat response to persist, got %q", persistedText)
 	}
 }
 

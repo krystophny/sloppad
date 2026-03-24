@@ -66,27 +66,3 @@ func assistantRenderChatCommand(turnID, outputMode, markdown string) map[string]
 		"html":        renderedHTML,
 	}
 }
-
-func assistantRenderCanvasCommand(turnID, outputMode, title, path, markdown string) map[string]interface{} {
-	renderedHTML := assistantRenderHTML(markdown)
-	if renderedHTML == "" {
-		return nil
-	}
-	payload := map[string]interface{}{
-		"type":        "render_canvas",
-		"turn_id":     strings.TrimSpace(turnID),
-		"output_mode": normalizeTurnOutputMode(outputMode),
-		"kind":        "text_artifact",
-		"title":       strings.TrimSpace(title),
-		"path":        strings.TrimSpace(path),
-		"text":        strings.TrimSpace(markdown),
-		"html":        renderedHTML,
-	}
-	if payload["title"] == "" {
-		delete(payload, "title")
-	}
-	if payload["path"] == "" {
-		delete(payload, "path")
-	}
-	return payload
-}

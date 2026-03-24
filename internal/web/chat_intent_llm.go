@@ -25,9 +25,35 @@ type localIntentLLMChoice struct {
 }
 
 type localIntentLLMMessage struct {
-	Content      string                         `json:"content"`
-	ToolCalls    []localAssistantLLMToolCall    `json:"tool_calls"`
-	FunctionCall *localAssistantLLMFunctionCall `json:"function_call"`
+	Content          string                         `json:"content"`
+	Reasoning        string                         `json:"reasoning,omitempty"`
+	ReasoningContent string                         `json:"reasoning_content,omitempty"`
+	ToolCalls        []localAssistantLLMToolCall    `json:"tool_calls"`
+	FunctionCall     *localAssistantLLMFunctionCall `json:"function_call"`
+}
+
+type localIntentLLMStreamChatCompletionResponse struct {
+	Choices []localIntentLLMStreamChoice `json:"choices"`
+}
+
+type localIntentLLMStreamChoice struct {
+	Delta        localIntentLLMStreamDelta `json:"delta"`
+	FinishReason string                    `json:"finish_reason,omitempty"`
+}
+
+type localIntentLLMStreamDelta struct {
+	Content          string                           `json:"content"`
+	Reasoning        string                           `json:"reasoning,omitempty"`
+	ReasoningContent string                           `json:"reasoning_content,omitempty"`
+	ToolCalls        []localAssistantLLMToolCallDelta `json:"tool_calls,omitempty"`
+	FunctionCall     *localAssistantLLMFunctionCall   `json:"function_call,omitempty"`
+}
+
+type localAssistantLLMToolCallDelta struct {
+	Index    int                           `json:"index"`
+	ID       string                        `json:"id,omitempty"`
+	Type     string                        `json:"type,omitempty"`
+	Function localAssistantLLMFunctionCall `json:"function"`
 }
 
 type intentLocalAnswer struct {

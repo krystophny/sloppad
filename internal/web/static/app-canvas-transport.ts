@@ -37,6 +37,7 @@ export function applyCanvasArtifactEvent(payload) {
       title: '',
       path: '',
       surfaceDefault: '',
+      realArtifact: false,
       itemID: 0,
       artifactID: 0,
     };
@@ -79,12 +80,14 @@ export function applyCanvasArtifactEvent(payload) {
   const artifactKind = String(meta?.artifact_kind || '').trim().toLowerCase();
   const itemID = Number(meta?.item_id || 0);
   const artifactID = Number(meta?.artifact_id || 0);
+  const realArtifact = isRealCanvasArtifactEvent(payload);
   state.currentCanvasArtifact = {
     kind,
     artifactKind,
     title: String(payload?.title || '').trim(),
     path: String(payload?.path || '').trim(),
     surfaceDefault: hintedSurface === 'editor' ? 'editor' : (hintedSurface === 'annotate' ? 'annotate' : ''),
+    realArtifact,
     itemID: Number.isFinite(itemID) && itemID > 0 ? itemID : 0,
     artifactID: Number.isFinite(artifactID) && artifactID > 0 ? artifactID : 0,
   };
@@ -96,10 +99,9 @@ export function applyCanvasArtifactEvent(payload) {
 
   const paneId = paneIdForCanvasKind(payload.kind);
   if (!paneId) return;
-  const realCanvasArtifact = isRealCanvasArtifactEvent(payload);
   showCanvasColumn(paneId);
-  state.canvasActionThisTurn = state.canvasActionThisTurn || realCanvasArtifact;
-  if (isMobileSilent() && realCanvasArtifact) {
+  state.canvasActionThisTurn = state.canvasActionThisTurn || realArtifact;
+  if (isMobileSilent() && realArtifact) {
     const edgeRight = document.getElementById('edge-right');
     if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
   }

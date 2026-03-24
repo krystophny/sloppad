@@ -71,11 +71,8 @@ func TestStripLocalAssistantThinkingPreamble(t *testing.T) {
 	}
 }
 
-func TestNormalizeTruncatedAssistantText(t *testing.T) {
-	if got := normalizeTruncatedAssistantText("Hello world from Tabura"); got != "Hello world from..." {
-		t.Fatalf("normalizeTruncatedAssistantText() = %q, want %q", got, "Hello world from...")
-	}
-	if got := normalizeTruncatedAssistantText("Done."); got != "Done." {
-		t.Fatalf("normalizeTruncatedAssistantText() punctuation = %q, want %q", got, "Done.")
+func TestAnnotateLocalAssistantSafetyStop(t *testing.T) {
+	if got := annotateLocalAssistantSafetyStop("Hello world from Tabura"); got != "Hello world from Tabura\n\n[stopped at local safety limit]" {
+		t.Fatalf("annotateLocalAssistantSafetyStop() = %q", got)
 	}
 }

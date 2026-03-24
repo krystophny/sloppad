@@ -65,6 +65,7 @@ export function showCanvasColumn(paneId) {
     title: artifactTitle,
     path: String(currentArtifact.path || ''),
     surfaceDefault: String(currentArtifact.surfaceDefault || ''),
+    realArtifact: Boolean(currentArtifact.realArtifact),
     itemID: Number(currentArtifact.itemID || 0),
     artifactID: Number(currentArtifact.artifactID || 0),
   };
@@ -92,6 +93,7 @@ export function hideCanvasColumn() {
     title: '',
     path: '',
     surfaceDefault: '',
+    realArtifact: false,
     itemID: 0,
     artifactID: 0,
   };

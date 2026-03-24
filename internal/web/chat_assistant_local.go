@@ -15,9 +15,9 @@ const (
 	assistantModeCodex           = "codex"
 	DefaultAssistantMode         = assistantModeAuto
 	defaultAssistantLLMTimeout   = 2 * time.Minute
-	assistantLLMFastMaxTokens    = 96
-	assistantLLMDirectMaxTokens  = 192
-	assistantLLMToolMaxTokens    = 256
+	assistantLLMFastMaxTokens    = 2048
+	assistantLLMDirectMaxTokens  = 4096
+	assistantLLMToolMaxTokens    = 4096
 	assistantLLMResponseLimit    = 256 * 1024
 	assistantLLMMaxToolRounds    = 6
 	assistantLLMMalformedRetries = 2
@@ -160,7 +160,26 @@ func (a *App) runLocalAssistantTurn(req *assistantTurnRequest) {
 		"turn_id": runID,
 	})
 
-	reply, err := a.runLocalAssistantToolLoop(ctx, req, prompt, latestCanvasPositionVisualAttachment(req.positionCtx))
+	reply, err := a.runLocalAssistantToolLoop(
+		ctx,
+		req,
+		prompt,
+		latestCanvasPositionVisualAttachment(req.positionCtx),
+		func(fullText string, delta string) {
+			fullText = strings.TrimSpace(fullText)
+			delta = strings.TrimSpace(delta)
+			if fullText == "" || delta == "" {
+				return
+			}
+			a.broadcastChatEvent(req.sessionID, map[string]any{
+				"type":        "assistant_message",
+				"turn_id":     runID,
+				"output_mode": req.outputMode,
+				"message":     fullText,
+				"delta":       delta,
+			})
+		},
+	)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			a.finishCompanionPendingTurn(req.sessionID, "assistant_turn_cancelled")

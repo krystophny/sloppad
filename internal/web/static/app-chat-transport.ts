@@ -670,31 +670,18 @@ export function handleChatEvent(payload) {
     const turnID = String(payload.turn_id || '').trim();
     trackAssistantTurnStarted(turnID);
     const md = String(payload.message || '');
-    const autoCanvas = Boolean(payload.auto_canvas);
-    const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(md);
     const row = ensurePendingForTurn(turnID);
     if (String(md || '').trim()) {
       updateAssistantRow(row, md, true);
-    } else if (!renderOnCanvas) {
+    } else {
       updateAssistantRow(row, '_Working..._', true);
     }
 
-    if (autoCanvas) {
-      state.indicatorSuppressedByCanvasUpdate = true;
-      updateAssistantActivityIndicator();
-      if (!isVoiceTurn()) {
-        hideOverlay();
-      }
-    }
-
-    // First non-empty response: show on canvas (silent) / speak (voice)
+    // First non-empty response: start TTS as soon as a sentence is ready.
     const trimmedMd = String(md || '').trim();
     const shouldSpeakStreaming = isVoiceOutputModePayload(payload) || (turnID ? state.voiceTurns.has(turnID) : false) || isVoiceTurn();
     if (trimmedMd && !state.turnFirstResponseShown) {
       state.turnFirstResponseShown = true;
-      if (isMobileSilent()) {
-        renderCanvas({ kind: 'text_artifact', title: '', text: md });
-      }
       if (shouldSpeakStreaming && canSpeakTTS()) {
         const { ttsText, ttsLang } = extractTTSText(md);
         const { ttsText: hintedDeltaText } = extractTTSText(String(payload.delta || ''));
@@ -717,10 +704,7 @@ export function handleChatEvent(payload) {
       providerLabel: payload.provider_label,
       providerModel: payload.provider_model,
     };
-    const autoCanvas = Boolean(payload.auto_canvas);
     const lastTTSText = getTTSLastSpeakText();
-    const inferredText = md || lastTTSText;
-    const renderOnCanvas = Boolean(payload.render_on_canvas) || autoCanvas || assistantMessageUsesCanvasBlocks(inferredText);
     // Persisted text may be empty for voice-only responses; fall back to TTS text.
     const displayMd = md || (lastTTSText ? `_${lastTTSText}_` : '');
     const hasDisplayMd = Boolean(String(displayMd || '').trim());
@@ -747,9 +731,6 @@ export function handleChatEvent(payload) {
       if (ttsLang) setTTSSpeakLang(ttsLang);
       const diff = computeTTSDiff(ttsText, hintedDeltaText);
       queueTTSDiff(diff);
-    } else if (autoCanvas) {
-      state.indicatorSuppressedByCanvasUpdate = true;
-      updateAssistantActivityIndicator();
     }
 
     flushTTSChunker();
@@ -758,13 +739,6 @@ export function handleChatEvent(payload) {
         // LLM touched the canvas this turn — keep showing the document.
         const edgeRight = document.getElementById('edge-right');
         if (edgeRight) edgeRight.classList.remove('edge-active', 'edge-pinned');
-      } else if (hasDisplayMd) {
-        // Mirror final answer on canvas while keeping chat in focus.
-        renderCanvas({
-          kind: 'text_artifact',
-          title: '',
-          text: displayMd,
-        });
       }
       hideOverlay();
       state.canvasActionThisTurn = false;
