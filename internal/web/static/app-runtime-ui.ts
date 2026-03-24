@@ -795,10 +795,10 @@ export function hasVisibleCanvasArtifact() {
 }
 
 export function shouldShowCompanionIdleSurface() {
-  const dialogueCompanionActive = state.liveSessionActive && state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE;
-  if (!state.companionEnabled && !dialogueCompanionActive) return false;
+  const liveCompanionActive = state.liveSessionActive
+    && (state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE || state.liveSessionMode === LIVE_SESSION_MODE_MEETING);
+  if (!state.companionEnabled && !liveCompanionActive) return false;
   if (hasVisibleCanvasArtifact()) return false;
-  if (state.liveSessionActive && state.liveSessionMode !== LIVE_SESSION_MODE_DIALOGUE) return false;
   return true;
 }
 

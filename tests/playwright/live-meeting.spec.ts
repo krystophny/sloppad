@@ -74,6 +74,8 @@ async function setHarnessMeetingState(
       ];
       appState.activeWorkspaceId = 'test';
       appState.hasArtifact = false;
+      appState.liveSessionActive = true;
+      appState.liveSessionMode = 'meeting';
       appState.companionEnabled = Boolean(nextState.enabled);
       appState.companionIdleSurface = String(nextState.idleSurface || 'robot');
       appState.companionRuntimeState = String(nextState.runtimeState || 'idle');
