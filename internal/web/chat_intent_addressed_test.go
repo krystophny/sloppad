@@ -235,11 +235,11 @@ func TestRunAssistantTurnMeetingDirectAddressOverridesFalseAddressedClassificati
 	if err != nil {
 		t.Fatalf("project session: %v", err)
 	}
-	if _, err := app.store.AddChatMessage(session.ID, "user", "Tabura, please go silent now", "Tabura, please go silent now", "text"); err != nil {
+	if _, err := app.store.AddChatMessage(session.ID, "user", "Computer, please go silent now", "Computer, please go silent now", "text"); err != nil {
 		t.Fatalf("add user message: %v", err)
 	}
 
-	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Tabura, please go silent now", nil, "")
+	message, payloads, handled := app.classifyAndExecuteSystemActionForTurn(context.Background(), session.ID, session, "Computer, please go silent now", nil, "")
 	if !handled {
 		t.Fatal("expected explicit direct address to be handled")
 	}

@@ -441,6 +441,7 @@ test('dialogue shows the companion robot by default', async ({ page }) => {
     display: 'block',
     surface: 'robot',
   });
+  await expect(page.locator('#companion-idle-surface')).toContainText('Sloppy');
 });
 
 test('dialogue barge-in interrupts TTS and starts recording with connected turn intelligence', async ({ page }) => {

@@ -309,14 +309,14 @@ func TestParticipantStatusIncludesMeetingDiagnosticsAndReplayEval(t *testing.T) 
 	first, err := app.store.AddParticipantSegment(store.ParticipantSegment{
 		SessionID:   sess.ID,
 		Speaker:     "Alice",
-		Text:        "Tabura, summarize that.",
+		Text:        "Computer, summarize that.",
 		CommittedAt: 100,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("AddParticipantSegment(first): %v", err)
 	}
-	if err := app.store.AddParticipantEvent(sess.ID, first.ID, "segment_committed", `{"text":"Tabura, summarize that."}`); err != nil {
+	if err := app.store.AddParticipantEvent(sess.ID, first.ID, "segment_committed", `{"text":"Computer, summarize that."}`); err != nil {
 		t.Fatalf("AddParticipantEvent segment_committed(first): %v", err)
 	}
 	if err := app.store.AddParticipantEvent(sess.ID, first.ID, "assistant_triggered", `{"chat_session_id":"chat-1"}`); err != nil {

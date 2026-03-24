@@ -68,7 +68,7 @@ func (e localTurnEvaluation) fallbackText() string {
 
 const systemActionLastShellPathPlaceholder = "$last_shell_path"
 
-var hotwordIntentLeadPattern = regexp.MustCompile(`(?i)^\s*(?:(?:hey|hi|ok|okay)\b[\s,.:;!?-]*)*(?:computer)\b[\s,.:;!?-]*`)
+var hotwordIntentLeadPattern = regexp.MustCompile(`(?i)^\s*(?:(?:hey|hi|ok|okay)\b[\s,.:;!?-]*)*(?:computer|sloppy)\b[\s,.:;!?-]*`)
 
 func extractEmbeddedJSON(raw string) string {
 	trimmed := strings.TrimSpace(raw)

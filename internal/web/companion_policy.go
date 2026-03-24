@@ -166,6 +166,11 @@ func evaluateCompanionInteractionPolicy(cfg companionConfig, session *store.Part
 		state.Reason = "segment_already_triggered"
 		return state
 	}
+	if isCompanionNoiseSuppressed(latest.Text) {
+		state.Decision = companionInteractionDecisionSuppressed
+		state.Reason = "noise_suppressed"
+		return state
+	}
 	if !directAddress && !targetSpeakerFollowUp {
 		if pendingSegmentID != 0 && pendingSegmentID != latest.ID && requestWithoutDirectAddress && state.PendingSpeaker != "" && state.Speaker != "" && !companionSpeakersMatch(state.PendingSpeaker, state.Speaker) {
 			state.Decision = companionInteractionDecisionSuppressed
@@ -174,11 +179,6 @@ func evaluateCompanionInteractionPolicy(cfg companionConfig, session *store.Part
 		}
 		state.Decision = companionInteractionDecisionAwaitingAddress
 		state.Reason = "not_direct_address"
-		return state
-	}
-	if isCompanionNoiseSuppressed(latest.Text) {
-		state.Decision = companionInteractionDecisionSuppressed
-		state.Reason = "noise_suppressed"
 		return state
 	}
 	if pendingSegmentID != 0 && pendingSegmentID != latest.ID {
@@ -263,7 +263,7 @@ func isCompanionNoiseSuppressed(raw string) bool {
 	meaningful := make([]string, 0, len(words))
 	for _, word := range words {
 		switch word {
-		case "tabura", "assistant", "hey", "please":
+		case "computer", "sloppy", "tabura", "assistant", "hey", "please":
 			continue
 		default:
 			meaningful = append(meaningful, word)

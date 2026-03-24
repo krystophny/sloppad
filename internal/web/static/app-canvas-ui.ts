@@ -26,6 +26,7 @@ const updateCompanionIdleSurface = (...args) => refs.updateCompanionIdleSurface(
 const requestHotwordSync = (...args) => refs.requestHotwordSync(...args);
 const canSpeakTTS = (...args) => refs.canSpeakTTS(...args);
 const isDialogueLiveSession = (...args) => refs.isDialogueLiveSession(...args);
+const isMeetingLiveSession = (...args) => refs.isMeetingLiveSession(...args);
 const beginVoiceCapture = (...args) => refs.beginVoiceCapture(...args);
 const applyInteractionDefaultsForPane = (...args) => refs.applyInteractionDefaultsForPane(...args);
 const isArtifactEditorActive = (...args) => refs.isArtifactEditorActive(...args);
@@ -229,6 +230,10 @@ export function canStartLiveDialogueListen() {
 }
 
 export function beginConversationVoiceCapture(triggerSource = 'hotword') {
+  if (isMeetingLiveSession() && String(triggerSource || '').trim().toLowerCase() !== 'hotword') {
+    updateAssistantActivityIndicator();
+    return;
+  }
   const x = Math.floor(window.innerWidth / 2);
   const y = Math.floor(window.innerHeight / 2);
   void beginVoiceCapture(x, y, null, { triggerSource });

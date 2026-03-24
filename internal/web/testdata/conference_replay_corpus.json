@@ -13,7 +13,7 @@
           "id": 1,
           "session_id": "psess-replay-1",
           "speaker": "Alice",
-          "text": "Tabura, summarize the decision log.",
+          "text": "Computer, summarize the decision log.",
           "committed_at": 120,
           "status": "final"
         }
@@ -29,7 +29,7 @@
       "expect": {
         "trigger_expected": true,
         "gate_decision": "direct_address",
-        "gate_reason": "assistant_name_mentioned",
+        "gate_reason": "assistant_address_mentioned",
         "interaction_decision": "respond",
         "interaction_reason": "direct_address_ready",
         "overlap": false
@@ -47,7 +47,7 @@
           "id": 2,
           "session_id": "psess-replay-2",
           "speaker": "Alice",
-          "text": "Tabura, capture the blockers.",
+          "text": "Computer, capture the blockers.",
           "committed_at": 220,
           "status": "final"
         },
@@ -95,7 +95,7 @@
           "id": 4,
           "session_id": "psess-replay-3",
           "speaker": "Alice",
-          "text": "Tabura, summarize that section.",
+          "text": "Computer, summarize that section.",
           "committed_at": 320,
           "status": "final"
         },
@@ -149,7 +149,7 @@
           "id": 6,
           "session_id": "psess-replay-4",
           "speaker": "Alice",
-          "text": "Tabura, summarize that section.",
+          "text": "Computer, summarize that section.",
           "committed_at": 420,
           "status": "final"
         },

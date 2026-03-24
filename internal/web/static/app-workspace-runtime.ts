@@ -783,16 +783,6 @@ export function startAssistantActivityWatcher() {
   };
   const tick = async () => {
     if (document.hidden) return;
-    if (hasLocalStopCapableWork() && state.chatWs && state.chatWsLastMessageAt > 0) {
-      const elapsed = Date.now() - state.chatWsLastMessageAt;
-      if (elapsed > CHAT_WS_STALE_THRESHOLD_MS) {
-        state.chatWsLastMessageAt = 0;
-        closeChatWs();
-        openChatWs();
-        scheduleAssistantActivityTick(ASSISTANT_ACTIVITY_POLL_MS);
-        return;
-      }
-    }
     try {
       await refreshAssistantActivity();
       await refreshProjectRunStates();

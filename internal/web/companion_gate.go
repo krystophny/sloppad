@@ -30,8 +30,8 @@ type companionDirectedSpeechGate struct {
 }
 
 var (
-	companionAddressLeadPattern = regexp.MustCompile(`(?i)^(?:hey|ok|okay)\s+(?:tabura|assistant)\b|^(?:tabura|assistant)\b`)
-	companionAddressCuePattern  = regexp.MustCompile(`(?i)\b(?:tabura|assistant)\b[:,!?]`)
+	companionAddressLeadPattern = regexp.MustCompile(`(?i)^(?:hey|ok|okay)\s+(?:computer|sloppy)\b|^(?:computer|sloppy)\b`)
+	companionAddressCuePattern  = regexp.MustCompile(`(?i)\b(?:computer|sloppy)\b[:,!?]`)
 	companionRequestPattern     = regexp.MustCompile(`(?i)\b(?:can|could|would|will)\s+you\b|^(?:please\s+)?(?:summarize|open|show|tell|give|find|write|draft|explain|list|track|remind|create|help)\b|^(?:what|when|where|why|how)\b`)
 )
 
@@ -105,7 +105,7 @@ func evaluateCompanionDirectedSpeechGate(cfg companionConfig, session *store.Par
 	gate.SpeakerMatch = companionSpeakersMatch(gate.Speaker, gate.TargetSpeaker)
 	if isCompanionDirectAddress(latest.Text) {
 		gate.Decision = companionGateDecisionDirect
-		gate.Reason = "assistant_name_mentioned"
+		gate.Reason = "assistant_address_mentioned"
 		return gate
 	}
 	if gate.SpeakerMatch && isCompanionRequestWithoutDirectAddress(latest.Text) {
@@ -190,7 +190,7 @@ func isCompanionDirectAddress(raw string) bool {
 	if companionAddressLeadPattern.MatchString(text) || companionAddressCuePattern.MatchString(text) {
 		return true
 	}
-	return companionRequestPattern.MatchString(text) && strings.Contains(text, "tabura")
+	return companionRequestPattern.MatchString(text) && (strings.Contains(text, "computer") || strings.Contains(text, "sloppy"))
 }
 
 func isCompanionRequestWithoutDirectAddress(raw string) bool {

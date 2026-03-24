@@ -225,14 +225,14 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 		StartTS:     100,
 		EndTS:       101,
 		Speaker:     "Alice",
-		Text:        "Tabura, open the meeting transcript.",
+		Text:        "Computer, open the meeting transcript.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("AddParticipantSegment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(sess.ID, seg.ID, "segment_committed", `{"text":"Tabura, open the meeting transcript."}`); err != nil {
+	if err := app.store.AddParticipantEvent(sess.ID, seg.ID, "segment_committed", `{"text":"Computer, open the meeting transcript."}`); err != nil {
 		t.Fatalf("AddParticipantEvent segment_committed: %v", err)
 	}
 
@@ -247,8 +247,8 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 	if state.DirectedSpeechGate.Decision != companionGateDecisionDirect {
 		t.Fatalf("directed_speech_gate.decision = %q, want %q", state.DirectedSpeechGate.Decision, companionGateDecisionDirect)
 	}
-	if state.DirectedSpeechGate.Reason != "assistant_name_mentioned" {
-		t.Fatalf("directed_speech_gate.reason = %q, want assistant_name_mentioned", state.DirectedSpeechGate.Reason)
+	if state.DirectedSpeechGate.Reason != "assistant_address_mentioned" {
+		t.Fatalf("directed_speech_gate.reason = %q, want assistant_address_mentioned", state.DirectedSpeechGate.Reason)
 	}
 	if state.DirectedSpeechGate.SessionID != sess.ID {
 		t.Fatalf("directed_speech_gate.session_id = %q, want %q", state.DirectedSpeechGate.SessionID, sess.ID)
@@ -259,7 +259,7 @@ func TestProjectCompanionStateExposesDirectedSpeechGateMetadata(t *testing.T) {
 	if state.DirectedSpeechGate.LastEventType != "segment_committed" {
 		t.Fatalf("directed_speech_gate.last_event_type = %q, want segment_committed", state.DirectedSpeechGate.LastEventType)
 	}
-	if state.DirectedSpeechGate.EvaluatedText != "Tabura, open the meeting transcript." {
+	if state.DirectedSpeechGate.EvaluatedText != "Computer, open the meeting transcript." {
 		t.Fatalf("directed_speech_gate.evaluated_text = %q", state.DirectedSpeechGate.EvaluatedText)
 	}
 	if state.DirectedSpeechGate.Speaker != "Alice" {

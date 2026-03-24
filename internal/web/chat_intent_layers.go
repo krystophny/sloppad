@@ -152,7 +152,7 @@ Prefer case-insensitive filename search (for example -iname) and use single quot
 	if policy.RequiresExplicitAddress() {
 		prompt += `
 Meeting mode: include an "addressed" boolean on every JSON response indicating whether the utterance is directed at Tabura.
-If the user explicitly mentions "Tabura" or "assistant", set "addressed":true.
+If the user explicitly mentions "computer" or "sloppy", set "addressed":true.
 For meeting discussion not directed at Tabura, use {"addressed":false,"kind":"dialogue"}.
 For addressed commands/plans, keep the same response shape and add "addressed":true at the top level.`
 	}

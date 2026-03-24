@@ -263,14 +263,14 @@ func TestCompanionResponseTriggerExecutesAssistantTurn(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, tell me something helpful.",
+		Text:        "Computer, tell me something helpful.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, tell me something helpful."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, tell me something helpful."}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 
@@ -292,7 +292,7 @@ func TestCompanionResponseTriggerExecutesAssistantTurn(t *testing.T) {
 	if strings.TrimSpace(messages[0].Role) != "user" {
 		t.Fatalf("first message role = %q, want user", messages[0].Role)
 	}
-	if strings.TrimSpace(messages[0].ContentPlain) != "Tabura, tell me something helpful." {
+	if strings.TrimSpace(messages[0].ContentPlain) != "Computer, tell me something helpful." {
 		t.Fatalf("first message text = %q", messages[0].ContentPlain)
 	}
 	if strings.TrimSpace(messages[1].Role) != "assistant" {
@@ -344,14 +344,14 @@ func TestCompanionResponseTriggerExecutesTargetSpeakerFollowUp(t *testing.T) {
 		StartTS:     100,
 		EndTS:       101,
 		Speaker:     "Alice",
-		Text:        "Tabura, summarize the budget changes.",
+		Text:        "Computer, summarize the budget changes.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add initial participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, first.ID, "segment_committed", `{"text":"Tabura, summarize the budget changes."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, first.ID, "segment_committed", `{"text":"Computer, summarize the budget changes."}`); err != nil {
 		t.Fatalf("add initial committed event: %v", err)
 	}
 	followUp, err := app.store.AddParticipantSegment(store.ParticipantSegment{
@@ -418,14 +418,14 @@ func TestCompanionResponseTriggerSkipsWhenCompanionDisabled(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, tell me something helpful.",
+		Text:        "Computer, tell me something helpful.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, tell me something helpful."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, tell me something helpful."}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 
@@ -538,14 +538,14 @@ func TestCompanionResponseTriggerUsesSilentModeOutputQueue(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, tell me something helpful.",
+		Text:        "Computer, tell me something helpful.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, tell me something helpful."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, tell me something helpful."}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 
@@ -589,14 +589,14 @@ func TestCompanionResponseTriggerDoesNotDuplicateSegment(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, tell me something helpful.",
+		Text:        "Computer, tell me something helpful.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, tell me something helpful."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, tell me something helpful."}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 
@@ -645,14 +645,14 @@ func TestCompanionResponseTriggerInterruptsPendingTurn(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, summarize that.",
+		Text:        "Computer, summarize that.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add first participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, firstSeg.ID, "segment_committed", `{"text":"Tabura, summarize that."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, firstSeg.ID, "segment_committed", `{"text":"Computer, summarize that."}`); err != nil {
 		t.Fatalf("add first participant committed event: %v", err)
 	}
 
@@ -674,14 +674,14 @@ func TestCompanionResponseTriggerInterruptsPendingTurn(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     103,
 		EndTS:       104,
-		Text:        "Tabura, open the transcript.",
+		Text:        "Computer, open the transcript.",
 		CommittedAt: 105,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add second participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, secondSeg.ID, "segment_committed", `{"text":"Tabura, open the transcript."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, secondSeg.ID, "segment_committed", `{"text":"Computer, open the transcript."}`); err != nil {
 		t.Fatalf("add second participant committed event: %v", err)
 	}
 
@@ -696,7 +696,7 @@ func TestCompanionResponseTriggerInterruptsPendingTurn(t *testing.T) {
 	}
 	foundReplacement := false
 	for _, message := range messages {
-		if strings.TrimSpace(message.Role) == "user" && strings.TrimSpace(message.ContentPlain) == "Tabura, open the transcript." {
+		if strings.TrimSpace(message.Role) == "user" && strings.TrimSpace(message.ContentPlain) == "Computer, open the transcript." {
 			foundReplacement = true
 			break
 		}
@@ -801,14 +801,14 @@ func TestCompanionResponseTriggerIncludesProjectScopedCompanionContext(t *testin
 		SessionID:   participantSession.ID,
 		StartTS:     200,
 		EndTS:       201,
-		Text:        "Tabura, what changed in the budget review?",
+		Text:        "Computer, what changed in the budget review?",
 		CommittedAt: 202,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, what changed in the budget review?"}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, what changed in the budget review?"}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 
@@ -893,14 +893,14 @@ func TestCompanionResponseTriggerUsesWorkspaceDirForAppSession(t *testing.T) {
 		SessionID:   participantSession.ID,
 		StartTS:     100,
 		EndTS:       101,
-		Text:        "Tabura, tell me something helpful.",
+		Text:        "Computer, tell me something helpful.",
 		CommittedAt: 102,
 		Status:      "final",
 	})
 	if err != nil {
 		t.Fatalf("add participant segment: %v", err)
 	}
-	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Tabura, tell me something helpful."}`); err != nil {
+	if err := app.store.AddParticipantEvent(participantSession.ID, seg.ID, "segment_committed", `{"text":"Computer, tell me something helpful."}`); err != nil {
 		t.Fatalf("add participant committed event: %v", err)
 	}
 

@@ -13,7 +13,7 @@ func TestEvaluateCompanionInteractionPolicyRespondsToDirectAddress(t *testing.T)
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 1, SessionID: session.ID, Text: "Tabura, draft the summary.", CommittedAt: 100},
+		{ID: 1, SessionID: session.ID, Text: "Computer, draft the summary.", CommittedAt: 100},
 	}
 
 	policy := evaluateCompanionInteractionPolicy(cfg, session, segments, nil)
@@ -32,7 +32,26 @@ func TestEvaluateCompanionInteractionPolicySuppressesNoise(t *testing.T) {
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 2, SessionID: session.ID, Text: "Tabura, okay", CommittedAt: 100},
+		{ID: 2, SessionID: session.ID, Text: "Computer, okay", CommittedAt: 100},
+	}
+
+	policy := evaluateCompanionInteractionPolicy(cfg, session, segments, nil)
+	if policy.Decision != companionInteractionDecisionSuppressed {
+		t.Fatalf("decision = %q, want %q", policy.Decision, companionInteractionDecisionSuppressed)
+	}
+	if policy.Reason != "noise_suppressed" {
+		t.Fatalf("reason = %q, want noise_suppressed", policy.Reason)
+	}
+}
+
+func TestEvaluateCompanionInteractionPolicySuppressesNoiseForSloppyAlias(t *testing.T) {
+	cfg := defaultCompanionConfig()
+	cfg.CompanionEnabled = true
+	cfg.DirectedSpeechGateEnabled = true
+
+	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
+	segments := []store.ParticipantSegment{
+		{ID: 2, SessionID: session.ID, Text: "Sloppy, okay", CommittedAt: 100},
 	}
 
 	policy := evaluateCompanionInteractionPolicy(cfg, session, segments, nil)
@@ -51,7 +70,7 @@ func TestEvaluateCompanionInteractionPolicyAppliesCooldown(t *testing.T) {
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 3, SessionID: session.ID, Text: "Tabura, summarize that.", CommittedAt: 203},
+		{ID: 3, SessionID: session.ID, Text: "Computer, summarize that.", CommittedAt: 203},
 	}
 	events := []store.ParticipantEvent{
 		{SessionID: session.ID, SegmentID: 1, EventType: "assistant_triggered", CreatedAt: 195},
@@ -74,8 +93,8 @@ func TestEvaluateCompanionInteractionPolicyInterruptsPendingResponse(t *testing.
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 1, SessionID: session.ID, Text: "Tabura, summarize that.", CommittedAt: 100},
-		{ID: 2, SessionID: session.ID, Text: "Tabura, stop and open the transcript.", CommittedAt: 102},
+		{ID: 1, SessionID: session.ID, Text: "Computer, summarize that.", CommittedAt: 100},
+		{ID: 2, SessionID: session.ID, Text: "Computer, stop and open the transcript.", CommittedAt: 102},
 	}
 	events := []store.ParticipantEvent{
 		{SessionID: session.ID, SegmentID: 1, EventType: "assistant_triggered", CreatedAt: 101},
@@ -97,7 +116,7 @@ func TestEvaluateCompanionInteractionPolicyAllowsTargetSpeakerFollowUp(t *testin
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 100},
+		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Computer, summarize that.", CommittedAt: 100},
 		{ID: 2, SessionID: session.ID, Speaker: "Alice", Text: "Can you include the budget appendix?", CommittedAt: 102},
 	}
 
@@ -123,7 +142,7 @@ func TestEvaluateCompanionInteractionPolicySuppressesDifferentSpeakerOverlap(t *
 
 	session := &store.ParticipantSession{ID: "psess-1", WorkspacePath: "proj"}
 	segments := []store.ParticipantSegment{
-		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 100},
+		{ID: 1, SessionID: session.ID, Speaker: "Alice", Text: "Computer, summarize that.", CommittedAt: 100},
 		{ID: 2, SessionID: session.ID, Speaker: "Bob", Text: "Can you include the budget appendix?", CommittedAt: 102},
 	}
 	events := []store.ParticipantEvent{

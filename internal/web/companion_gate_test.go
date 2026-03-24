@@ -14,16 +14,27 @@ func TestEvaluateCompanionDirectedSpeechGate(t *testing.T) {
 	events := []store.ParticipantEvent{{EventType: "segment_committed", CreatedAt: 130}}
 
 	t.Run("direct address", func(t *testing.T) {
-		segments := []store.ParticipantSegment{{ID: 7, Text: "Tabura, summarize the action items.", CommittedAt: 130}}
+		segments := []store.ParticipantSegment{{ID: 7, Text: "Computer, summarize the action items.", CommittedAt: 130}}
 		gate := evaluateCompanionDirectedSpeechGate(cfg, session, segments, events)
 		if gate.Decision != companionGateDecisionDirect {
 			t.Fatalf("decision = %q, want %q", gate.Decision, companionGateDecisionDirect)
 		}
-		if gate.Reason != "assistant_name_mentioned" {
-			t.Fatalf("reason = %q, want assistant_name_mentioned", gate.Reason)
+		if gate.Reason != "assistant_address_mentioned" {
+			t.Fatalf("reason = %q, want assistant_address_mentioned", gate.Reason)
 		}
 		if gate.SegmentID != 7 {
 			t.Fatalf("segment_id = %d, want 7", gate.SegmentID)
+		}
+	})
+
+	t.Run("sloppy alias", func(t *testing.T) {
+		segments := []store.ParticipantSegment{{ID: 12, Text: "Sloppy, summarize the action items.", CommittedAt: 130}}
+		gate := evaluateCompanionDirectedSpeechGate(cfg, session, segments, events)
+		if gate.Decision != companionGateDecisionDirect {
+			t.Fatalf("decision = %q, want %q", gate.Decision, companionGateDecisionDirect)
+		}
+		if gate.Reason != "assistant_address_mentioned" {
+			t.Fatalf("reason = %q, want assistant_address_mentioned", gate.Reason)
 		}
 	})
 
@@ -49,9 +60,9 @@ func TestEvaluateCompanionDirectedSpeechGate(t *testing.T) {
 		}
 	})
 
-	t.Run("target speaker follow up", func(t *testing.T) {
+		t.Run("target speaker follow up", func(t *testing.T) {
 		segments := []store.ParticipantSegment{
-			{ID: 10, Speaker: "Alice", Text: "Tabura, summarize that.", CommittedAt: 120},
+			{ID: 10, Speaker: "Alice", Text: "Computer, summarize that.", CommittedAt: 120},
 			{ID: 11, Speaker: "Alice", Text: "Can you send it to the team?", CommittedAt: 130},
 		}
 		gate := evaluateCompanionDirectedSpeechGate(cfg, session, segments, events)

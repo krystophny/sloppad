@@ -289,6 +289,7 @@ test('meeting idle surface tracks runtime state and hides behind open artifacts'
   });
 
   await waitForMeetingSurface(page, 'idle', 'robot');
+  await expect(page.locator('#companion-idle-surface')).toContainText('Sloppy');
 
   for (const nextState of ['listening', 'thinking', 'talking', 'error'] as const) {
     await setHarnessMeetingState(page, {
