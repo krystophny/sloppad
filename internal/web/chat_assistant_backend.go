@@ -11,6 +11,7 @@ type assistantTurnRequest struct {
 	sessionID       string
 	session         store.ChatSession
 	messages        []store.ChatMessage
+	canvasCtx       *canvasContext
 	userText        string
 	promptText      string
 	cursorCtx       *chatCursorContext

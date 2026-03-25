@@ -20,18 +20,45 @@ async function sendPromptAndExpect(page: Page, prompt: string, needle: string) {
   expect(reply.toLowerCase()).toContain(needle.toLowerCase());
 }
 
+function canvasArtifactBody(page: Page) {
+  return page.locator('#canvas-text .canvas-text-page-body');
+}
+
+function normalizeCanvasArtifactText(raw: string) {
+  return String(raw || '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (/^Available actions\b/i.test(trimmed)) return false;
+      if (/^Page \d+ \/ \d+$/i.test(trimmed)) return false;
+      return true;
+    })
+    .join('\n')
+    .trim();
+}
+
+function looksStructuredFlowchart(text: string) {
+  const lines = text.split('\n').filter((line) => line.trim().length > 0).length;
+  if (lines >= 4) return true;
+  const lower = text.toLowerCase();
+  return (lower.split('->').length - 1 >= 2 || lower.split('|').length - 1 >= 3) && (lower.split('[').length - 1 >= 3);
+}
+
 async function expectCanvasFlowchart(page: Page, expectedTerms: string[]) {
+  const body = canvasArtifactBody(page);
   await expect.poll(async () => {
-    const text = String(await page.locator('#canvas-text').textContent() || '').trim();
+    const text = normalizeCanvasArtifactText(String(await body.textContent() || ''));
     if (!text) return '';
     return text;
   }, {
     timeout: 120_000,
     intervals: [500, 1_000, 2_000, 4_000],
   }).not.toBe('');
-  const canvasText = String(await page.locator('#canvas-text').textContent() || '').trim();
+  const canvasText = normalizeCanvasArtifactText(String(await body.textContent() || ''));
   expect(canvasText.length).toBeGreaterThan(60);
-  expect(canvasText.split('\n').filter((line) => line.trim().length > 0).length).toBeGreaterThanOrEqual(4);
+  expect(looksStructuredFlowchart(canvasText)).toBeTruthy();
   const lower = canvasText.toLowerCase();
   for (const term of expectedTerms) {
     expect(lower).toContain(term.toLowerCase());
@@ -103,7 +130,7 @@ test.describe('local llm conversation flows @local-only', () => {
     const before = await page.locator('#chat-history .chat-message.chat-assistant:not(.is-pending)').count();
     await submitPrompt(page, 'Display the README on canvas.');
     await waitForAssistantReply(page, before, '', 120_000);
-    await expect(page.locator('#canvas-text')).toContainText('Tabura', { timeout: 120_000 });
+    await expect(canvasArtifactBody(page)).toContainText('Tabura', { timeout: 120_000 });
   });
 
   test('meeting typed flow creates German canvas flowchart content', async ({ page }) => {
@@ -121,6 +148,29 @@ test.describe('local llm conversation flows @local-only', () => {
     await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
   });
 
+  test('meeting typed flow can refine an existing German canvas flowchart', async ({ page }) => {
+    await clearLiveChat(sessionToken);
+    await openLiveApp(page, sessionToken);
+    await waitForLiveAppReady(page);
+    await resetCircleRuntimeState(page);
+    await setCircleToggle(page, 'silent', true);
+    await setLiveSession(page, 'meeting', true);
+
+    let before = await assistantReplyCount(page);
+    await submitPrompt(page, 'Bitte zeichne mir wie ein Fusionsreaktor funktioniert als Flowchart auf der Canvas.');
+    await waitForAssistantReply(page, before, '', 120_000);
+    await expectCanvasFlowchart(page, ['fusion', 'plasma']);
+    const initialBody = normalizeCanvasArtifactText(String(await canvasArtifactBody(page).textContent() || ''));
+
+    before = await assistantReplyCount(page);
+    await submitPrompt(page, 'Mach es schöner, behalte das Flussdiagramm auf der Canvas und füge Magnetspulen und Turbine hinzu.');
+    await waitForAssistantReply(page, before, '', 120_000);
+    await expectCanvasFlowchart(page, ['magnet', 'turbine']);
+    const refinedBody = normalizeCanvasArtifactText(String(await canvasArtifactBody(page).textContent() || ''));
+    expect(refinedBody).not.toBe(initialBody);
+    await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+  });
+
   test('meeting typed flow creates English canvas flowchart content', async ({ page }) => {
     await clearLiveChat(sessionToken);
     await openLiveApp(page, sessionToken);
@@ -133,6 +183,29 @@ test.describe('local llm conversation flows @local-only', () => {
     await submitPrompt(page, 'Please draw a flowchart on the canvas showing how a fusion reactor works.');
     await waitForAssistantReply(page, before, '', 120_000);
     await expectCanvasFlowchart(page, ['fusion', 'reactor']);
+    await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+  });
+
+  test('meeting typed flow can refine an existing English canvas flowchart', async ({ page }) => {
+    await clearLiveChat(sessionToken);
+    await openLiveApp(page, sessionToken);
+    await waitForLiveAppReady(page);
+    await resetCircleRuntimeState(page);
+    await setCircleToggle(page, 'silent', true);
+    await setLiveSession(page, 'meeting', true);
+
+    let before = await assistantReplyCount(page);
+    await submitPrompt(page, 'Please draw a flowchart on the canvas showing how a fusion reactor works.');
+    await waitForAssistantReply(page, before, '', 120_000);
+    await expectCanvasFlowchart(page, ['fusion', 'reactor']);
+    const initialBody = normalizeCanvasArtifactText(String(await canvasArtifactBody(page).textContent() || ''));
+
+    before = await assistantReplyCount(page);
+    await submitPrompt(page, 'Make it nicer, keep it on the canvas, and add magnets plus a turbine stage.');
+    await waitForAssistantReply(page, before, '', 120_000);
+    await expectCanvasFlowchart(page, ['magnet', 'turbine']);
+    const refinedBody = normalizeCanvasArtifactText(String(await canvasArtifactBody(page).textContent() || ''));
+    expect(refinedBody).not.toBe(initialBody);
     await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
   });
 

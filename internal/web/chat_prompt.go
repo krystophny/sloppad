@@ -101,18 +101,73 @@ func (a *App) resolveCanvasContext(workspacePath string) *canvasContext {
 	if active == nil {
 		return nil
 	}
+	artifactID := parseCanvasArtifactID(status["active_artifact_id"])
 	title := strings.TrimSpace(fmt.Sprint(active["title"]))
 	if title == "<nil>" {
 		title = ""
 	}
 	kind := resolveCanvasArtifactKind(active)
-	return &canvasContext{HasArtifact: true, ArtifactTitle: title, ArtifactKind: kind}
+	text := strings.TrimSpace(fmt.Sprint(active["text"]))
+	if text == "<nil>" {
+		text = ""
+	}
+	if text == "" && artifactID > 0 {
+		if artifact, err := a.mcpToolsCall(port, "artifact_get", map[string]interface{}{"artifact_id": artifactID}); err == nil {
+			text = strings.TrimSpace(fmt.Sprint(artifact["content_text"]))
+			if text == "<nil>" {
+				text = ""
+			}
+		}
+	}
+	return &canvasContext{
+		HasArtifact:   true,
+		ArtifactID:    artifactID,
+		ArtifactTitle: title,
+		ArtifactKind:  kind,
+		ArtifactText:  limitCanvasContextText(text),
+	}
 }
 
 type canvasContext struct {
 	HasArtifact   bool
+	ArtifactID    int64
 	ArtifactTitle string
 	ArtifactKind  string
+	ArtifactText  string
+}
+
+const canvasContextTextLimit = 2400
+
+func parseCanvasArtifactID(raw any) int64 {
+	switch v := raw.(type) {
+	case int64:
+		return v
+	case int:
+		return int64(v)
+	case float64:
+		return int64(v)
+	case float32:
+		return int64(v)
+	default:
+		text := strings.TrimSpace(fmt.Sprint(raw))
+		if text == "" || text == "<nil>" {
+			return 0
+		}
+		var id int64
+		fmt.Sscanf(text, "%d", &id)
+		return id
+	}
+}
+
+func limitCanvasContextText(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	if len(text) <= canvasContextTextLimit {
+		return text
+	}
+	return strings.TrimSpace(text[:canvasContextTextLimit]) + "\n..."
 }
 
 func resolveCanvasArtifactKind(active map[string]interface{}) string {

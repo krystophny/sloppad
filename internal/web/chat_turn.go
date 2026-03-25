@@ -62,6 +62,7 @@ func (a *App) runAssistantTurn(sessionID string, turn dequeuedTurn) {
 		sessionID:       sessionID,
 		session:         session,
 		messages:        messages,
+		canvasCtx:       a.resolveCanvasContext(session.WorkspacePath),
 		userText:        userText,
 		promptText:      promptText,
 		cursorCtx:       cursorCtx,

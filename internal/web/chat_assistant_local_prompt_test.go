@@ -17,13 +17,14 @@ func TestBuildLeanLocalAssistantPromptIsCompact(t *testing.T) {
 	prompt := buildLeanLocalAssistantPrompt(
 		workspace,
 		messages,
-		&canvasContext{HasArtifact: true, ArtifactTitle: "notes.md", ArtifactKind: "markdown"},
+		&canvasContext{HasArtifact: true, ArtifactTitle: "notes.md", ArtifactKind: "markdown", ArtifactText: "line one\nline two"},
 		&companionPromptContext{SummaryText: "Planning next steps."},
 		turnOutputModeVoice,
 	)
 	for _, snippet := range []string{
 		"Workspace: Tabura (/tmp/tabura)",
 		"Canvas: notes.md [markdown]",
+		"Canvas content:\nline one\nline two",
 		"## Companion Context",
 		"- Summary: Planning next steps.",
 		"Reply briefly for speech in 1-3 short sentences. Do not use markdown unless the user explicitly asks for it.",
@@ -142,5 +143,23 @@ func TestLocalAssistantVisibleStreamDeltaPreservesSpaces(t *testing.T) {
 	}
 	if got != "Yes, everything is fine!" {
 		t.Fatalf("streamed text = %q", got)
+	}
+}
+
+func TestBuildLocalAssistantCanvasGenerationPromptKeepsStructuredFollowUp(t *testing.T) {
+	prompt := buildLocalAssistantCanvasGenerationPrompt(
+		"Mach es schöner und füge eine Turbine hinzu.",
+		"[Fusion Reactor]\n  |\n[Plasma]\n  |\n[Turbine]",
+		"",
+	)
+	if !strings.Contains(prompt, "The current canvas already contains a structured diagram. Keep the revised result as a structured multi-line diagram.") {
+		t.Fatalf("canvas prompt missing structured follow-up guidance:\n%s", prompt)
+	}
+}
+
+func TestRecoverLocalAssistantCanvasTextFromMalformedToolOutputRejectsNonCanvasTools(t *testing.T) {
+	raw := `{"tool_calls":[{"name":"workspace_read","arguments":{"content":"not canvas"}}]}`
+	if got, ok := recoverLocalAssistantCanvasTextFromMalformedToolOutput(raw); ok || got != "" {
+		t.Fatalf("recoverLocalAssistantCanvasTextFromMalformedToolOutput() = %q, %v; want empty false", got, ok)
 	}
 }

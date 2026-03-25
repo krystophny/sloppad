@@ -20,7 +20,7 @@ func localAssistantCanvasDiagramRequiredPrompt() string {
 	return "Reply with only a multi-line text diagram for the canvas. Do not return a title alone. Use at least 6 short non-empty lines and include connectors such as |, ->, or boxed steps."
 }
 
-func buildLocalAssistantCanvasGenerationPrompt(userText string, reasoningHint string) string {
+func buildLocalAssistantCanvasGenerationPrompt(userText string, promptContext string, reasoningHint string) string {
 	lines := []string{
 		"You are Tabura, the assistant in the current workspace.",
 		"If the user says Tabura, Sloppy, or computer, they are addressing you, not asking about those words.",
@@ -37,6 +37,12 @@ func buildLocalAssistantCanvasGenerationPrompt(userText string, reasoningHint st
 			"Use at least 6 short non-empty lines.",
 			"Include connectors such as ->, |, or boxed steps.",
 			"Keep labels short and concrete.",
+		)
+	}
+	if localAssistantCanvasHasStructuredDiagramText(promptContext) {
+		lines = append(lines,
+			"The current canvas already contains a structured diagram. Keep the revised result as a structured multi-line diagram.",
+			"Preserve the main subject and the key existing labels unless the user explicitly asks to replace them.",
 		)
 	}
 	if strings.TrimSpace(reasoningHint) != "" {
@@ -66,8 +72,8 @@ func localAssistantCanvasNeedsStructuredDiagram(text string) bool {
 		return false
 	}
 	return containsAnyLocalAssistantKeyword(lower,
-		"flowchart", "diagram", "schematic", "sketch", "draw", "draw ",
-		"flussdiagramm", "diagramm", "schema", "schaubild", "skizze", "zeichne",
+		"flowchart", "diagram", "block diagram", "process map", "workflow", "pipeline", "state machine", "architecture", "schematic", "sketch", "chart", "draw", "draw ", "overview",
+		"flussdiagramm", "diagramm", "blockdiagramm", "ablaufdiagramm", "prozess", "prozessablauf", "workflow", "zustandsdiagramm", "architektur", "schema", "schaubild", "skizze", "zeichne", "übersicht", "uebersicht",
 	)
 }
 
@@ -79,19 +85,20 @@ func localAssistantCanvasHasStructuredDiagramText(text string) bool {
 		}
 		lines++
 	}
-	if lines < 4 {
-		return false
-	}
 	lower := strings.ToLower(text)
-	return strings.Contains(lower, "->") || strings.Contains(lower, "|") || strings.Contains(lower, "[")
+	hasConnectors := strings.Contains(lower, "->") || strings.Contains(lower, "|") || strings.Contains(lower, "[")
+	if lines >= 4 && hasConnectors {
+		return true
+	}
+	return (strings.Count(lower, "->") >= 2 || strings.Count(lower, "|") >= 3) && strings.Count(lower, "[") >= 3
 }
 
-func localAssistantCanvasRenderText(toolText string, text string) string {
+func localAssistantCanvasRenderText(structured bool, text string) string {
 	clean := strings.TrimSpace(text)
 	if clean == "" {
 		return ""
 	}
-	if !localAssistantCanvasNeedsStructuredDiagram(toolText) {
+	if !structured && !localAssistantCanvasHasStructuredDiagramText(clean) {
 		return clean
 	}
 	if strings.HasPrefix(clean, "```") {
@@ -102,6 +109,12 @@ func localAssistantCanvasRenderText(toolText string, text string) string {
 
 func recoverLocalAssistantCanvasTextFromMalformedToolOutput(raw string) (string, bool) {
 	clean := strings.TrimSpace(stripCodeFence(raw))
+	lower := strings.ToLower(clean)
+	if !strings.Contains(lower, "canvas_write_text") &&
+		!strings.Contains(lower, "canvas_artifact_show") &&
+		!strings.Contains(lower, "mcp__canvas_artifact_show") {
+		return "", false
+	}
 	for _, field := range []string{"content", "markdown_or_text", "text", "body"} {
 		value, ok := extractLocalAssistantJSONStringField(clean, field)
 		if !ok {
@@ -114,6 +127,15 @@ func recoverLocalAssistantCanvasTextFromMalformedToolOutput(raw string) (string,
 		return value, true
 	}
 	return "", false
+}
+
+func localAssistantCanvasToolNameAllowed(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "canvas_write_text", "canvas_artifact_show", "mcp__canvas_artifact_show":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractLocalAssistantJSONStringField(raw string, field string) (string, bool) {
@@ -184,6 +206,9 @@ func stripLocalAssistantThinkingPreamble(raw string) string {
 
 func localAssistantCanvasTextFromToolCalls(calls []localAssistantToolCall) (string, bool) {
 	for _, call := range calls {
+		if !localAssistantCanvasToolNameAllowed(call.Name) {
+			continue
+		}
 		for _, key := range []string{"content", "markdown_or_text", "text", "body"} {
 			value := strings.TrimSpace(fmt.Sprint(call.Arguments[key]))
 			if value == "<nil>" {
@@ -226,24 +251,24 @@ func (a *App) renderLocalAssistantCanvasText(ctx context.Context, state *localAs
 	return "Shown on canvas.", nil
 }
 
-func (a *App) handleLocalAssistantGeneratedCanvasText(ctx context.Context, state *localAssistantTurnState, toolText string, text string, retries int) (string, string, error) {
+func (a *App) handleLocalAssistantGeneratedCanvasText(ctx context.Context, state *localAssistantTurnState, structured bool, text string, retries int) (string, string, error) {
 	if localAssistantLooksLikeCanvasPlanningText(text) {
 		if retries >= 1 {
 			return "", "", errors.New("local assistant answered with a canvas plan instead of canvas content")
 		}
 		return "", localAssistantCanvasContentRequiredPrompt(), nil
 	}
-	if localAssistantCanvasNeedsStructuredDiagram(toolText) && !localAssistantCanvasHasStructuredDiagramText(text) {
+	if structured && !localAssistantCanvasHasStructuredDiagramText(text) {
 		if retries >= 1 {
 			return "", "", errors.New("local assistant answered without a usable multi-line canvas diagram")
 		}
 		return "", localAssistantCanvasDiagramRequiredPrompt(), nil
 	}
-	confirmation, err := a.renderLocalAssistantCanvasText(ctx, state, localAssistantCanvasRenderText(toolText, text))
+	confirmation, err := a.renderLocalAssistantCanvasText(ctx, state, localAssistantCanvasRenderText(structured, text))
 	return confirmation, "", err
 }
 
-func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *assistantTurnRequest, visual *chatVisualAttachment, state localAssistantTurnState, userText string) (string, error) {
+func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *assistantTurnRequest, visual *chatVisualAttachment, state localAssistantTurnState, userText string, promptContext string) (string, error) {
 	if a == nil || req == nil {
 		return "", errors.New("assistant turn request is required")
 	}
@@ -251,14 +276,19 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 	if promptText == "" {
 		return "", errors.New("canvas request is empty")
 	}
+	userContentText := strings.TrimSpace(promptContext)
+	if userContentText == "" {
+		userContentText = promptText
+	}
+	requiresStructured := localAssistantCanvasNeedsStructuredDiagram(promptText) || localAssistantCanvasHasStructuredDiagramText(userContentText)
 	conversation := []map[string]any{
 		{
 			"role":    "system",
-			"content": buildLocalAssistantCanvasGenerationPrompt(promptText, localAssistantReasoningHint(req)),
+			"content": buildLocalAssistantCanvasGenerationPrompt(promptText, userContentText, localAssistantReasoningHint(req)),
 		},
 		{
 			"role":    "user",
-			"content": buildLocalAssistantUserContent(promptText, visual),
+			"content": buildLocalAssistantUserContent(userContentText, visual),
 		},
 	}
 	enableThinking := localAssistantThinkingEnabled(req)
@@ -278,7 +308,7 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 		decision, err := parseLocalAssistantDecision(message)
 		if err == nil {
 			if recovered, ok := localAssistantCanvasTextFromToolCalls(decision.ToolCalls); ok {
-				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, promptText, recovered, retries)
+				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, recovered, retries)
 				if renderErr != nil {
 					return "", renderErr
 				}
@@ -293,7 +323,7 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 				continue
 			}
 			if text := strings.TrimSpace(decision.FinalText); text != "" {
-				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, promptText, text, retries)
+				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, text, retries)
 				if renderErr != nil {
 					return "", renderErr
 				}
@@ -309,7 +339,7 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 			}
 		}
 		if recovered, ok := recoverLocalAssistantCanvasTextFromMalformedToolOutput(message.Content); ok {
-			confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, promptText, recovered, retries)
+			confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, recovered, retries)
 			if renderErr != nil {
 				return "", renderErr
 			}

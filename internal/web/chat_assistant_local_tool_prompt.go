@@ -22,6 +22,31 @@ func localAssistantToolUserPrompt(req *assistantTurnRequest, prompt string) stri
 	return strings.TrimSpace(prompt)
 }
 
+func buildLocalAssistantCanvasPromptContext(req *assistantTurnRequest, fallbackPrompt string) string {
+	sections := make([]string, 0, 3)
+	if req != nil && req.canvasCtx != nil {
+		if canvasText := strings.TrimSpace(req.canvasCtx.ArtifactText); canvasText != "" {
+			sections = append(sections, "Current canvas content:\n"+canvasText)
+		}
+	}
+	if req != nil {
+		if history := buildLocalAssistantToolHistoryPrompt(req.messages); history != "" {
+			sections = append(sections, "Recent conversation:\n"+history)
+		}
+		current := strings.TrimSpace(normalizeLocalAssistantAddress(req.userText))
+		if current == "" {
+			current = strings.TrimSpace(normalizeLocalAssistantAddress(latestUserMessage(req.messages)))
+		}
+		if current != "" {
+			sections = append(sections, "Current request:\n"+current)
+		}
+	}
+	if len(sections) == 0 {
+		return strings.TrimSpace(fallbackPrompt)
+	}
+	return strings.Join(sections, "\n\n")
+}
+
 func buildLocalAssistantToolHistoryPrompt(messages []store.ChatMessage) string {
 	recent := collectLeanLocalAssistantHistory(messages)
 	if len(recent) == 0 {
@@ -69,13 +94,16 @@ func localAssistantNeedsFullPromptContext(text string) bool {
 		lower == "oeffne es" {
 		return true
 	}
+	if containsAnyLocalAssistantKeyword(lower,
+		" it", " them", " this", " that", " there", " here",
+		" es", " sie", " dort", " hier",
+	) {
+		return true
+	}
 	if len(words) > 4 {
 		return false
 	}
-	return containsAnyLocalAssistantKeyword(lower,
-		" it", " them", " this", " that", " there", " here",
-		" es", " sie", " dort", " hier",
-	)
+	return false
 }
 
 func localAssistantInitialToolMaxTokens(family localAssistantToolFamily) int {

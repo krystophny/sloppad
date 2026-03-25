@@ -85,6 +85,11 @@ func appendLeanLocalAssistantCanvas(b *strings.Builder, canvas *canvasContext) {
 	default:
 		fmt.Fprintf(b, "Canvas kind: %s\n", kind)
 	}
+	if body := strings.TrimSpace(canvas.ArtifactText); body != "" {
+		b.WriteString("Canvas content:\n")
+		b.WriteString(body)
+		b.WriteByte('\n')
+	}
 }
 
 func appendLeanLocalAssistantCompanion(b *strings.Builder, companion *companionPromptContext) {

@@ -345,7 +345,7 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		}
 	}
 	if catalog.RenderGeneratedText {
-		return a.runLocalAssistantGeneratedCanvasTurn(ctx, req, visual, state, toolUserPrompt)
+		return a.runLocalAssistantGeneratedCanvasTurn(ctx, req, visual, state, toolUserPrompt, buildLocalAssistantCanvasPromptContext(req, prompt))
 	}
 	userPrompt := strings.TrimSpace(prompt)
 	if family != localAssistantToolFamilyNone {
@@ -418,7 +418,7 @@ func (a *App) runLocalAssistantToolLoop(ctx context.Context, req *assistantTurnR
 		}
 		if text := strings.TrimSpace(decision.FinalText); text != "" {
 			if catalog.RenderGeneratedText && !toolExecuted {
-				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, toolText, text, toolPlanRetries)
+				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, localAssistantCanvasNeedsStructuredDiagram(toolText), text, toolPlanRetries)
 				if renderErr != nil {
 					return "", renderErr
 				}

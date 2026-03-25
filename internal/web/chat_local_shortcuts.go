@@ -76,8 +76,8 @@ func selectLocalAssistantToolFamily(text string) localAssistantToolFamily {
 		"canvas", "draw ", "render ", "display ", "show ", "open ",
 		"zeichne", "zeige", "öffne", "oeffne", "darstell", "rendere", "skizziere",
 	) && containsAnyLocalAssistantKeyword(lower,
-		"canvas", "artifact", "diagram", "flowchart", "schematic", "readme", "file", "document", "pdf", "image", "text",
-		"diagramm", "flussdiagramm", "schema", "schaubild", "datei", "dokument", "bild", "skizze", "schematik",
+		"canvas", "artifact", "diagram", "flowchart", "block diagram", "process map", "workflow", "state machine", "architecture", "schematic", "readme", "file", "document", "pdf", "image", "text", "chart", "overview",
+		"diagramm", "flussdiagramm", "blockdiagramm", "ablaufdiagramm", "prozess", "workflow", "zustandsdiagramm", "architektur", "schema", "schaubild", "datei", "dokument", "bild", "skizze", "schematik", "übersicht", "uebersicht",
 	):
 		return localAssistantToolFamilyCanvas
 	case containsAnyLocalAssistantKeyword(lower,
