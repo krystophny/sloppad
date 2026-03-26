@@ -128,16 +128,7 @@ export function setPrReviewDrawerOpen(open) {
 }
 
 export function setFileSidebarAvailability() {
-  const enabled = state.prReviewMode
-    || Boolean(state.activeWorkspaceId)
-    || state.liveSessionActive
-    || state.liveSessionMode === LIVE_SESSION_MODE_DIALOGUE
-    || state.liveSessionMode === LIVE_SESSION_MODE_MEETING
-    || state.itemSidebarItems.length > 0;
-  document.body.classList.toggle('file-sidebar-enabled', enabled);
-  if (!enabled) {
-    setPrReviewDrawerOpen(false);
-  }
+  document.body.classList.toggle('file-sidebar-enabled', true);
 }
 
 export function normalizeWorkspaceBrowserPath(rawPath) {
