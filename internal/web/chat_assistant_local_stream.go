@@ -261,7 +261,7 @@ func (a *App) requestLocalAssistantCompletionWithConfig(ctx context.Context, mes
 		}
 		message = msg
 	}
-	if cacheKey != "" {
+	if cacheKey != "" && (strings.TrimSpace(message.Content) != "" || len(message.ToolCalls) > 0) {
 		storeMessageInCache(a.llmCache, cacheKey, message, a.localAssistantLLMModel())
 	}
 	return message, nil

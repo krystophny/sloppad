@@ -136,7 +136,8 @@ func (c *Cache) Store(key, content string, toolCalls []ToolCall, finishReason, m
 		 VALUES (?, ?, ?, ?, ?, 0, ?, 0, 0)
 		 ON CONFLICT(cache_key) DO UPDATE SET
 		   content=excluded.content, tool_calls_json=excluded.tool_calls_json,
-		   finish_reason=excluded.finish_reason, model=excluded.model, invalidated=0`,
+		   finish_reason=excluded.finish_reason, model=excluded.model,
+		   hit_count=llm_cache.hit_count, invalidated=0`,
 		key, content, string(tcJSON), finishReason, model, now,
 	)
 	if err != nil {
@@ -194,7 +195,9 @@ func (c *Cache) InvalidateRecent(n int) (int, error) {
 			c.entries.Delete(key)
 			return true
 		})
-		c.loadAll()
+		if err := c.loadAll(); err != nil {
+			return int(affected), err
+		}
 	}
 	return int(affected), nil
 }
@@ -246,7 +249,7 @@ const cleanupMaxAgeDays = 90
 
 func (c *Cache) cleanup() {
 	cutoff := time.Now().AddDate(0, 0, -cleanupMaxAgeDays).Unix()
-	c.db.Exec(`DELETE FROM llm_cache WHERE created_at < ? OR invalidated=1`, cutoff)
+	c.db.Exec(`DELETE FROM llm_cache WHERE created_at < ?`, cutoff)
 }
 
 func (c *Cache) drainHits() {
