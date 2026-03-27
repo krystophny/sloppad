@@ -548,7 +548,7 @@ var MCPTools = []Tool{
 	},
 	{
 		Name:        "mail_message_list",
-		Description: "List messages from a mail account with mailbox filters and optional paging.",
+		Description: "List messages from a mail account, newest first, with mailbox filters and paging. Returns up to 50 messages per page (default 20). Use next_page_token to fetch more.",
 		Required:    []string{"account_id"},
 		Properties: map[string]ToolProperty{
 			"account_id": {

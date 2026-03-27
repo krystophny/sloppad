@@ -87,11 +87,18 @@ func (s *Server) mailMessageList(args map[string]interface{}) (map[string]interf
 	if err != nil {
 		return nil, err
 	}
+	if opts.MaxResults <= 0 || opts.MaxResults > 50 {
+		opts.MaxResults = 20
+	}
 	ids, nextPageToken, err := listMailMessageIDs(context.Background(), provider, opts, pageToken)
 	if err != nil {
 		return nil, err
 	}
-	messages, err := provider.GetMessages(context.Background(), ids, "full")
+	format := "metadata"
+	if len(ids) <= 10 {
+		format = "full"
+	}
+	messages, err := provider.GetMessages(context.Background(), ids, format)
 	if err != nil {
 		return nil, err
 	}
@@ -610,16 +617,16 @@ func mailSearchOptionsFromArgs(args map[string]interface{}) (email.SearchOptions
 }
 
 func listMailMessageIDs(ctx context.Context, provider email.EmailProvider, opts email.SearchOptions, pageToken string) ([]string, string, error) {
-	if pageToken != "" {
-		pager, ok := provider.(email.MessagePageProvider)
-		if !ok {
-			return nil, "", fmt.Errorf("page_token is not supported for this provider")
-		}
+	pager, ok := provider.(email.MessagePageProvider)
+	if ok {
 		page, err := pager.ListMessagesPage(ctx, opts, pageToken)
 		if err != nil {
 			return nil, "", err
 		}
 		return page.IDs, strings.TrimSpace(page.NextPageToken), nil
+	}
+	if pageToken != "" {
+		return nil, "", fmt.Errorf("page_token is not supported for this provider")
 	}
 	ids, err := provider.ListMessages(ctx, opts)
 	if err != nil {
