@@ -152,8 +152,26 @@ func resolveCanvasFileQuery(rootAbs, raw string) (string, bool) {
 		return "", false
 	}
 	normalizedQuery := strings.ToLower(filepath.ToSlash(query))
-	bestExact := ""
-	bestContains := ""
+	type candidate struct {
+		path string
+		rel  string
+	}
+	bestExact := candidate{}
+	bestContains := candidate{}
+	betterCandidate := func(current candidate, next candidate) bool {
+		if current.path == "" {
+			return true
+		}
+		currentDepth := strings.Count(current.rel, "/")
+		nextDepth := strings.Count(next.rel, "/")
+		if nextDepth != currentDepth {
+			return nextDepth < currentDepth
+		}
+		if len(next.rel) != len(current.rel) {
+			return len(next.rel) < len(current.rel)
+		}
+		return next.rel < current.rel
+	}
 	err := filepath.WalkDir(rootAbs, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -166,24 +184,30 @@ func resolveCanvasFileQuery(rootAbs, raw string) (string, bool) {
 			return nil
 		}
 		normalizedRel := strings.ToLower(filepath.ToSlash(rel))
+		next := candidate{
+			path: path,
+			rel:  filepath.ToSlash(rel),
+		}
 		base := strings.ToLower(filepath.Base(normalizedRel))
 		if normalizedRel == normalizedQuery || base == normalizedQuery || strings.HasPrefix(base, normalizedQuery+".") {
-			bestExact = path
-			return filepath.SkipAll
+			if betterCandidate(bestExact, next) {
+				bestExact = next
+			}
+			return nil
 		}
-		if bestContains == "" && strings.Contains(normalizedRel, normalizedQuery) {
-			bestContains = path
+		if strings.Contains(normalizedRel, normalizedQuery) && betterCandidate(bestContains, next) {
+			bestContains = next
 		}
 		return nil
 	})
 	if err != nil && !errors.Is(err, filepath.SkipAll) {
 		return "", false
 	}
-	if bestExact != "" {
-		return filepath.Clean(bestExact), true
+	if bestExact.path != "" {
+		return filepath.Clean(bestExact.path), true
 	}
-	if bestContains != "" {
-		return filepath.Clean(bestContains), true
+	if bestContains.path != "" {
+		return filepath.Clean(bestContains.path), true
 	}
 	return "", false
 }

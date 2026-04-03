@@ -213,6 +213,11 @@
     window.__setMessagePostDelay(0);
     window.__setSTTTranscribeResponse({ text: 'hello world' }, 200);
     window.__queueSTTTranscribeResponses([]);
+    window.__confirmResponse = true;
+    window.confirm = (message) => {
+      window.__harnessLog.push({ type: 'confirm', message: String(message || '') });
+      return Boolean(window.__confirmResponse);
+    };
     const harnessParams = new URL(window.location.href).searchParams;
     const runtimeState = {
       dev_mode: false,
@@ -1878,6 +1883,26 @@
           session: { id: 'psess-harness-001', workspace_path: '/tmp/test', started_at: 100, ended_at: 0, config_json: '{}' },
           summary_text: 'Harness meeting summary',
           updated_at: 101,
+        }), { status: 200 });
+      }
+      if (u.includes('/api/workspaces/') && u.includes('/meeting/finalize') && opts?.method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'meeting_finalize',
+          method: opts?.method || 'POST',
+          url: u,
+          payload: body,
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          workspace_id: activeWorkspaceId,
+          workspace_path: '/tmp/test',
+          session_id: 'psess-harness-001',
+          summary_text: '# Meeting Notes\n\n## Decisions\n\n- Harness decision\n',
+          summary_artifact_id: 701,
+          transcript_discarded: Boolean(body.discard_transcript),
         }), { status: 200 });
       }
       if (u.includes('/api/workspaces/') && u.includes('/meeting-items') && opts?.method === 'POST') {

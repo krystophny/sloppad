@@ -53,6 +53,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/api/workspaces/{workspace_id}/references", a.handleWorkspaceCompanionReferences)
 	r.Get("/api/workspaces/{workspace_id}/meeting-items", a.handleWorkspaceMeetingItemsGet)
 	r.Post("/api/workspaces/{workspace_id}/meeting-items", a.handleWorkspaceMeetingItemsCreate)
+	r.Post("/api/workspaces/{workspace_id}/meeting/finalize", a.handleWorkspaceMeetingFinalize)
 	r.Post("/api/ink/submit", a.handleInkSubmit)
 	r.Post("/api/review/submit", a.handleReviewSubmit)
 	r.Post("/api/scan/upload", a.handleScanUpload)
@@ -242,6 +243,10 @@ func (a *App) serveHotwordRuntimeAsset(w http.ResponseWriter, r *http.Request) {
 	contentType := "application/octet-stream"
 	if name == hotwordModelFileName+".data" {
 		targetPath = hotwordModelDataPath(modelPath)
+	} else if !fileExists(targetPath) {
+		if bundledPath := hotwordBundledModelPath(a.hotwordProjectRoot()); fileExists(bundledPath) {
+			targetPath = bundledPath
+		}
 	}
 	file, err := os.Open(targetPath)
 	if err != nil {

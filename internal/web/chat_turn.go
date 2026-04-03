@@ -127,7 +127,7 @@ func (a *App) runCodexAssistantTurn(req *assistantTurnRequest) {
 	}
 
 	canvasCtx := a.resolveCanvasContext(req.session.WorkspacePath)
-	companionCtx := a.loadCompanionPromptContext(req.session.WorkspacePath)
+	companionCtx := a.loadCompanionPromptContextForTurn(req.sessionID, req.session.WorkspacePath)
 	var prompt string
 	if resumed {
 		prompt = buildTurnPromptForSessionWithCompanion(req.sessionID, withQueuedUserMessage(req.messages, req.messageID, req.promptText), canvasCtx, companionCtx, req.outputMode, req.turnProfile.Alias)

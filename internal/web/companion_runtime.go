@@ -14,6 +14,7 @@ const (
 	companionEventState             = "companion_state"
 	companionEventTranscriptPartial = "companion_transcript_partial"
 	companionEventTranscriptFinal   = "companion_transcript_final"
+	companionEventMeetingWakeWord   = "meeting_wake_word_detected"
 )
 
 type companionRuntimeSnapshot struct {

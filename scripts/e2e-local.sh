@@ -68,6 +68,10 @@ if [ -z "${SLOPSHELL_TEST_SESSION_TOKEN:-}" ]; then
         printf '%s\n' "${HOME}/Library/Application Support/slopshell/web-data/slopshell.db"
         return 0
       fi
+      if [ -f "${HOME}/.local/share/slopshell/slopshell.db" ]; then
+        printf '%s\n' "${HOME}/.local/share/slopshell/slopshell.db"
+        return 0
+      fi
       if [ -f "${HOME}/.local/share/slopshell-web/slopshell.db" ]; then
         printf '%s\n' "${HOME}/.local/share/slopshell-web/slopshell.db"
         return 0

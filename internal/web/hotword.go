@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	hotwordModelFileName = "keyword.onnx"
+	hotwordModelFileName       = "keyword.onnx"
+	hotwordVendorModelFileName = "alexa.onnx"
 )
 
 var hotwordSharedAssetFiles = []string{
@@ -42,6 +43,10 @@ func hotwordRuntimeDir(dataDir string) string {
 
 func hotwordRuntimeModelPath(dataDir string) string {
 	return filepath.Join(hotwordRuntimeDir(dataDir), hotwordModelFileName)
+}
+
+func hotwordBundledModelPath(root string) string {
+	return filepath.Join(hotwordVendorDir(root), hotwordVendorModelFileName)
 }
 
 func hotwordModelDataPath(path string) string {

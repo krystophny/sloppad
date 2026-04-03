@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -767,7 +768,7 @@ func TestCompanionResponseTriggerIncludesProjectScopedCompanionContext(t *testin
 			EndTS:       int64(100 + i),
 			CommittedAt: int64(100 + i),
 			Speaker:     "Alice",
-			Text:        strings.Join([]string{"budget-segment", strings.Repeat("detail", 40)}, "-"),
+			Text:        fmt.Sprintf("budget-segment-%d %s", i, strings.Repeat("detail ", 20)),
 			Status:      "final",
 		}); err != nil {
 			t.Fatalf("add participant segment %d: %v", i, err)
@@ -830,11 +831,14 @@ func TestCompanionResponseTriggerIncludesProjectScopedCompanionContext(t *testin
 	if !strings.Contains(prompt, "Entities: Acme Cloud, Budget, Alice") {
 		t.Fatalf("prompt missing entities: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Recent topics: Budget review; Owner follow-up") {
-		t.Fatalf("prompt missing recent topics: %q", prompt)
+	if !strings.Contains(prompt, "budget-segment-0") || !strings.Contains(prompt, "budget-segment-9") {
+		t.Fatalf("prompt missing expanded transcript window: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Older transcript omitted:") {
-		t.Fatalf("prompt missing transcript compaction marker: %q", prompt)
+	if !strings.Contains(prompt, "Computer, what changed in the budget review?") {
+		t.Fatalf("prompt missing triggering segment: %q", prompt)
+	}
+	if strings.Contains(prompt, "Older transcript omitted:") {
+		t.Fatalf("prompt should keep the 10-minute trigger window without compaction here: %q", prompt)
 	}
 	if strings.Contains(prompt, "Zeus") || strings.Contains(prompt, "Mallory") {
 		t.Fatalf("prompt leaked cross-project context: %q", prompt)

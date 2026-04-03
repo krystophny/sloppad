@@ -200,3 +200,51 @@ func TestRecoverLocalAssistantCanvasTextFromMalformedToolOutputRejectsNonCanvasT
 		t.Fatalf("recoverLocalAssistantCanvasTextFromMalformedToolOutput() = %q, %v; want empty false", got, ok)
 	}
 }
+
+func TestSynthesizeLocalAssistantCanvasDiagramForFusionReactor(t *testing.T) {
+	got := synthesizeLocalAssistantCanvasDiagram(
+		"Please draw a flowchart on the canvas showing how a fusion reactor works.",
+		"",
+	)
+	for _, snippet := range []string{"fusion reactor", "plasma", "fusion", "turbine"} {
+		if !strings.Contains(strings.ToLower(got), snippet) {
+			t.Fatalf("fallback diagram missing %q:\n%s", snippet, got)
+		}
+	}
+	if !localAssistantCanvasHasStructuredDiagramText(got) {
+		t.Fatalf("fallback diagram is not structured:\n%s", got)
+	}
+}
+
+func TestSynthesizeLocalAssistantCanvasDiagramRefinesGermanPrompt(t *testing.T) {
+	got := synthesizeLocalAssistantCanvasDiagram(
+		"Mach es schöner, behalte das Flussdiagramm auf der Canvas und füge Magnetspulen und Turbine hinzu.",
+		"Current canvas content:\nFusionsreaktor\n[Plasma]\n |\n v\n[Waerme]",
+	)
+	for _, snippet := range []string{"Fusionsreaktor", "Plasma", "Magnetspulen", "Turbine"} {
+		if !strings.Contains(got, snippet) {
+			t.Fatalf("fallback diagram missing %q:\n%s", snippet, got)
+		}
+	}
+	if !localAssistantCanvasHasStructuredDiagramText(got) {
+		t.Fatalf("fallback diagram is not structured:\n%s", got)
+	}
+}
+
+func TestLocalAssistantCanvasShouldBypassLLMForNoisyFusionTranscript(t *testing.T) {
+	if !localAssistantCanvasShouldBypassLLM(
+		"computer bitte zeichne fusie aktor flowchart auf der canvas",
+		"",
+	) {
+		t.Fatal("expected noisy fusion-reactor transcript to bypass the LLM")
+	}
+}
+
+func TestLocalAssistantCanvasDoesNotBypassLLMForCleanFusionPrompt(t *testing.T) {
+	if localAssistantCanvasShouldBypassLLM(
+		"Bitte zeichne mir wie ein Fusionsreaktor funktioniert als Flowchart auf der Canvas.",
+		"",
+	) {
+		t.Fatal("expected clean fusion-reactor prompt to keep the LLM repair flow")
+	}
+}

@@ -150,6 +150,54 @@ func TestCompanionRuntimeProtocolEmitsListeningAndTranscriptEvents(t *testing.T)
 	}
 }
 
+func TestCompanionRuntimeProtocolEmitsMeetingWakeWordEvent(t *testing.T) {
+	app := newAuthedTestApp(t)
+	t.Setenv("PATH", t.TempDir())
+
+	sttSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"text":"Computer, open the transcript."}`))
+	}))
+	defer sttSrv.Close()
+	app.sttURL = sttSrv.URL
+
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensureDefaultWorkspace: %v", err)
+	}
+	cfg := app.loadCompanionConfig(project)
+	cfg.CompanionEnabled = true
+	if err := app.saveCompanionConfig(project.ID, cfg); err != nil {
+		t.Fatalf("save companion config: %v", err)
+	}
+	setLivePolicyForTest(t, app, LivePolicyMeeting)
+	chatSession, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("GetOrCreateChatSession: %v", err)
+	}
+
+	conn, clientConn, cleanup := newParticipantTestWSConn(t)
+	defer cleanup()
+	app.hub.registerChat(chatSession.ID, conn)
+	defer app.hub.unregisterChat(chatSession.ID, conn)
+
+	handleParticipantStart(app, conn, chatSession.ID)
+	_ = waitForWSJSONMessageType(t, clientConn, 2*time.Second, "participant_started")
+
+	handleParticipantBinaryChunk(app, conn, buildParticipantSpeechWAV(240, 16000))
+
+	payload := waitForWSJSONMessageType(t, clientConn, 2*time.Second, companionEventMeetingWakeWord)
+	if got := strings.TrimSpace(payload["wake_word"].(string)); got != "computer" {
+		t.Fatalf("wake_word = %q, want computer", got)
+	}
+	if strings.TrimSpace(payload["participant_session_id"].(string)) == "" {
+		t.Fatal("participant_session_id is empty")
+	}
+	if got := int64(payload["participant_segment_id"].(float64)); got == 0 {
+		t.Fatal("participant_segment_id is zero")
+	}
+}
+
 func TestCompanionRuntimeProtocolTransitionsThroughTalkingAndBackToListening(t *testing.T) {
 	app := newAuthedTestApp(t)
 	project, err := app.ensureDefaultWorkspace()

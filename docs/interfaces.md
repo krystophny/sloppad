@@ -57,6 +57,7 @@ Runtime and chat session management:
 - `GET /api/workspaces/{workspace_id}/transcript`
 - `GET /api/workspaces/{workspace_id}/summary`
 - `GET /api/workspaces/{workspace_id}/references`
+- `POST /api/workspaces/{workspace_id}/meeting/finalize`
 - `GET /api/workspaces/{workspace_id}/meeting-items`
 - `POST /api/workspaces/{workspace_id}/meeting-items`
 - `POST /api/participant/document-follow/decide`
@@ -258,6 +259,7 @@ Defined in `internal/surface/definitions.go` and used by `internal/mcp/server.go
 - `mail_message_get`
 - `mail_attachment_get`
 - `mail_action`
+- `mail_message_copy`
 - `mail_server_filter_list`
 - `mail_server_filter_upsert`
 - `mail_server_filter_delete`

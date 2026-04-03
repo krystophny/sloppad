@@ -511,6 +511,31 @@ func TestResolveCanvasFilePath_ResolvesSimpleWorkspaceQuery(t *testing.T) {
 	}
 }
 
+func TestResolveCanvasFilePath_PrefersShallowWorkspaceMatch(t *testing.T) {
+	tmp := t.TempDir()
+	rootReadme := filepath.Join(tmp, "README.md")
+	if err := os.WriteFile(rootReadme, []byte("# root\n"), 0o644); err != nil {
+		t.Fatalf("write root readme: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, ".tabura", "imports"), 0o755); err != nil {
+		t.Fatalf("mkdir hidden import dir: %v", err)
+	}
+	hiddenReadme := filepath.Join(tmp, ".tabura", "imports", "README.md")
+	if err := os.WriteFile(hiddenReadme, []byte("# hidden\n"), 0o644); err != nil {
+		t.Fatalf("write hidden readme: %v", err)
+	}
+	abs, title, err := resolveCanvasFilePath(tmp, "README")
+	if err != nil {
+		t.Fatalf("resolveCanvasFilePath returned error: %v", err)
+	}
+	if abs != rootReadme {
+		t.Fatalf("resolved path = %q, want %q", abs, rootReadme)
+	}
+	if title != "README.md" {
+		t.Fatalf("resolved title = %q, want README.md", title)
+	}
+}
+
 func TestResolveCanvasFilePath_RejectsEscapingProjectRoot(t *testing.T) {
 	tmp := t.TempDir()
 	if _, _, err := resolveCanvasFilePath(tmp, "../outside.md"); err == nil {

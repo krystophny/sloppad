@@ -12,6 +12,7 @@ playwright-report/
 test-results/
 tests/manual/
 /slopshell
+/slopshell-edge
 tools/
 .env
 internal/web/static/vad/

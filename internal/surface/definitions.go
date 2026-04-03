@@ -826,6 +826,7 @@ var WebRouteSections = []RouteSection{
 			"GET /api/workspaces/{workspace_id}/transcript",
 			"GET /api/workspaces/{workspace_id}/summary",
 			"GET /api/workspaces/{workspace_id}/references",
+			"POST /api/workspaces/{workspace_id}/meeting/finalize",
 			"GET /api/workspaces/{workspace_id}/meeting-items",
 			"POST /api/workspaces/{workspace_id}/meeting-items",
 			"POST /api/participant/document-follow/decide",

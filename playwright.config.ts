@@ -9,11 +9,12 @@ export default defineConfig({
   timeout: 30_000,
   fullyParallel: false,
   workers: process.env.CI ? 1 : 2,
+  outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR || '/tmp/slopshell-playwright',
   grepInvert,
   expect: {
     timeout: 5_000,
   },
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: process.env.PLAYWRIGHT_HTML_REPORT_DIR || '/tmp/slopshell-playwright-report' }]],
   use: {
     baseURL: 'http://127.0.0.1:4173',
     headless: true,

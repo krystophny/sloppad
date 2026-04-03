@@ -212,6 +212,11 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 	}
 
 	_ = a.store.AddParticipantEvent(sessionID, seg.ID, "segment_committed", fmt.Sprintf(`{"text":%q}`, text))
+	wakeWord := a.detectMeetingWakeWord(text)
+	if wakeWord != "" {
+		payload := fmt.Sprintf(`{"wake_word":%q}`, wakeWord)
+		_ = a.store.AddParticipantEvent(sessionID, seg.ID, "meeting_wake_word_detected", payload)
+	}
 	a.captureMeetingNotesForSegment(sessionID, seg)
 	a.syncProjectCompanionArtifactsBySessionID(sessionID)
 	if workspacePath != "" {
@@ -231,6 +236,14 @@ func transcribeParticipantChunk(a *App, conn *chatWSConn, sessionID string, buf 
 			"status":                 seg.Status,
 			"latency_ms":             latencyMS,
 		})
+		if wakeWord != "" {
+			a.broadcastCompanionTranscriptEvent(workspacePath, map[string]interface{}{
+				"type":                   companionEventMeetingWakeWord,
+				"participant_session_id": sessionID,
+				"participant_segment_id": seg.ID,
+				"wake_word":              wakeWord,
+			})
+		}
 		a.broadcastCompanionRuntimeState(workspacePath, companionRuntimeSnapshot{
 			State:                companionRuntimeStateListening,
 			Reason:               "transcript_finalized",
@@ -270,6 +283,10 @@ func (a *App) maybeTriggerCompanionResponse(participantSessionID string, seg sto
 	if a == nil || a.store == nil || seg.ID == 0 {
 		return
 	}
+	text := strings.TrimSpace(seg.Text)
+	if text == "" {
+		return
+	}
 	session, err := a.store.GetParticipantSession(participantSessionID)
 	if err != nil {
 		log.Printf("participant trigger session lookup error: %v", err)
@@ -299,6 +316,13 @@ func (a *App) maybeTriggerCompanionResponse(participantSessionID string, seg sto
 	}
 	gate := evaluateCompanionDirectedSpeechGate(cfg, &session, segments, events)
 	if gate.Decision != companionGateDecisionDirect || gate.SegmentID != seg.ID {
+		if remainder, _, matched := stripWakeWordIntentPrefix(text, a.configuredWakeWordPhrases()); matched && isCompanionRequestWithoutDirectAddress(remainder) {
+			gate.Decision = companionGateDecisionDirect
+			gate.Reason = "meeting_wake_word_detected"
+			gate.SegmentID = seg.ID
+		}
+	}
+	if gate.Decision != companionGateDecisionDirect || gate.SegmentID != seg.ID {
 		if a.triggerSilentLiveEditForParticipantSegment(participantSessionID, session, seg) {
 			a.syncProjectCompanionArtifactsBySessionID(participantSessionID)
 		}
@@ -322,10 +346,6 @@ func (a *App) maybeTriggerCompanionResponse(participantSessionID string, seg sto
 		ParticipantSessionID: participantSessionID,
 		ParticipantSegmentID: seg.ID,
 	})
-	text := strings.TrimSpace(seg.Text)
-	if text == "" {
-		return
-	}
 	chatSession, err := a.store.GetOrCreateChatSessionForWorkspace(session.WorkspaceID)
 	if err != nil {
 		log.Printf("participant trigger chat session error: %v", err)

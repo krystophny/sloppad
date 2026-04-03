@@ -19,6 +19,12 @@ function resolveMock() {
 }
 
 async function loadRuntime() {
+  const mock = resolveMock();
+  if (state.loaded && state.mock && mock !== state.mock) {
+    state.loaded = false;
+    state.available = false;
+    state.mock = null;
+  }
   if (state.loaded) return;
   if (state.loading) {
     await state.loading;
@@ -26,7 +32,6 @@ async function loadRuntime() {
   }
   state.loading = (async () => {
     try {
-      const mock = resolveMock();
       if (mock) {
         state.mock = mock;
         const ok = await Promise.resolve(mock.init());

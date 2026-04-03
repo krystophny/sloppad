@@ -236,6 +236,45 @@ function normalizeLivePolicy(policy) {
     ? LIVE_SESSION_MODE_MEETING
     : LIVE_SESSION_MODE_DIALOGUE;
 }
+
+async function fetchWorkspaceMeetingTranscript(workspaceID = state.activeWorkspaceId) {
+  const id = String(workspaceID || '').trim();
+  if (!id) return null;
+  const resp = await fetch(apiURL(`workspaces/${encodeURIComponent(id)}/transcript`), { cache: 'no-store' });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
+export async function finalizeMeetingSession(workspaceID = state.activeWorkspaceId, discardTranscript = true) {
+  const id = String(workspaceID || '').trim();
+  if (!id) return null;
+  const resp = await fetch(apiURL(`workspaces/${encodeURIComponent(id)}/meeting/finalize`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ discard_transcript: Boolean(discardTranscript) }),
+  });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  return resp.json();
+}
+
+async function prepareMeetingStop() {
+  const transcript = await fetchWorkspaceMeetingTranscript().catch(() => null);
+  const segments = Array.isArray(transcript?.segments) ? transcript.segments : [];
+  if (!segments.length) {
+    return { shouldFinalize: false, canceled: false };
+  }
+  if (typeof window.confirm === 'function' && !window.confirm('Generate summary and discard transcript?')) {
+    return { shouldFinalize: false, canceled: true };
+  }
+  return { shouldFinalize: true, canceled: false };
+}
+
 export async function updateLivePolicy(policy) {
   const nextPolicy = normalizeLivePolicy(policy);
   const resp = await fetch(apiURL('live-policy'), {
@@ -262,8 +301,14 @@ export async function activateLiveSession(mode) {
     await updateLivePolicy(normalized);
   }
   if (state.liveSessionActive) {
-    stopLiveSession();
-    applyLiveSessionStateSnapshot();
+    const stopped = await deactivateLiveSession({
+      silent: true,
+      disableMeetingConfig: wasMeeting && normalized !== LIVE_SESSION_MODE_MEETING,
+      finalizeMeeting: wasMeeting,
+    });
+    if (!stopped) {
+      return false;
+    }
   }
   if (normalized === LIVE_SESSION_MODE_MEETING) {
     applyCompanionState({
@@ -300,17 +345,29 @@ export async function deactivateLiveSession(options: Record<string, any> = {}) {
   const silent = Boolean(options?.silent);
   const disableMeetingConfig = Boolean(options?.disableMeetingConfig);
   const wasMeeting = isMeetingLiveSession();
+  const finalizeMeeting = wasMeeting && options?.finalizeMeeting !== false;
+  let meetingStop = { shouldFinalize: false, canceled: false };
+  if (finalizeMeeting) {
+    meetingStop = await prepareMeetingStop();
+    if (meetingStop.canceled) {
+      return false;
+    }
+  }
   resetDialogueTurnController();
   stopLiveSession();
   applyLiveSessionStateSnapshot();
+  if (meetingStop.shouldFinalize) {
+    await finalizeMeetingSession();
+  }
   if (disableMeetingConfig && wasMeeting) {
     await updateCompanionConfig({ companion_enabled: false }).catch(() => {});
   }
   renderEdgeTopModelButtons();
   updateAssistantActivityIndicator();
   if (!silent) {
-    showStatus('live off');
+    showStatus(meetingStop.shouldFinalize ? 'meeting summary saved' : 'live off');
   }
+  return true;
 }
 
 export function resolveInitialWorkspaceID() {

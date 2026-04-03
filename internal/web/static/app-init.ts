@@ -47,6 +47,8 @@ const initHotwordLifecycle = (...args) => refs.initHotwordLifecycle(...args);
 const resolveInitialWorkspaceID = (...args) => refs.resolveInitialWorkspaceID(...args);
 const applyRuntimeReasoningEffortOptions = (...args) => refs.applyRuntimeReasoningEffortOptions(...args);
 const fetchProjects = (...args) => refs.fetchProjects(...args);
+const activateLiveSession = (...args) => refs.activateLiveSession(...args);
+const deactivateLiveSession = (...args) => refs.deactivateLiveSession(...args);
 const startRuntimeReloadWatcher = (...args) => refs.startRuntimeReloadWatcher(...args);
 const startAssistantActivityWatcher = (...args) => refs.startAssistantActivityWatcher(...args);
 const closeEdgePanels = (...args) => refs.closeEdgePanels(...args);
@@ -648,10 +650,6 @@ export function bindUi() {
   // Click outside overlay/input -> dismiss
   document.addEventListener('mousedown', (ev) => {
     if (!(ev.target instanceof Element)) return;
-    const sidebarMenu = document.getElementById(ITEM_SIDEBAR_MENU_ID);
-    if (state.itemSidebarMenuOpen && sidebarMenu instanceof HTMLElement && !sidebarMenu.contains(ev.target)) {
-      hideItemSidebarMenu();
-    }
     const commandCenter = commandCenterPanel();
     if (isCommandCenterVisible() && commandCenter instanceof HTMLElement && !commandCenter.contains(ev.target)) {
       hideCommandCenter();
@@ -671,6 +669,28 @@ export function bindUi() {
       }
     }
   });
+  document.addEventListener('click', (ev) => {
+    if (!(ev.target instanceof Element)) return;
+    const sidebarMenu = document.getElementById(ITEM_SIDEBAR_MENU_ID);
+    if (!state.itemSidebarMenuOpen || !(sidebarMenu instanceof HTMLElement) || sidebarMenu.contains(ev.target)) {
+      return;
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
+    hideItemSidebarMenu();
+  }, true);
+  document.addEventListener('touchend', (ev) => {
+    const touch = ev.changedTouches && ev.changedTouches[0];
+    if (!touch) return;
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    const sidebarMenu = document.getElementById(ITEM_SIDEBAR_MENU_ID);
+    if (!state.itemSidebarMenuOpen || !(sidebarMenu instanceof HTMLElement) || !(target instanceof Element) || sidebarMenu.contains(target)) {
+      return;
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
+    hideItemSidebarMenu();
+  }, { passive: false, capture: true });
 
   // Keyboard typing auto-activates text input (rasa mode)
   document.addEventListener('keydown', (ev) => {
@@ -754,6 +774,16 @@ export function bindUi() {
       if (state.chatVoiceCapture) {
         cancelChatVoiceCapture();
         showStatus('ready');
+      }
+      return;
+    }
+
+    if (ev.shiftKey && !ev.metaKey && !ev.ctrlKey && !ev.altKey && (ev.key === 'M' || ev.key === 'm')) {
+      ev.preventDefault();
+      if (state.liveSessionActive && String(state.liveSessionMode || '').trim().toLowerCase() === LIVE_SESSION_MODE_MEETING) {
+        void deactivateLiveSession({ disableMeetingConfig: true, finalizeMeeting: true });
+      } else {
+        void activateLiveSession(LIVE_SESSION_MODE_MEETING);
       }
       return;
     }

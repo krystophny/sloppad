@@ -15,6 +15,10 @@ const (
 	companionPromptRecentCharLimit      = 1200
 	companionPromptSummaryCharLimit     = 480
 	companionPromptSegmentTextCharLimit = 240
+	companionPromptTriggerLookbackSec   = 10 * 60
+	companionPromptTriggerSegmentLimit  = 64
+	companionPromptTriggerCharLimit     = 8000
+	companionPromptTriggerTextCharLimit = 480
 )
 
 type companionPromptSegment struct {
@@ -63,6 +67,33 @@ func (a *App) loadCompanionPromptContext(workspacePath string) *companionPromptC
 	return ctx
 }
 
+func (a *App) loadCompanionPromptContextForTurn(chatSessionID, workspacePath string) *companionPromptContext {
+	if a == nil || a.store == nil {
+		return nil
+	}
+	pending, ok := a.companionPendingTurnForChatSession(chatSessionID)
+	if !ok || strings.TrimSpace(pending.participantSessionID) == "" {
+		return a.loadCompanionPromptContext(workspacePath)
+	}
+	session, err := a.store.GetParticipantSession(pending.participantSessionID)
+	if err != nil || strings.TrimSpace(session.WorkspacePath) != strings.TrimSpace(workspacePath) {
+		return a.loadCompanionPromptContext(workspacePath)
+	}
+	memory, err := a.loadCompanionRoomMemory(session.ID)
+	if err != nil {
+		return a.loadCompanionPromptContext(workspacePath)
+	}
+	segments, err := a.store.ListParticipantSegments(session.ID, 0, 0)
+	if err != nil {
+		return a.loadCompanionPromptContext(workspacePath)
+	}
+	ctx := buildTriggeredCompanionPromptContext(&session, memory, segments, pending.segmentID)
+	if ctx == nil || ctx.empty() {
+		return a.loadCompanionPromptContext(workspacePath)
+	}
+	return ctx
+}
+
 func buildCompanionPromptContext(session *store.ParticipantSession, memory companionRoomMemory, segments []store.ParticipantSegment) *companionPromptContext {
 	if session == nil {
 		return nil
@@ -76,6 +107,15 @@ func buildCompanionPromptContext(session *store.ParticipantSession, memory compa
 			firstNonEmptyStrings(companionPromptTopics(memory.TopicTimeline), companionPromptTopicLimit)...),
 	}
 	ctx.RecentTranscript, ctx.OmittedSegments = compactCompanionPromptSegments(segments)
+	return ctx
+}
+
+func buildTriggeredCompanionPromptContext(session *store.ParticipantSession, memory companionRoomMemory, segments []store.ParticipantSegment, triggerSegmentID int64) *companionPromptContext {
+	ctx := buildCompanionPromptContext(session, memory, segments)
+	if ctx == nil {
+		return nil
+	}
+	ctx.RecentTranscript, ctx.OmittedSegments = compactCompanionPromptSegmentsForTrigger(segments, triggerSegmentID)
 	return ctx
 }
 
@@ -160,6 +200,55 @@ func compactCompanionPromptSegments(segments []store.ParticipantSegment) ([]comp
 		selected[i], selected[j] = selected[j], selected[i]
 	}
 	return selected, omitted
+}
+
+func compactCompanionPromptSegmentsForTrigger(segments []store.ParticipantSegment, triggerSegmentID int64) ([]companionPromptSegment, int) {
+	if len(segments) == 0 {
+		return nil, 0
+	}
+	triggerAt := participantPromptTimestamp(participantSegmentByID(segments, triggerSegmentID))
+	if triggerAt == 0 {
+		triggerAt = participantPromptTimestamp(&segments[len(segments)-1])
+	}
+	selected := make([]companionPromptSegment, 0, minInt(len(segments), companionPromptTriggerSegmentLimit))
+	usedChars := 0
+	omitted := 0
+
+	for i := len(segments) - 1; i >= 0; i-- {
+		segment := segments[i]
+		text := truncatePromptValue(segment.Text, companionPromptTriggerTextCharLimit)
+		if text == "" {
+			continue
+		}
+		at := participantPromptTimestamp(&segment)
+		if triggerAt > 0 && at > 0 && segment.ID != triggerSegmentID && at < triggerAt-companionPromptTriggerLookbackSec {
+			omitted++
+			continue
+		}
+		segChars := len(text)
+		if len(selected) >= companionPromptTriggerSegmentLimit || (usedChars+segChars > companionPromptTriggerCharLimit && len(selected) > 0 && segment.ID != triggerSegmentID) {
+			omitted++
+			continue
+		}
+		selected = append(selected, companionPromptSegment{
+			Speaker: strings.TrimSpace(segment.Speaker),
+			At:      at,
+			Text:    text,
+		})
+		usedChars += segChars
+	}
+
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
+	return selected, omitted
+}
+
+func participantPromptTimestamp(segment *store.ParticipantSegment) int64 {
+	if segment == nil {
+		return 0
+	}
+	return maxPromptInt64(segment.CommittedAt, maxPromptInt64(segment.EndTS, segment.StartTS))
 }
 
 func companionPromptTopics(items []any) []string {

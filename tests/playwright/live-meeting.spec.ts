@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { setLiveMode } from './slopshell-circle-helpers';
+import { clickCircleSegment, setLiveMode } from './slopshell-circle-helpers';
 
 async function clearLog(page: Page) {
   await page.evaluate(() => {
@@ -329,6 +329,45 @@ test('meeting tap starts direct capture and keeps meeting mode active', async ({
   });
 
   await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+});
+
+test('tapping meeting again finalizes the session and returns to manual mode', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await waitReady(page);
+  await switchToProject(page, 'test');
+  await setLiveMode(page, 'meeting');
+  await clearLog(page);
+
+  await clickCircleSegment(page, 'meeting');
+
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Manual');
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return {
+      confirmed: log.some((entry: any) => entry?.type === 'confirm' && String(entry?.message || '').includes('Generate summary and discard transcript?')),
+      finalized: log.some((entry: any) => entry?.type === 'api_fetch' && entry?.action === 'meeting_finalize'),
+    };
+  }).toEqual({
+    confirmed: true,
+    finalized: true,
+  });
+});
+
+test('Shift+M toggles meeting capture on and off', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await waitReady(page);
+  await switchToProject(page, 'test');
+  await clearLog(page);
+
+  await page.keyboard.press('Shift+M');
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
+
+  await page.keyboard.press('Shift+M');
+  await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Manual');
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.filter((entry: any) => entry?.type === 'api_fetch' && entry?.action === 'meeting_finalize').length;
+  }).toBe(1);
 });
 
 test('top panel omits legacy meeting surface controls', async ({ page }) => {

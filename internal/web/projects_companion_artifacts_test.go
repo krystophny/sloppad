@@ -338,6 +338,152 @@ func TestProjectCompanionRoomMemoryIsProjectScoped(t *testing.T) {
 	}
 }
 
+func TestProjectMeetingFinalizeCreatesSummaryAndDeletesTranscriptData(t *testing.T) {
+	app := newAuthedTestApp(t)
+	project, session := seedProjectCompanionSession(t, app)
+	workspace := requireWorkspaceForProject(t, app, project)
+
+	if err := app.store.AddParticipantEvent(session.ID, 0, "session_started", `{"reason":"manual"}`); err != nil {
+		t.Fatalf("AddParticipantEvent session_started: %v", err)
+	}
+	seg1, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   session.ID,
+		StartTS:     100,
+		EndTS:       110,
+		Speaker:     "Alice",
+		Text:        "We decided to ship option B for the rollout.",
+		CommittedAt: 111,
+		Status:      "final",
+	})
+	if err != nil {
+		t.Fatalf("AddParticipantSegment seg1: %v", err)
+	}
+	seg2, err := app.store.AddParticipantSegment(store.ParticipantSegment{
+		SessionID:   session.ID,
+		StartTS:     120,
+		EndTS:       130,
+		Speaker:     "Bob",
+		Text:        "Can we confirm the remaining rollout risk?",
+		CommittedAt: 131,
+		Status:      "final",
+	})
+	if err != nil {
+		t.Fatalf("AddParticipantSegment seg2: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(session.ID, seg2.ID, "segment_committed", `{"text":"Can we confirm the remaining rollout risk?"}`); err != nil {
+		t.Fatalf("AddParticipantEvent segment_committed: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(session.ID, seg1.ID, "meeting_decision_captured", `{"decision":"Ship option B for the rollout","text":"Ship option B for the rollout"}`); err != nil {
+		t.Fatalf("AddParticipantEvent meeting_decision_captured: %v", err)
+	}
+	if err := app.store.AddParticipantEvent(session.ID, seg1.ID, "meeting_action_item_captured", `{"actor_name":"Alice","item_title":"Draft the rollout notes","text":"Alice: Draft the rollout notes","title":"Draft the rollout notes"}`); err != nil {
+		t.Fatalf("AddParticipantEvent meeting_action_item_captured: %v", err)
+	}
+	if err := app.store.UpsertParticipantRoomState(session.ID, "raw summary", `["Alice","Bob"]`, `[{"topic":"Rollout","detail":"Can we confirm the remaining rollout risk?"}]`); err != nil {
+		t.Fatalf("UpsertParticipantRoomState: %v", err)
+	}
+	app.syncProjectCompanionArtifactsBySessionID(session.ID)
+
+	artifactDir := filepath.Join(project.RootPath, ".slopshell", "artifacts", "companion", session.ID)
+	transcriptPath := filepath.Join(artifactDir, "transcript.md")
+	referencesPath := filepath.Join(artifactDir, "references.md")
+	if _, err := os.Stat(transcriptPath); err != nil {
+		t.Fatalf("stat transcript artifact: %v", err)
+	}
+	if _, err := os.Stat(referencesPath); err != nil {
+		t.Fatalf("stat references artifact: %v", err)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/workspaces/"+itoa(workspace.ID)+"/meeting/finalize", map[string]any{
+		"discard_transcript": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST meeting finalize status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var resp finalizeMeetingResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode finalize response: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("finalize response ok = false: %#v", resp)
+	}
+	for _, want := range []string{
+		"# Meeting Notes",
+		"## Decisions",
+		"## Action Checklist",
+		"## Open Questions / Risks",
+		"## Topics and Outcomes",
+		"## Participant Context",
+	} {
+		if !strings.Contains(resp.SummaryText, want) {
+			t.Fatalf("summary_text missing %q: %q", want, resp.SummaryText)
+		}
+	}
+
+	segments, err := app.store.ListParticipantSegments(session.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListParticipantSegments: %v", err)
+	}
+	if len(segments) != 0 {
+		t.Fatalf("segments len = %d, want 0", len(segments))
+	}
+	events, err := app.store.ListParticipantEvents(session.ID)
+	if err != nil {
+		t.Fatalf("ListParticipantEvents: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events len = %d, want 0", len(events))
+	}
+
+	ended, err := app.store.GetParticipantSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetParticipantSession: %v", err)
+	}
+	if ended.EndedAt == 0 {
+		t.Fatal("participant session should be ended after finalize")
+	}
+
+	state, err := app.store.GetParticipantRoomState(session.ID)
+	if err != nil {
+		t.Fatalf("GetParticipantRoomState: %v", err)
+	}
+	if !strings.Contains(state.SummaryText, "# Meeting Notes") {
+		t.Fatalf("room state summary_text = %q, want finalized summary", state.SummaryText)
+	}
+	if strings.Contains(state.TopicTimelineJSON, "Can we confirm the remaining rollout risk?") {
+		t.Fatalf("topic_timeline_json leaked transcript detail: %q", state.TopicTimelineJSON)
+	}
+	if !strings.Contains(state.TopicTimelineJSON, `"topic":"Decision"`) || !strings.Contains(state.TopicTimelineJSON, `"topic":"Action item"`) {
+		t.Fatalf("topic_timeline_json = %q, want sanitized decision/action entries", state.TopicTimelineJSON)
+	}
+
+	summaryPath := filepath.Join(artifactDir, "summary.md")
+	summaryBody, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatalf("read summary artifact: %v", err)
+	}
+	if !strings.Contains(string(summaryBody), "# Meeting Summary") || !strings.Contains(string(summaryBody), "Ship option B for the rollout") {
+		t.Fatalf("summary artifact = %q, want finalized meeting summary", string(summaryBody))
+	}
+	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
+		t.Fatalf("transcript artifact should be removed, stat err = %v", err)
+	}
+	if _, err := os.Stat(referencesPath); !os.IsNotExist(err) {
+		t.Fatalf("references artifact should be removed, stat err = %v", err)
+	}
+
+	artifact, err := app.store.GetArtifact(resp.SummaryArtifactID)
+	if err != nil {
+		t.Fatalf("GetArtifact summary: %v", err)
+	}
+	if artifact.RefPath == nil || !strings.HasSuffix(*artifact.RefPath, "/summary.md") {
+		t.Fatalf("summary artifact ref_path = %v, want summary.md", artifact.RefPath)
+	}
+	if artifact.MetaJSON == nil || !strings.Contains(*artifact.MetaJSON, `"session_id":"`+session.ID+`"`) {
+		t.Fatalf("summary artifact meta_json = %v, want session id", artifact.MetaJSON)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

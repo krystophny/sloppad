@@ -441,6 +441,33 @@ func (s *Store) ListParticipantEvents(sessionID string) ([]ParticipantEvent, err
 	return out, rows.Err()
 }
 
+func (s *Store) DeleteParticipantSegments(sessionID string) error {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return errors.New("session id is required")
+	}
+	_, err := s.db.Exec(`DELETE FROM participant_segments WHERE session_id = ?`, sid)
+	return err
+}
+
+func (s *Store) DeleteParticipantEvents(sessionID string) error {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return errors.New("session id is required")
+	}
+	_, err := s.db.Exec(`DELETE FROM participant_events WHERE session_id = ?`, sid)
+	return err
+}
+
+func (s *Store) DeleteParticipantRoomState(sessionID string) error {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return errors.New("session id is required")
+	}
+	_, err := s.db.Exec(`DELETE FROM participant_room_state WHERE session_id = ?`, sid)
+	return err
+}
+
 func (s *Store) UpsertParticipantRoomState(sessionID, summaryText, entitiesJSON, topicTimelineJSON string) error {
 	sid := strings.TrimSpace(sessionID)
 	if sid == "" {

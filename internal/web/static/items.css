@@ -294,7 +294,7 @@
 
 .item-sidebar-menu {
   position: fixed;
-  z-index: 460;
+  z-index: 560;
   min-width: 160px;
   max-width: min(280px, calc(100vw - 24px));
   display: none;

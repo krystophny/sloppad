@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -113,5 +115,29 @@ func TestHotwordStatusReportsReadyWhenAllAssetsPresent(t *testing.T) {
 	}
 	if revision, _ := modelRaw["revision"].(string); revision == "" {
 		t.Fatalf("model revision missing: %#v", modelRaw)
+	}
+}
+
+func TestServeHotwordRuntimeAssetFallsBackToBundledVendorModel(t *testing.T) {
+	app := newAuthedTestApp(t)
+	root := t.TempDir()
+	app.localProjectDir = root
+
+	vendorDir := filepath.Join(root, "internal", "web", "static", "vendor", "openwakeword")
+	if err := os.MkdirAll(vendorDir, 0o755); err != nil {
+		t.Fatalf("mkdir vendor dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, hotwordVendorModelFileName), []byte("bundled-hotword"), 0o644); err != nil {
+		t.Fatalf("write bundled model: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/static/vendor/openwakeword/keyword.onnx", nil)
+	app.Router().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); body != "bundled-hotword" {
+		t.Fatalf("body = %q, want bundled-hotword", body)
 	}
 }

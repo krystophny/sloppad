@@ -18,6 +18,7 @@ let layoutBound = false;
 
 const selectInteractionTool = (...args) => refs.selectInteractionTool(...args);
 const activateLiveSession = (...args) => refs.activateLiveSession(...args);
+const deactivateLiveSession = (...args) => refs.deactivateLiveSession(...args);
 const toggleTTSSilentMode = (...args) => refs.toggleTTSSilentMode(...args);
 const toggleFastMode = (...args) => refs.toggleFastMode(...args);
 const handleStopAction = (...args) => refs.handleStopAction(...args);
@@ -153,7 +154,13 @@ async function selectCircleSession(session: string) {
   if (!state.activeWorkspaceId) return;
   try {
     if (state.liveSessionActive && currentSession() === next) {
-      showStatus(next === 'meeting' ? 'live meeting on' : 'live dialogue on');
+      const stopped = await deactivateLiveSession({
+        disableMeetingConfig: next === 'meeting',
+        finalizeMeeting: next === 'meeting',
+      });
+      if (stopped) {
+        showStatus(next === 'meeting' ? 'live meeting off' : 'live dialogue off');
+      }
       return;
     }
     const started = await activateLiveSession(next);

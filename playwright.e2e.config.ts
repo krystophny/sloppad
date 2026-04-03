@@ -18,11 +18,12 @@ export default defineConfig({
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
+  outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR || '/tmp/slopshell-playwright-e2e',
   grepInvert,
   expect: {
     timeout: 10_000,
   },
-  reporter: [['list'], ['html', { open: 'never' }]],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: process.env.PLAYWRIGHT_HTML_REPORT_DIR || '/tmp/slopshell-playwright-e2e-report' }]],
   use: {
     baseURL: process.env.E2E_BASE_URL || process.env.SLOPSHELL_TEST_SERVER_URL || 'http://127.0.0.1:8420',
     headless: true,

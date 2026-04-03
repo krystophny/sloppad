@@ -157,6 +157,9 @@ func (a *App) captureMeetingNotesForSegment(participantSessionID string, seg sto
 	if text == "" || isCompanionDirectAddress(text) {
 		return
 	}
+	if _, _, matched := stripWakeWordIntentPrefix(text, a.configuredWakeWordPhrases()); matched {
+		return
+	}
 	session, err := a.store.GetParticipantSession(participantSessionID)
 	if err != nil {
 		log.Printf("meeting capture session lookup error: %v", err)

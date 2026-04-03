@@ -102,7 +102,7 @@ func (a *App) buildLocalAssistantPrompt(sessionID string, session store.ChatSess
 		workspaceRef = &workspace
 	}
 	canvasCtx := a.resolveCanvasContext(session.WorkspacePath)
-	companionCtx := a.loadCompanionPromptContext(session.WorkspacePath)
+	companionCtx := a.loadCompanionPromptContextForTurn(sessionID, session.WorkspacePath)
 	prompt := buildLeanLocalAssistantPrompt(workspaceRef, messages, canvasCtx, companionCtx, outputMode)
 	prompt = appendChatCursorPrompt(prompt, cursorCtx)
 	prompt = appendCanvasInkPrompt(prompt, inkCtx)

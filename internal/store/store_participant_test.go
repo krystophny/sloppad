@@ -245,6 +245,70 @@ func TestParticipantRoomStateUpsert(t *testing.T) {
 	}
 }
 
+func TestParticipantTranscriptCleanup(t *testing.T) {
+	s := newTestStore(t)
+	project := createParticipantTestProject(t, s, "proj-cleanup")
+
+	sess, err := s.AddParticipantSession(project.WorkspacePath, "{}")
+	if err != nil {
+		t.Fatalf("add session: %v", err)
+	}
+	if _, err := s.AddParticipantSegment(ParticipantSegment{
+		SessionID:   sess.ID,
+		StartTS:     100,
+		EndTS:       120,
+		Text:        "Computer, summarize the meeting.",
+		Model:       "whisper-1",
+		CommittedAt: 120,
+		Status:      "final",
+	}); err != nil {
+		t.Fatalf("add segment: %v", err)
+	}
+	if err := s.AddParticipantEvent(sess.ID, 1, "assistant_triggered", `{"reason":"direct_address"}`); err != nil {
+		t.Fatalf("add event: %v", err)
+	}
+	if err := s.UpsertParticipantRoomState(sess.ID, "summary", `["Acme"]`, `[{"topic":"Decision"}]`); err != nil {
+		t.Fatalf("upsert room state: %v", err)
+	}
+
+	if err := s.DeleteParticipantSegments(sess.ID); err != nil {
+		t.Fatalf("DeleteParticipantSegments() error: %v", err)
+	}
+	if err := s.DeleteParticipantEvents(sess.ID); err != nil {
+		t.Fatalf("DeleteParticipantEvents() error: %v", err)
+	}
+
+	segments, err := s.ListParticipantSegments(sess.ID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListParticipantSegments() error: %v", err)
+	}
+	if len(segments) != 0 {
+		t.Fatalf("segments = %d, want 0", len(segments))
+	}
+	events, err := s.ListParticipantEvents(sess.ID)
+	if err != nil {
+		t.Fatalf("ListParticipantEvents() error: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("events = %d, want 0", len(events))
+	}
+
+	state, err := s.GetParticipantRoomState(sess.ID)
+	if err != nil {
+		t.Fatalf("GetParticipantRoomState() error: %v", err)
+	}
+	if state.SummaryText != "summary" {
+		t.Fatalf("SummaryText = %q, want summary", state.SummaryText)
+	}
+
+	if err := s.DeleteParticipantRoomState(sess.ID); err != nil {
+		t.Fatalf("DeleteParticipantRoomState() error: %v", err)
+	}
+	if _, err := s.GetParticipantRoomState(sess.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetParticipantRoomState(deleted) error = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestParticipantSessionValidation(t *testing.T) {
 	s := newTestStore(t)
 
@@ -266,6 +330,15 @@ func TestParticipantSessionValidation(t *testing.T) {
 	err = s.UpsertParticipantRoomState("", "summary", "[]", "[]")
 	if err == nil {
 		t.Fatal("expected error for empty session id in room state")
+	}
+	if err := s.DeleteParticipantSegments(""); err == nil {
+		t.Fatal("expected error for empty session id in DeleteParticipantSegments")
+	}
+	if err := s.DeleteParticipantEvents(""); err == nil {
+		t.Fatal("expected error for empty session id in DeleteParticipantEvents")
+	}
+	if err := s.DeleteParticipantRoomState(""); err == nil {
+		t.Fatal("expected error for empty session id in DeleteParticipantRoomState")
 	}
 }
 

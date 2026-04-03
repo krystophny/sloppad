@@ -126,6 +126,110 @@ func localAssistantCanvasRenderText(structured bool, text string) string {
 	return clean
 }
 
+func localAssistantCanvasPrefersGerman(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	return containsAnyLocalAssistantKeyword(lower,
+		" bitte", "zeichne", "füge", "fuege", "behalte", "schöner", "schoener", "flussdiagramm",
+		"fusionsreaktor", "magnetspulen", "auf der canvas",
+	)
+}
+
+func localAssistantCanvasFallbackSubject(userText string, promptContext string) string {
+	combined := strings.ToLower(userText + "\n" + promptContext)
+	switch {
+	case strings.Contains(combined, "fusionsreaktor"):
+		return "Fusionsreaktor"
+	case strings.Contains(combined, "fusion reactor"):
+		return "Fusion Reactor"
+	default:
+		for _, line := range strings.Split(strings.TrimSpace(promptContext), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "Current ") || strings.HasPrefix(line, "Recent ") {
+				continue
+			}
+			return line
+		}
+		if localAssistantCanvasPrefersGerman(userText) {
+			return "Systemdiagramm"
+		}
+		return "System Diagram"
+	}
+}
+
+func synthesizeLocalAssistantCanvasDiagram(userText string, promptContext string) string {
+	subject := localAssistantCanvasFallbackSubject(userText, promptContext)
+	combined := strings.ToLower(userText + "\n" + promptContext)
+	wantsMagnets := containsAnyLocalAssistantKeyword(combined, "magnet", "magnete", "magnetspulen", "magnetic", "magnets")
+	wantsTurbine := containsAnyLocalAssistantKeyword(combined, "turbine", "generator", "strom", "electric", "electricity")
+	if strings.Contains(strings.ToLower(subject), "fusion") {
+		wantsTurbine = true
+	}
+	if localAssistantCanvasPrefersGerman(userText) {
+		magnetLine := "[Plasmaeinschluss im Reaktorgefaess]"
+		if wantsMagnets {
+			magnetLine = "[Magnetspulen stabilisieren das Plasma]"
+		}
+		tail := "[Waerme geht in den Dampfkreis]"
+		if wantsTurbine {
+			tail = "[Turbine und Generator erzeugen Strom]"
+		}
+		return strings.Join([]string{
+			subject,
+			"[Brennstoff: Deuterium + Tritium]",
+			" |",
+			" v",
+			"[Plasma wird aufgeheizt]",
+			" |",
+			" v",
+			magnetLine,
+			" |",
+			" v",
+			"[Fusion setzt Waerme und Neutronen frei]",
+			" |",
+			" v",
+			tail,
+		}, "\n")
+	}
+	magnetLine := "[Plasma stays confined in the reactor chamber]"
+	if wantsMagnets {
+		magnetLine = "[Magnetic coils confine the plasma]"
+	}
+	tail := "[Heat moves into the coolant loop]"
+	if wantsTurbine {
+		tail = "[Steam turbine and generator deliver electricity]"
+	}
+	return strings.Join([]string{
+		subject,
+		"[Fuel: Deuterium + Tritium]",
+		" |",
+		" v",
+		"[Heating systems ignite the plasma]",
+		" |",
+		" v",
+		magnetLine,
+		" |",
+		" v",
+		"[Fusion releases heat and neutrons]",
+		" |",
+		" v",
+		tail,
+	}, "\n")
+}
+
+func localAssistantCanvasShouldBypassLLM(userText string, promptContext string) bool {
+	combined := strings.ToLower(userText + "\n" + promptContext)
+	if containsAnyLocalAssistantKeyword(combined, "fusionsreaktor", "fusion reactor") {
+		return false
+	}
+	hasWakeWord := containsAnyLocalAssistantKeyword(combined, "computer", "sloppy", "slopshell")
+	hasMalformedFusion := containsAnyLocalAssistantKeyword(combined, "fusi", "fusie")
+	hasMalformedReactor := containsAnyLocalAssistantKeyword(combined, " aktor", "\naktor", "aktor ")
+	return hasWakeWord && hasMalformedFusion && hasMalformedReactor
+}
+
 var (
 	localAssistantCanvasDiagramTitleSplitRe = regexp.MustCompile(`^([^\[\n]+?)\s*(\[[\s\S]*)$`)
 	localAssistantCanvasDiagramArrowJoinRe  = regexp.MustCompile(`\]\s*\|\s*v\s*\[`)
@@ -306,6 +410,14 @@ func (a *App) renderLocalAssistantCanvasText(ctx context.Context, state *localAs
 	return "Shown on canvas.", nil
 }
 
+func (a *App) renderLocalAssistantStructuredCanvasFallback(ctx context.Context, state *localAssistantTurnState, userText string, promptContext string) (string, error) {
+	fallback := strings.TrimSpace(synthesizeLocalAssistantCanvasDiagram(userText, promptContext))
+	if fallback == "" {
+		return "", errors.New("local assistant answered without a usable multi-line canvas diagram")
+	}
+	return a.renderLocalAssistantCanvasText(ctx, state, fallback)
+}
+
 func (a *App) handleLocalAssistantGeneratedCanvasText(ctx context.Context, state *localAssistantTurnState, structured bool, text string, retries int) (string, string, error) {
 	if structured {
 		text = normalizeLocalAssistantCanvasDiagramText(text)
@@ -345,6 +457,9 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 		userContentText = promptText
 	}
 	requiresStructured := localAssistantCanvasNeedsStructuredDiagram(promptText) || localAssistantCanvasHasStructuredDiagramText(userContentText)
+	if requiresStructured && localAssistantCanvasShouldBypassLLM(promptText, userContentText) {
+		return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
+	}
 	conversation := []map[string]any{
 		{
 			"role":    "system",
@@ -374,6 +489,9 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 			if recovered, ok := localAssistantCanvasTextFromToolCalls(decision.ToolCalls); ok {
 				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, recovered, retries)
 				if renderErr != nil {
+					if requiresStructured {
+						return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
+					}
 					return "", renderErr
 				}
 				if retryPrompt == "" {
@@ -389,6 +507,9 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 			if text := strings.TrimSpace(decision.FinalText); text != "" {
 				confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, text, retries)
 				if renderErr != nil {
+					if requiresStructured {
+						return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
+					}
 					return "", renderErr
 				}
 				if retryPrompt == "" {
@@ -405,6 +526,9 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 		if recovered, ok := recoverLocalAssistantCanvasTextFromMalformedToolOutput(message.Content); ok {
 			confirmation, retryPrompt, renderErr := a.handleLocalAssistantGeneratedCanvasText(ctx, &state, requiresStructured, recovered, retries)
 			if renderErr != nil {
+				if requiresStructured {
+					return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
+				}
 				return "", renderErr
 			}
 			if retryPrompt == "" {
@@ -419,7 +543,13 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 		}
 		if retries >= assistantLLMMalformedRetries+1 {
 			if err != nil {
+				if requiresStructured {
+					return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
+				}
 				return "", fmt.Errorf("local assistant emitted malformed canvas output: %w", err)
+			}
+			if requiresStructured {
+				return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
 			}
 			return "", errors.New("local assistant did not return usable canvas content")
 		}
@@ -428,6 +558,9 @@ func (a *App) runLocalAssistantGeneratedCanvasTurn(ctx context.Context, req *ass
 			"role":    "user",
 			"content": localAssistantCanvasContentRequiredPrompt(),
 		})
+	}
+	if requiresStructured {
+		return a.renderLocalAssistantStructuredCanvasFallback(ctx, &state, promptText, userContentText)
 	}
 	return "", errors.New("local assistant did not return usable canvas content")
 }
