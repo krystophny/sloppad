@@ -1,4 +1,4 @@
-# タブラ slopshell
+# スロップシェル slopshell
 
 Core paradigm:
 - Full-viewport zen canvas: blank screen (tabula rasa) or artifact fills the view.
