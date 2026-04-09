@@ -83,23 +83,25 @@ Requirements:
 ```bash
 slopshell bootstrap --project-dir .
 slopshell mcp-server --project-dir .
-slopshell server --project-dir . --data-dir ~/.slopshell-web --web-host 0.0.0.0 --web-port 8420 --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
-slopshell server --project-dir . --data-dir ~/.slopshell-web --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+sloptools server --project-dir . --data-dir ~/.local/share/sloptools --mcp-host 127.0.0.1 --mcp-port 9420
+slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```
 
 ## Runtime Stack (Canonical)
 
-Slopshell runs as one Go runtime plus five local services:
+Slopshell runs with one web runtime plus a dedicated local MCP daemon:
 
-1. `slopshell-web.service` (`slopshell server`)
-2. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
+1. `sloptools.service` (`sloptools server`, loopback MCP and canvas relay)
+2. `slopshell-web.service` (`slopshell server`, consuming `--local-mcp-url`)
+3. `slopshell-codex-app-server.service`
+4. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
    - default: Piper
-3. `slopshell-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
-4. `slopshell-llm.service` (local OpenAI-compatible LLM endpoint at `127.0.0.1:8081/v1/chat/completions`)
+5. `slopshell-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
+6. `slopshell-llm.service` (local OpenAI-compatible LLM endpoint at `127.0.0.1:8081/v1/chat/completions`)
    - macOS default: `vllm-mlx` serving `mlx-community/Qwen3.5-9B-4bit`
    - Linux default: `llama.cpp` serving Qwen3.5 9B GGUF
    - keep the server reasoning-capable and WebUI-enabled; fast non-thinking paths disable thinking per request
-5. `slopshell-codex-app-server.service`
 
 Voice commit still uses built-in browser VAD auto-stop, then sends audio to the local voxtype STT service.
 
@@ -111,7 +113,7 @@ Why TTS remains an HTTP sidecar:
 
 - Web UI/API listener: `http://localhost:8420` (public-facing)
 - Optional HTTPS listener: add `--web-cert-file <cert.pem> --web-key-file <key.pem>` (for example on `8443`)
-- MCP listener: `http://127.0.0.1:9420/mcp` (loopback-only)
+- Local MCP listener: `http://127.0.0.1:9420/mcp` (served by `sloptools`, loopback-only)
 - Canvas websocket relay source: `ws://127.0.0.1:9420/ws/canvas`
 - Codex app-server websocket: `ws://127.0.0.1:8787`
 - TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
@@ -131,7 +133,8 @@ Why TTS remains an HTTP sidecar:
 
 Security model:
 - MCP routes are intentionally not exposed on the web listener.
-- By default, non-loopback MCP bind is rejected unless `--unsafe-public-mcp` is explicitly set.
+- `slopshell server` can reuse an existing loopback MCP with `--local-mcp-url`.
+- `sloptools server` rejects non-loopback MCP bind unless `--unsafe-public-mcp` is explicitly set.
 
 ## Temporary Voxtype Branch Pin
 
@@ -163,7 +166,7 @@ Example with `mkcert`:
 mkdir -p ~/.config/slopshell/certs
 mkcert -install
 mkcert -cert-file ~/.config/slopshell/certs/slopshell.pem -key-file ~/.config/slopshell/certs/slopshell-key.pem localhost 127.0.0.1 ::1 192.168.1.50
-slopshell server --project-dir . --data-dir ~/.slopshell-web --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```
 
 If a second device (for example a Mac) connects to this server, trust the same local CA on that device too.

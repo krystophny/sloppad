@@ -101,6 +101,7 @@ func cmdSchema() int {
 type serverConfig struct {
 	dataDir              string
 	projectDir           string
+	localMCPURL          string
 	webHost              string
 	webPort              int
 	webHTTPSPort         int
@@ -173,6 +174,7 @@ func parseServerConfig(args []string) (*serverConfig, int) {
 	}
 	projectDir := fs.String("project-dir", ".", "project dir")
 	fs.StringVar(&cfg.dataDir, "data-dir", cfg.dataDir, "data dir")
+	fs.StringVar(&cfg.localMCPURL, "local-mcp-url", strings.TrimSpace(os.Getenv("SLOPSHELL_LOCAL_MCP_URL")), "existing local MCP endpoint URL to use instead of starting the bundled MCP listener")
 	fs.StringVar(&cfg.webHost, "web-host", "127.0.0.1", "web listener host")
 	fs.IntVar(&cfg.webPort, "web-port", web.DefaultPort, "web listener port")
 	fs.IntVar(&cfg.webHTTPSPort, "web-https-port", 8443, "HTTPS web listener port (requires --web-cert-file and --web-key-file)")
@@ -209,11 +211,20 @@ func runServer(cfg *serverConfig) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	mcpApp, mcpErrCh, mcpURL := startMCPListener(cfg, res.Paths.ProjectDir)
-	if err := waitForMCPReady(cfg.mcpHost, cfg.mcpPort, 10*time.Second, mcpErrCh); err != nil {
-		_ = mcpApp.Stop(context.Background())
-		fmt.Fprintf(os.Stderr, "failed to start local MCP listener: %v\n", err)
-		return 1
+	var (
+		mcpApp   *serve.App
+		mcpErrCh chan error
+		mcpURL   string
+	)
+	if strings.TrimSpace(cfg.localMCPURL) != "" {
+		mcpURL = strings.TrimSpace(cfg.localMCPURL)
+	} else {
+		mcpApp, mcpErrCh, mcpURL = startMCPListener(cfg, res.Paths.ProjectDir)
+		if err := waitForMCPReady(cfg.mcpHost, cfg.mcpPort, 10*time.Second, mcpErrCh); err != nil {
+			_ = mcpApp.Stop(context.Background())
+			fmt.Fprintf(os.Stderr, "failed to start local MCP listener: %v\n", err)
+			return 1
+		}
 	}
 	app, err := web.New(
 		cfg.dataDir,
@@ -226,7 +237,9 @@ func runServer(cfg *serverConfig) int {
 		cfg.devRuntime,
 	)
 	if err != nil {
-		_ = mcpApp.Stop(context.Background())
+		if mcpApp != nil {
+			_ = mcpApp.Stop(context.Background())
+		}
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -240,9 +253,14 @@ func runServer(cfg *serverConfig) int {
 	}
 	startErr := app.Start(cfg.webHost, cfg.webPort)
 	if startErr != nil {
-		_ = mcpApp.Stop(context.Background())
+		if mcpApp != nil {
+			_ = mcpApp.Stop(context.Background())
+		}
 		fmt.Fprintln(os.Stderr, startErr)
 		return 1
+	}
+	if mcpErrCh == nil {
+		return 0
 	}
 	select {
 	case mcpErr := <-mcpErrCh:

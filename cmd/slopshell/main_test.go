@@ -32,6 +32,16 @@ func TestParseServerConfigRejectsPublicMCPWithoutUnsafeFlag(t *testing.T) {
 	}
 }
 
+func TestParseServerConfigAllowsExternalLocalMCPWithoutBundledListenerFlags(t *testing.T) {
+	cfg, status := parseServerConfig([]string{"--local-mcp-url", "http://127.0.0.1:9420/mcp"})
+	if status != 0 {
+		t.Fatalf("parseServerConfig(local mcp url) status = %d, want 0", status)
+	}
+	if cfg.localMCPURL != "http://127.0.0.1:9420/mcp" {
+		t.Fatalf("localMCPURL = %q, want http://127.0.0.1:9420/mcp", cfg.localMCPURL)
+	}
+}
+
 func TestParseServerConfigRejectsIncompleteTLSConfig(t *testing.T) {
 	_, status := parseServerConfig([]string{"--web-cert-file", "/tmp/cert.pem"})
 	if status != 2 {

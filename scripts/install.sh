@@ -936,6 +936,10 @@ UNIT
 
     local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
     local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
+    local web_mcp_args="--mcp-host 127.0.0.1 --mcp-port 9420"
+    if have_cmd sloptools; then
+        web_mcp_args="--local-mcp-url http://127.0.0.1:9420/mcp"
+    fi
 
     cat >"${systemd_dir}/slopshell-web.service" <<UNIT
 [Unit]
@@ -951,7 +955,7 @@ Environment=SLOPSHELL_INTENT_LLM_PROFILE=qwen3.5-9b
 Environment=SLOPSHELL_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b
 Environment=SLOPSHELL_ASSISTANT_LLM_URL=${effective_llm_url}
 Environment=SLOPSHELL_ASSISTANT_LLM_MODEL=local
-ExecStart=${BIN_PATH} server --project-dir ${PROJECT_DIR} --data-dir ${WEB_DATA_DIR} --web-host ${web_host} --web-port 8420 --mcp-host 127.0.0.1 --mcp-port 9420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+ExecStart=${BIN_PATH} server --project-dir ${PROJECT_DIR} --data-dir ${WEB_DATA_DIR} ${web_mcp_args} --web-host ${web_host} --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 Restart=on-failure
 RestartSec=2
 

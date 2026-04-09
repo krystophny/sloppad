@@ -27,12 +27,12 @@ Do not scan source or docs unless the runtime command fails or the request is ab
 ## Runtime Model
 
 Current runtime shape:
-- `slopshell server` starts both listeners in one process:
-  - web listener for the public UI/API
-  - MCP listener for local MCP and canvas relay
+- `slopshell server` is the web/UI runtime and can reuse an existing loopback MCP via `--local-mcp-url`.
+- `sloptools server` is the canonical local MCP daemon on `127.0.0.1:9420`, including canvas relay.
 - `slopshell mcp-server` remains available for stdio MCP use.
 
 Supported loopback sidecars and helpers:
+- `sloptools.service` for the local MCP + canvas relay (`http://127.0.0.1:9420/mcp`)
 - `slopshell-codex-app-server.service` for Codex app-server (`ws://127.0.0.1:8787`)
 - `slopshell-piper-tts.service` for Piper TTS (`http://127.0.0.1:8424/v1/audio/speech`)
 - `slopshell-stt.service` for voxtype daemon with STT service and push-to-talk (`/v1/audio/transcriptions` on `127.0.0.1:8427`)
@@ -64,9 +64,9 @@ What bootstrap must not do:
 ## Security Boundary
 
 - Web UI/API listener stays on port `8420` by default.
-- MCP listener stays on port `9420` and binds loopback by default.
+- `sloptools` MCP listener stays on port `9420` and binds loopback by default.
 - Web routes must not expose `/mcp`.
-- Non-loopback MCP bind is blocked unless `--unsafe-public-mcp` is explicitly set.
+- Non-loopback MCP bind is blocked unless `sloptools server --unsafe-public-mcp` is explicitly set.
 
 ## Canvas + Chat Contract
 
@@ -112,6 +112,7 @@ Important selectors:
 ## Local Services
 
 Core runtime user units:
+- `sloptools.service`
 - `slopshell-web.service`
 - `slopshell-codex-app-server.service`
 - `slopshell-piper-tts.service`
@@ -121,13 +122,13 @@ Core runtime user units:
 Quick status:
 
 ```bash
-systemctl --user status slopshell-web.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service --no-pager -n 40
+systemctl --user status sloptools.service slopshell-web.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service --no-pager -n 40
 ```
 
 Restart core stack:
 
 ```bash
-systemctl --user restart slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service slopshell-web.service
+systemctl --user restart sloptools.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service slopshell-web.service
 ```
 
 ## Endpoints

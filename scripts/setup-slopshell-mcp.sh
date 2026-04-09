@@ -7,4 +7,4 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$SCRIPT_DIR/setup-codex-mcp.sh" "$MCP_URL"
 "$SCRIPT_DIR/setup-claude-mcp.sh" "$MCP_URL"
 
-echo "Configured Codex and Claude to use slopshell at $MCP_URL"
+echo "Configured Codex and Claude to use the local sloptools MCP at $MCP_URL"

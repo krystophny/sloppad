@@ -60,7 +60,7 @@ fi
     echo
   fi
   echo "$MCP_MARKER_BEGIN"
-  echo "[mcp_servers.slopshell]"
+  echo "[mcp_servers.sloptools]"
   printf 'url = "%s"\n' "$MCP_URL"
   echo "$MCP_MARKER_END"
   echo
@@ -90,5 +90,5 @@ fi
 
 mv "$TMP_OUT" "$CONFIG_PATH"
 echo "updated $CONFIG_PATH"
-echo "server key: mcp_servers.slopshell"
+echo "server key: mcp_servers.sloptools"
 echo "profile keys: local, fast"

@@ -33,9 +33,10 @@ printf '%s\n' "$BASE_JSON" | jq -S --arg mcp_url "$MCP_URL" '
   end
   | .mcpServers = (.mcpServers // {})
   | .mcpServers |= (if type == "object" then . else {} end)
-  | .mcpServers.slopshell = {"url": $mcp_url}
+  | .mcpServers.sloptools = {"url": $mcp_url}
+  | del(.mcpServers.slopshell)
 ' >"$TMP_OUT"
 
 mv "$TMP_OUT" "$SETTINGS_PATH"
 echo "updated $SETTINGS_PATH"
-echo "server key: mcpServers.slopshell"
+echo "server key: mcpServers.sloptools"

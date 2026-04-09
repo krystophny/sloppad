@@ -193,9 +193,17 @@ func (a *App) updateEmailInboxSyncState(account *store.ExternalAccount, state em
 func emailSyncConfigDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return ".slopshell"
+		return ".sloptools"
 	}
-	return filepath.Join(home, ".config", "slopshell")
+	preferred := filepath.Join(home, ".config", "sloptools")
+	legacy := filepath.Join(home, ".config", "slopshell")
+	if _, err := os.Stat(preferred); err == nil {
+		return preferred
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return preferred
 }
 
 func emailConfigPath(configDir, explicitPath, fileName string) string {
