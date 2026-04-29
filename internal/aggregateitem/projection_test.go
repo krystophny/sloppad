@@ -39,6 +39,9 @@ func TestCommitmentProjectionCoversAcceptedSourceKinds(t *testing.T) {
 	if len(got.BindingIDs) != 6 {
 		t.Fatalf("BindingIDs = %#v, want all bindings", got.BindingIDs)
 	}
+	if !containsString(got.BindingIDs, "mail:AAMk-msg") {
+		t.Fatalf("BindingIDs = %#v, want case-preserved mail ref", got.BindingIDs)
+	}
 }
 
 func TestCommitmentProjectionSeparatesSourceFieldsAndLocalOverlay(t *testing.T) {
@@ -155,4 +158,13 @@ func binding(provider, ref string, writeable bool) SourceBinding {
 		Writeable:        writeable,
 		AuthoritativeFor: []string{"title", "status"},
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

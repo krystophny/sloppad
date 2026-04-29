@@ -192,7 +192,7 @@ func bindingIDs(bindings []SourceBinding, existing []string) []string {
 	for _, binding := range bindings {
 		ids = append(ids, binding.Provider+":"+binding.Ref)
 	}
-	return uniqueSorted(ids)
+	return uniqueSortedIDs(ids)
 }
 
 func hasWriteableBinding(bindings []SourceBinding) bool {
@@ -245,6 +245,24 @@ func uniqueSorted(values []string) []string {
 		out = append(out, value)
 	}
 	sort.Strings(out)
+	return out
+}
+
+func uniqueSortedIDs(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i]) < strings.ToLower(out[j])
+	})
 	return out
 }
 
