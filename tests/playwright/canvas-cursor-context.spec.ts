@@ -452,3 +452,27 @@ test('markdown image paths are rewritten through the canvas file proxy', async (
   })).toContain('/api/files/');
   await expect(page.locator('#canvas-text img')).toHaveAttribute('src', /docs%2Fimages%2Fdiagram\.png/);
 });
+
+test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {
+  await page.evaluate(() => {
+    (window as any).__mockMarkdownLinkResolution = {
+      ok: false,
+      blocked: true,
+      reason: 'link target leaves the vault',
+    };
+    const app = (window as any)._slopshellApp;
+    if (app?.getState) app.getState().activeWorkspaceId = 'active';
+    const mod = (window as any).__canvasModule;
+    mod.renderCanvas({
+      event_id: 'blocked-markdown-link',
+      kind: 'text_artifact',
+      title: 'topics/active.md',
+      path: 'topics/active.md',
+      text: '[Outside](../../../outside.md)\n\n[[Private Note]]',
+    });
+  });
+
+  await page.locator('#canvas-text a', { hasText: 'Outside' }).click();
+  await expect(page.locator('#canvas-text .markdown-link-blocked-reason')).toHaveText('link target leaves the vault');
+  await expect(page.locator('#canvas-text a', { hasText: 'Private Note' })).toHaveAttribute('href', /slopshell-wiki:/);
+});

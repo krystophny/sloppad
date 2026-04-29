@@ -33,8 +33,8 @@ import {
   captureVisualReasoningContext as captureSurfaceVisualReasoningContext,
   getTextImageAnchorFromPoint as getVisualTextImageAnchorFromPoint,
   hydrateTextArtifactImages as hydrateVisualTextArtifactImages,
-  normalizeCanvasPath,
 } from './canvas-visual.js';
+import { hydrateMarkdownArtifactLinks } from './canvas-markdown-links.js';
 import { apiURL } from './paths.js';
 
 export { escapeHtml, sanitizeHtml } from './canvas-content.js';
@@ -507,6 +507,14 @@ function getPdfURL(event) {
   const pdfState = (window._slopshellApp || {}).getState ? window._slopshellApp.getState() : {};
   const pdfSid = String(pdfState.sessionId || '');
   const pdfPath = String(event?.path || '');
+  const directURL = String(event?.url || '').trim();
+  if (directURL) {
+    return {
+      sid: pdfSid,
+      path: pdfPath,
+      url: directURL,
+    };
+  }
   return {
     sid: pdfSid,
     path: pdfPath,
@@ -812,6 +820,7 @@ export function renderCanvas(event) {
       previousArtifactTitle = nextState.previousArtifactTitle;
     }
     hydrateVisualTextArtifactImages(e.text, String(event?.path || '').trim(), currentCanvasSessionID());
+    hydrateMarkdownArtifactLinks(e.text, event, renderCanvas);
     const textKey = canvasEventPageKey(event);
     const keepIndex = canvasPageState.kind === 'text' && canvasPageState.key === textKey
       ? canvasPageState.pageIndex
@@ -866,7 +875,7 @@ export function renderCanvas(event) {
     e.image.classList.add('is-active');
     const state = (window._slopshellApp || {}).getState ? window._slopshellApp.getState() : {};
     const sid = state.sessionId || '';
-    (e.img as HTMLImageElement).src = apiURL(`files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`);
+    (e.img as HTMLImageElement).src = String(event.url || '').trim() || apiURL(`files/${encodeURIComponent(sid)}/${encodeURIComponent(event.path)}`);
     (e.img as HTMLImageElement).alt = event.title || 'Image';
     activeTextEventId = null;
     activeArtifactTitle = event.title || '';

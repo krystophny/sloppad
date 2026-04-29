@@ -364,6 +364,7 @@ export async function openWorkspaceSidebarFile(path) {
       kind: 'text_artifact',
       event_id: `workspace-file-${Date.now()}`,
       title: filePath,
+      path: filePath,
       text,
     });
     showCanvasColumn('canvas-text');
@@ -400,6 +401,7 @@ export async function openCompanionWorkspaceView(viewKind, filePath) {
       kind: 'text_artifact',
       event_id: `workspace-companion-${viewKind}-${Date.now()}`,
       title: titles[viewKind] || filePath,
+      path: filePath,
       text,
     });
     if (viewKind === 'summary') {

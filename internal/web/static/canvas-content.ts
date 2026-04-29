@@ -735,6 +735,26 @@ function restoreMathSegments(renderedHtml, mathSegments) {
   return output;
 }
 
+function escapeMarkdownLinkText(textRaw) {
+  return String(textRaw || '')
+    .replaceAll('\\', '\\\\')
+    .replaceAll('[', '\\[')
+    .replaceAll(']', '\\]');
+}
+
+function expandWikiLinks(markdownSource) {
+  return String(markdownSource || '').replace(/\[\[([^\]\n]+)\]\]/g, (_match, innerRaw) => {
+    const inner = String(innerRaw || '').trim();
+    if (!inner) return _match;
+    const pipe = inner.indexOf('|');
+    const target = pipe >= 0 ? inner.slice(0, pipe).trim() : inner;
+    const labelRaw = pipe >= 0 ? inner.slice(pipe + 1).trim() : target;
+    if (!target) return _match;
+    const label = labelRaw || target;
+    return `[${escapeMarkdownLinkText(label)}](slopshell-wiki:${encodeURIComponent(target)})`;
+  });
+}
+
 function typesetMarkdownMath(root, attempt = 0) {
   if (!(root instanceof Element) || !root.isConnected) return;
   const mj = window.MathJax;
@@ -830,7 +850,7 @@ export function renderTextArtifact(root, event, previousState) {
   } else if (looksStructuredTextArtifact(textBody)) {
     root.innerHTML = sanitizeHtml(renderCodeBlock(structuredText, 'plaintext'));
   } else {
-    const { text: markdownText, stash: mathSegments } = extractMathSegments(textBody);
+    const { text: markdownText, stash: mathSegments } = extractMathSegments(expandWikiLinks(textBody));
     const renderedMarkdownHtml = marked.parse(markdownText);
     root.innerHTML = restoreMathSegments(sanitizeHtml(renderedMarkdownHtml), mathSegments);
     typesetMarkdownMath(root);

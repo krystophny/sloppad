@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1045,6 +1046,136 @@ func TestProjectFilesListBlocksWorkPersonalSubtree(t *testing.T) {
 	if strings.Contains(body, "diary.md") || strings.Contains(body, personalRoot) {
 		t.Fatalf("personal list response leaked protected metadata: %q", body)
 	}
+}
+
+func TestWorkspaceMarkdownLinkResolveAllowsBrainAndVaultLinks(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	sourceRoot := filepath.Join(vaultRoot, "sources")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(sourceRoot, 0o755); err != nil {
+		t.Fatalf("mkdir sources: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("[related](related.md)"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "related.md"), []byte("related"), 0o644); err != nil {
+		t.Fatalf("write related note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "paper.md"), []byte("paper"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	inBrain := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "related.md", "")
+	if !inBrain.OK || inBrain.ResolvedPath != "brain/topics/related.md" || inBrain.Kind != "text" {
+		t.Fatalf("in-brain resolution = %+v", inBrain)
+	}
+	outToSource := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../sources/paper.md", "")
+	if !outToSource.OK || outToSource.ResolvedPath != "sources/paper.md" || outToSource.Kind != "text" {
+		t.Fatalf("out-to-source resolution = %+v", outToSource)
+	}
+	if strings.Contains(outToSource.FileURL, vaultRoot) || filepath.IsAbs(outToSource.ResolvedPath) {
+		t.Fatalf("resolution leaked absolute path: %+v", outToSource)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, outToSource.FileURL, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("linked file status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if strings.TrimSpace(rr.Body.String()) != "paper" {
+		t.Fatalf("linked file body = %q, want paper", rr.Body.String())
+	}
+}
+
+func TestWorkspaceMarkdownLinkResolveSupportsWikilinks(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("[[Related Note]]"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "Related Note.md"), []byte("related"), 0o644); err != nil {
+		t.Fatalf("write related note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	resolved := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "Related Note", "wikilink")
+	if !resolved.OK || resolved.ResolvedPath != "brain/topics/Related Note.md" {
+		t.Fatalf("wikilink resolution = %+v", resolved)
+	}
+}
+
+func TestWorkspaceMarkdownLinkResolveRejectsOutOfVaultAndWorkPersonal(t *testing.T) {
+	vaultRoot, personalRoot := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	outsidePath := filepath.Join(filepath.Dir(vaultRoot), "outside.md")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	if err := os.WriteFile(outsidePath, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("write outside note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(personalRoot, "diary.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write personal note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	outside := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../../outside.md", "")
+	if outside.OK || !outside.Blocked || !strings.Contains(outside.Reason, "leaves the vault") {
+		t.Fatalf("out-of-vault resolution = %+v", outside)
+	}
+	personal := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../personal/diary.md", "")
+	if personal.OK || !personal.Blocked || !strings.Contains(personal.Reason, "work personal subtree is blocked") {
+		t.Fatalf("personal resolution = %+v", personal)
+	}
+	if strings.Contains(personal.Reason, personalRoot) || strings.Contains(outside.Reason, outsidePath) {
+		t.Fatalf("blocked reason leaked absolute path: personal=%q outside=%q", personal.Reason, outside.Reason)
+	}
+}
+
+func resolveMarkdownLinkForTest(t *testing.T, app *App, workspaceID int64, sourcePath, target, linkType string) workspaceMarkdownLinkResolution {
+	t.Helper()
+	values := url.Values{}
+	values.Set("source", sourcePath)
+	values.Set("target", target)
+	if linkType != "" {
+		values.Set("type", linkType)
+	}
+	rr := doAuthedJSONRequest(
+		t,
+		app.Router(),
+		http.MethodGet,
+		"/api/workspaces/"+itoa(workspaceID)+"/markdown-link/resolve?"+values.Encode(),
+		nil,
+	)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var payload workspaceMarkdownLinkResolution
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode resolution: %v", err)
+	}
+	return payload
 }
 
 func TestProjectFilesListRejectsTraversal(t *testing.T) {

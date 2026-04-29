@@ -47,6 +47,8 @@ func (a *App) Router() http.Handler {
 	r.Post("/api/runtime/workspaces/{workspace_id}/chat-model", a.handleWorkspaceChatModelUpdate)
 	r.Get("/api/runtime/workspaces/{workspace_id}/snapshot", a.handleWorkspaceContext)
 	r.Get("/api/workspaces/{workspace_id}/files", a.handleWorkspaceFilesList)
+	r.Get("/api/workspaces/{workspace_id}/markdown-link/resolve", a.handleWorkspaceMarkdownLinkResolve)
+	r.Get("/api/workspaces/{workspace_id}/markdown-link/file", a.handleWorkspaceMarkdownLinkFile)
 	r.Get("/api/runtime/workspaces/{workspace_id}/welcome", a.handleWorkspaceWelcome)
 	r.Get("/api/workspaces/{workspace_id}/companion/config", a.handleWorkspaceCompanionConfigGet)
 	r.Put("/api/workspaces/{workspace_id}/companion/config", a.handleWorkspaceCompanionConfigPut)

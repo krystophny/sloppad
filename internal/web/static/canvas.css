@@ -68,6 +68,14 @@
 }
 
 #canvas-text h1, #canvas-text h2, #canvas-text h3 { color: var(--accent); margin: 1rem 0 0.5rem; }
+#canvas-text a.markdown-link-blocked {
+  color: #9f1239;
+  text-decoration-style: wavy;
+}
+#canvas-text .markdown-link-blocked-reason {
+  color: #9f1239;
+  font-size: 0.9em;
+}
 #canvas-text code { background: var(--bg-elevated); padding: 0.15rem 0.3rem; border-radius: 3px; }
 #canvas-text pre {
   background: transparent;

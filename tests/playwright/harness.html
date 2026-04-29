@@ -1984,6 +1984,23 @@
           topic_timeline: ['Budget'],
         }), { status: 200 });
       }
+      if (u.includes('/api/workspaces/') && u.includes('/markdown-link/resolve')) {
+        const payload = window.__mockMarkdownLinkResolution || {
+          ok: false,
+          blocked: true,
+          reason: 'link blocked',
+        };
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (u.includes('/api/workspaces/') && u.includes('/markdown-link/file')) {
+        return new Response(String(window.__mockMarkdownLinkFileText || ''), {
+          status: 200,
+          headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+        });
+      }
       if (u.includes('/api/workspaces/') && u.includes('/companion/config') && opts?.method === 'PUT') {
         let body = {};
         try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }

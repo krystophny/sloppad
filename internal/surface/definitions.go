@@ -823,6 +823,8 @@ var WebRouteSections = []RouteSection{
 			"GET /api/runtime/workspaces/{workspace_id}/snapshot",
 			"GET /api/runtime/workspaces/{workspace_id}/welcome",
 			"GET /api/workspaces/{workspace_id}/files",
+			"GET /api/workspaces/{workspace_id}/markdown-link/resolve",
+			"GET /api/workspaces/{workspace_id}/markdown-link/file",
 			"GET /api/workspaces/{workspace_id}/companion/config",
 			"PUT /api/workspaces/{workspace_id}/companion/config",
 			"GET /api/workspaces/{workspace_id}/companion/state",
