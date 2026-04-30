@@ -215,6 +215,7 @@ Brain commands (standalone, before chat flags):
 Link follow (top-level):
   sls link follow <note> <target> [<sphere>]    same as sls brain link follow
   sls agent-here <path-or-link>       start an agent in a resolved folder
+                                      source::target keeps explicit source context
 
 REPL commands (type inside sls):
   /help                 show this help

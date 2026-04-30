@@ -98,14 +98,17 @@ func resolveAgentHereSpec(spec, cwd string) (agentHereResolution, error) {
 	}
 	var sourcePath string
 	var cursor *chatMessageCursor
+	var sourceSphere string
 	if hasSource {
 		var err error
-		sourcePath, cursor, err = resolveAgentHereSource(sourceRaw, baseDir)
+		sourcePath, cursor, sourceSphere, err = resolveAgentHereSource(sourceRaw, baseDir)
 		if err != nil {
 			return agentHereResolution{}, err
 		}
+	} else {
+		sourcePath, cursor, sourceSphere = resolveAgentHereCurrentSource(baseDir)
 	}
-	targetPath, targetIsDir, err := resolveAgentHereTarget(targetRaw, baseDir, sourcePath)
+	targetPath, targetIsDir, err := resolveAgentHereTarget(targetRaw, baseDir, sourcePath, sourceSphere)
 	if err != nil {
 		return agentHereResolution{}, err
 	}
@@ -128,59 +131,105 @@ func splitAgentHereSpec(spec string) (string, string, bool) {
 	return strings.TrimSpace(left), strings.TrimSpace(right), true
 }
 
-func resolveAgentHereSource(raw, cwd string) (string, *chatMessageCursor, error) {
+func resolveAgentHereSource(raw, cwd string) (string, *chatMessageCursor, string, error) {
 	clean := cleanAgentHerePath(raw)
 	if clean == "" {
-		return "", nil, errors.New("source note is required")
+		return "", nil, "", errors.New("source note is required")
 	}
-	path, isDir, err := resolveAgentHereExistingPath(clean, cwd)
+	sourceSphere := agentHereSphereForResolvedContext(cwd)
+	if info, err := os.Stat(cwd); err == nil && !info.IsDir() {
+		if path, isDir, ok := resolveAgentHereDirectPath(clean, cwd, cwd); ok {
+			if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
+				return "", nil, "", err
+			}
+			return path, &chatMessageCursor{
+				Path:  clean,
+				IsDir: isDir,
+			}, sourceSphere, nil
+		}
+	}
+	path, isDir, err := resolveAgentHereExistingPath(clean, cwd, sourceSphere)
 	if err != nil {
-		return "", nil, fmt.Errorf("source note %q not found", raw)
+		return "", nil, "", fmt.Errorf("source note %q not found", raw)
 	}
-	if err := rejectAgentHerePersonalPath(path); err != nil {
-		return "", nil, err
+	if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
+		return "", nil, "", err
 	}
 	return path, &chatMessageCursor{
 		Path:  clean,
 		IsDir: isDir,
-	}, nil
+	}, sourceSphere, nil
 }
 
-func resolveAgentHereTarget(raw, cwd, sourcePath string) (string, bool, error) {
+func resolveAgentHereCurrentSource(cwd string) (string, *chatMessageCursor, string) {
+	sphere := agentHereSphereForResolvedContext(cwd)
+	info, err := os.Stat(cwd)
+	if err != nil {
+		return "", nil, sphere
+	}
+	if info.IsDir() {
+		return "", nil, sphere
+	}
+	path := absoluteCleanPath(cwd)
+	if path == "" {
+		return "", nil, sphere
+	}
+	return path, &chatMessageCursor{
+		Path:  path,
+		IsDir: false,
+	}, sphere
+}
+
+func resolveAgentHereTarget(raw, cwd, sourcePath, sourceSphere string) (string, bool, error) {
 	clean := cleanAgentHerePath(raw)
 	if clean == "" {
 		return "", false, errors.New("target path is required")
 	}
 	if path, isDir, ok := resolveAgentHereDirectPath(clean, cwd, sourcePath); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainPath(clean); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+	if path, isDir, ok := resolveAgentHereBrainPath(clean, sourceSphere); ok {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainBasename(clean); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+	if path, isDir, ok := resolveAgentHereBrainBasename(clean, sourceSphere); ok {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
+	}
+	if err := resolveAgentHereCrossSphereGuard(clean, sourceSphere); err != nil {
+		return "", false, err
 	}
 	return "", false, fmt.Errorf("target %q not found", raw)
 }
 
-func resolveAgentHereExistingPath(raw, cwd string) (string, bool, error) {
+func resolveAgentHereExistingPath(raw, cwd, sourceSphere string) (string, bool, error) {
 	if path, isDir, ok := resolveAgentHereDirectPath(raw, cwd, ""); ok {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
+			return "", false, err
+		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainPath(raw); ok {
+	if path, isDir, ok := resolveAgentHereBrainPath(raw, sourceSphere); ok {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
+			return "", false, err
+		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainBasename(raw); ok {
+	if path, isDir, ok := resolveAgentHereBrainBasename(raw, sourceSphere); ok {
+		if err := rejectAgentHereResolvedPath(path, sourceSphere); err != nil {
+			return "", false, err
+		}
 		return path, isDir, nil
+	}
+	if err := resolveAgentHereCrossSphereGuard(raw, sourceSphere); err != nil {
+		return "", false, err
 	}
 	return "", false, fmt.Errorf("target %q not found", raw)
 }
@@ -195,8 +244,8 @@ func resolveAgentHereDirectPath(raw, cwd, sourcePath string) (string, bool, bool
 	return "", false, false
 }
 
-func resolveAgentHereBrainPath(raw string) (string, bool, bool) {
-	roots := sortedBrainRoots(findBrainRoots())
+func resolveAgentHereBrainPath(raw, sourceSphere string) (string, bool, bool) {
+	roots := agentHereBrainRoots(sourceSphere)
 	if len(roots) == 0 {
 		return "", false, false
 	}
@@ -212,7 +261,7 @@ func resolveAgentHereBrainPath(raw string) (string, bool, bool) {
 	return "", false, false
 }
 
-func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
+func resolveAgentHereBrainBasename(raw, sourceSphere string) (string, bool, bool) {
 	if raw == "" || strings.ContainsAny(raw, `/\`) {
 		return "", false, false
 	}
@@ -221,7 +270,7 @@ func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
 	if filepath.Ext(needle) == "" {
 		alts = append(alts, needle+".md")
 	}
-	roots := sortedBrainRoots(findBrainRoots())
+	roots := agentHereBrainRoots(sourceSphere)
 	for _, root := range roots {
 		brainDir := filepath.Join(root, "brain")
 		var matches []string
@@ -257,6 +306,66 @@ func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
 		return matches[0], info.IsDir(), true
 	}
 	return "", false, false
+}
+
+func agentHereBrainRoots(sourceSphere string) []string {
+	roots := findBrainRoots()
+	if strings.TrimSpace(sourceSphere) == "" {
+		return sortedBrainRoots(roots)
+	}
+	root := strings.TrimSpace(roots[sourceSphere])
+	if root == "" {
+		return nil
+	}
+	return []string{root}
+}
+
+func rejectAgentHereResolvedPath(path, sourceSphere string) error {
+	if err := rejectAgentHerePersonalPath(path); err != nil {
+		return err
+	}
+	if strings.TrimSpace(sourceSphere) == "" {
+		return nil
+	}
+	if sphere := agentHereSphereForPath(path); sphere != "" && sphere != sourceSphere {
+		return errors.New("target leaves the originating sphere")
+	}
+	return nil
+}
+
+func agentHereSphereForResolvedContext(path string) string {
+	return agentHereSphereForPath(path)
+}
+
+func agentHereSphereForPath(path string) string {
+	roots := findBrainRoots()
+	for _, sphere := range []string{"work", "private"} {
+		root := strings.TrimSpace(roots[sphere])
+		if root == "" {
+			continue
+		}
+		if pathInsideOrEqual(path, root) {
+			return sphere
+		}
+	}
+	return ""
+}
+
+func resolveAgentHereCrossSphereGuard(raw, sourceSphere string) error {
+	if strings.TrimSpace(sourceSphere) == "" {
+		return nil
+	}
+	if path, _, ok := resolveAgentHereBrainPath(raw, ""); ok {
+		if sphere := agentHereSphereForPath(path); sphere != "" && sphere != sourceSphere {
+			return errors.New("target leaves the originating sphere")
+		}
+	}
+	if path, _, ok := resolveAgentHereBrainBasename(raw, ""); ok {
+		if sphere := agentHereSphereForPath(path); sphere != "" && sphere != sourceSphere {
+			return errors.New("target leaves the originating sphere")
+		}
+	}
+	return nil
 }
 
 func agentHerePathCandidates(raw, cwd, sourcePath string) []string {

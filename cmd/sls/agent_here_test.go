@@ -113,6 +113,75 @@ func TestResolveAgentHereSpecSourceLinkPreservesCursor(t *testing.T) {
 	}
 }
 
+func TestResolveAgentHereSpecCurrentNotePreservesCursor(t *testing.T) {
+	vaultRoot := t.TempDir()
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	currentNote := filepath.Join(brainRoot, "topics", "current.md")
+	targetDir := filepath.Join(brainRoot, "projects", "path")
+	if err := os.MkdirAll(filepath.Dir(currentNote), 0o755); err != nil {
+		t.Fatalf("mkdir current note dir: %v", err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(currentNote, []byte("current"), 0o644); err != nil {
+		t.Fatalf("write current note: %v", err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", vaultRoot)
+
+	res, err := resolveAgentHereSpec("../projects/path", currentNote)
+	if err != nil {
+		t.Fatalf("resolveAgentHereSpec() error = %v", err)
+	}
+	if res.TargetPath != targetDir {
+		t.Fatalf("target path = %q, want %q", res.TargetPath, targetDir)
+	}
+	if res.StartPath != targetDir {
+		t.Fatalf("start path = %q, want %q", res.StartPath, targetDir)
+	}
+	if res.SourceCursor == nil {
+		t.Fatal("source cursor = nil, want cursor")
+	}
+	if res.SourceCursor.Path != currentNote {
+		t.Fatalf("source cursor path = %q, want %q", res.SourceCursor.Path, currentNote)
+	}
+	if res.SourceCursor.IsDir {
+		t.Fatal("source cursor IsDir = true, want false")
+	}
+}
+
+func TestResolveAgentHereSpecKeepsWorkSphere(t *testing.T) {
+	workRoot := t.TempDir()
+	privateRoot := t.TempDir()
+	workCurrentNote := filepath.Join(workRoot, "brain", "topics", "current.md")
+	privateTarget := filepath.Join(privateRoot, "brain", "private-only.md")
+	if err := os.MkdirAll(filepath.Dir(workCurrentNote), 0o755); err != nil {
+		t.Fatalf("mkdir work note dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(privateTarget), 0o755); err != nil {
+		t.Fatalf("mkdir private target dir: %v", err)
+	}
+	if err := os.WriteFile(workCurrentNote, []byte("current"), 0o644); err != nil {
+		t.Fatalf("write work note: %v", err)
+	}
+	if err := os.WriteFile(privateTarget, []byte("private"), 0o644); err != nil {
+		t.Fatalf("write private target: %v", err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", workRoot)
+	t.Setenv("SLOPSHELL_BRAIN_PRIVATE_ROOT", privateRoot)
+
+	_, err := resolveAgentHereSpec("private-only.md", workCurrentNote)
+	if err == nil {
+		t.Fatal("resolveAgentHereSpec() error = nil, want originating sphere guard")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "sphere") {
+		t.Fatalf("resolveAgentHereSpec() error = %v, want sphere guard", err)
+	}
+	if strings.Contains(err.Error(), privateRoot) {
+		t.Fatalf("resolveAgentHereSpec() leaked private root: %v", err)
+	}
+}
+
 func TestResolveAgentHereSpecMissingTarget(t *testing.T) {
 	cwd := t.TempDir()
 	if _, err := resolveAgentHereSpec("missing.md", cwd); err == nil {
