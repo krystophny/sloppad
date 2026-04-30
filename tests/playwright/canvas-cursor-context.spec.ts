@@ -478,9 +478,10 @@ test('markdown image paths are rewritten through the canvas file proxy', async (
 
 test('folder markdown links start an agent in the linked workspace rooted at the vault target', async ({ page }) => {
   await seedBrainWorkspace(page);
+  await clearLog(page);
   await page.evaluate(async () => {
     const mod = await import(`../../internal/web/static/app-workspace-runtime.js?ts=${Date.now()}`);
-    await mod.startAgentHereAtPath('/tmp/vault/project/path');
+    await mod.startAgentHereAtPath('/tmp/vault/project/path', 'brain');
   });
 
   await expect.poll(async () => {
@@ -490,6 +491,15 @@ test('folder markdown links start an agent in the linked workspace rooted at the
         && entry.action === 'project_create'
         && String(entry.payload?.kind || '') === 'linked'
         && String(entry.payload?.path || '') === '/tmp/vault/project/path',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.source_workspace_id || '') === 'brain',
     );
   }, { timeout: 5_000 }).toBe(true);
 
@@ -551,7 +561,67 @@ test('start agent here welcome action opens the linked source folder and sends a
   await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
 });
 
+test('file markdown links open the parent folder as source context', async ({ page }) => {
+  await seedBrainWorkspace(page);
+  await clearLog(page);
+  await page.evaluate(() => {
+    const app = (window as any)._slopshellApp;
+    if (app?.getState) {
+      app.getState().activeWorkspaceId = 'brain';
+    }
+  });
+  await page.evaluate(() => {
+    (window as any).__mockMarkdownLinkResolution = {
+      ok: true,
+      kind: 'text',
+      resolved_path: 'project/path/file.md',
+      vault_relative_path: 'project/path/file.md',
+      file_url: '/api/workspaces/brain/markdown-link/file?path=project%2Fpath%2Ffile.md',
+    };
+    const mod = (window as any).__canvasModule;
+    mod.renderCanvas({
+      event_id: 'file-markdown-link',
+      kind: 'text_artifact',
+      title: 'topics/active.md',
+      path: 'topics/active.md',
+      text: '[File](../../project/path/file.md)',
+    });
+  });
+
+  await page.locator('#canvas-text a', { hasText: 'File' }).evaluate((node) => {
+    if (node instanceof HTMLAnchorElement) node.click();
+  });
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.kind || '') === 'linked'
+        && String(entry.payload?.path || '') === '/tmp/vault/project/path',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.source_workspace_id || '') === 'brain',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'message_sent'
+        && String(entry.text || '') === 'Start agent here.',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+});
+
 test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {
+  await clearLog(page);
   await page.evaluate(() => {
     (window as any).__mockMarkdownLinkResolution = {
       ok: false,
@@ -573,4 +643,7 @@ test('blocked markdown note links surface resolver reasons on canvas', async ({ 
   await page.locator('#canvas-text a', { hasText: 'Outside' }).click();
   await expect(page.locator('#canvas-text .markdown-link-blocked-reason')).toHaveText('link target leaves the vault');
   await expect(page.locator('#canvas-text a', { hasText: 'Private Note' })).toHaveAttribute('href', /slopshell-wiki:/);
+  await page.waitForTimeout(200);
+  const log = await getLog(page);
+  expect(log.some((entry) => entry.type === 'api_fetch' && entry.action === 'project_create')).toBe(false);
 });

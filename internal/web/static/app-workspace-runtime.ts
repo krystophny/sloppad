@@ -726,12 +726,13 @@ export async function createTemporaryProject(kind, sourceWorkspaceID = '') {
   }
 }
 
-async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefix, readyText) {
+async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefix, readyText, sourceWorkspaceID = '') {
   const path = String(workspacePath || '').trim();
   if (!path) return '';
   if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return '';
   showStatus(statusText);
   try {
+    const sourceID = String(sourceWorkspaceID || '').trim();
     const resp = await fetch(apiURL('runtime/workspaces'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -739,6 +740,7 @@ async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefi
         kind: 'linked',
         path,
         activate: true,
+        ...(sourceID ? { source_workspace_id: sourceID } : {}),
       }),
     });
     if (!resp.ok) {
@@ -763,12 +765,24 @@ async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefi
   }
 }
 
-export async function createLinkedWorkspaceAtPath(workspacePath) {
-  await openLinkedWorkspaceAtPath(workspacePath, 'opening linked workspace...', 'Linked workspace open failed', 'linked workspace ready');
+export async function createLinkedWorkspaceAtPath(workspacePath, sourceWorkspaceID = '') {
+  await openLinkedWorkspaceAtPath(
+    workspacePath,
+    'opening linked workspace...',
+    'Linked workspace open failed',
+    'linked workspace ready',
+    sourceWorkspaceID,
+  );
 }
 
-export async function startAgentHereAtPath(workspacePath) {
-  const workspaceID = await openLinkedWorkspaceAtPath(workspacePath, 'starting agent here...', 'Start agent here failed', 'agent ready');
+export async function startAgentHereAtPath(workspacePath, sourceWorkspaceID = '') {
+  const workspaceID = await openLinkedWorkspaceAtPath(
+    workspacePath,
+    'starting agent here...',
+    'Start agent here failed',
+    'agent ready',
+    sourceWorkspaceID,
+  );
   if (!workspaceID) return;
   await submitMessage('Start agent here.', { kind: 'start_agent_here' });
 }

@@ -1355,6 +1355,28 @@ func TestWorkspaceMarkdownLinkResolveUsesRelativeFileURLForVaultNotes(t *testing
 	}
 }
 
+func TestWorkspaceMarkdownLinkResolveReportsMissingTarget(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	sourceDir := filepath.Join(brainRoot, "topics")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	resolution := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../project/path/missing.md", "")
+	if resolution.OK || !resolution.Blocked || resolution.Reason != "link target was not found in the vault" {
+		t.Fatalf("missing target resolution = %+v", resolution)
+	}
+}
+
 func resolveMarkdownLinkForTest(t *testing.T, app *App, workspaceID int64, sourcePath, target, linkType string) workspaceMarkdownLinkResolution {
 	t.Helper()
 	values := url.Values{}
@@ -1513,6 +1535,60 @@ func TestProjectWelcomeIncludesStartAgentCardForLinkedWorkspaces(t *testing.T) {
 	}
 	if !strings.Contains(rrWelcome.Body.String(), "Start agent here") {
 		t.Fatalf("welcome missing start-agent card: %s", rrWelcome.Body.String())
+	}
+}
+
+func TestLinkedWorkspaceCreationCopiesSourceSettings(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	linkedRoot := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir linked root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	source, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(source) error: %v", err)
+	}
+	if err := app.store.UpdateEnrichedWorkspaceChatModel(workspaceIDStr(source.ID), "gpt"); err != nil {
+		t.Fatalf("UpdateWorkspaceChatModel() error: %v", err)
+	}
+	if err := app.store.UpdateEnrichedWorkspaceChatModelReasoningEffort(workspaceIDStr(source.ID), "xhigh"); err != nil {
+		t.Fatalf("UpdateWorkspaceChatModelReasoningEffort() error: %v", err)
+	}
+	if err := app.store.UpdateEnrichedWorkspaceCompanionConfig(workspaceIDStr(source.ID), `{"companion_enabled":true,"idle_surface":"black"}`); err != nil {
+		t.Fatalf("UpdateWorkspaceCompanionConfig() error: %v", err)
+	}
+
+	linked, created, err := app.createWorkspace2(runtimeWorkspaceCreateRequest{
+		Name:              "Linked source",
+		Kind:              "linked",
+		Path:              linkedRoot,
+		SourceWorkspaceID: workspaceIDStr(source.ID),
+	})
+	if err != nil {
+		t.Fatalf("create linked workspace: %v", err)
+	}
+	if !created {
+		t.Fatal("expected linked workspace to be created")
+	}
+	if linked.Kind != "linked" {
+		t.Fatalf("linked kind = %q, want linked", linked.Kind)
+	}
+	if linked.ChatModel != "gpt" {
+		t.Fatalf("linked chat model = %q, want gpt", linked.ChatModel)
+	}
+	if linked.ChatModelReasoningEffort != "xhigh" {
+		t.Fatalf("linked reasoning effort = %q, want xhigh", linked.ChatModelReasoningEffort)
+	}
+	if got := strings.TrimSpace(linked.CompanionConfigJSON); got != `{"companion_enabled":true,"idle_surface":"black"}` {
+		t.Fatalf("linked companion config = %q", got)
 	}
 }
 

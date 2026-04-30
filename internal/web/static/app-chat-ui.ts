@@ -591,7 +591,7 @@ export async function handleWelcomeAction(action) {
   if (type === 'start_agent_here') {
     const path = String(action?.path || '').trim();
     if (!path) return;
-    await startAgentHereAtPath(path);
+    await startAgentHereAtPath(path, String(state.activeWorkspaceId || '').trim());
   }
 }
 
