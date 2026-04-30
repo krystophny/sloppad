@@ -701,6 +701,43 @@ test('file markdown links open the parent folder as source context', async ({ pa
   await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).toBe('brain');
 });
 
+test('in-brain markdown note links stay in the current workspace and render the linked note', async ({ page }) => {
+  await seedBrainWorkspace(page);
+  await clearLog(page);
+  await page.evaluate(() => {
+    const app = (window as any)._slopshellApp;
+    if (app?.getState) {
+      app.getState().activeWorkspaceId = 'brain';
+    }
+    (window as any).__mockMarkdownLinkFileText = '# Related note\n\nBrain note body';
+    (window as any).__mockMarkdownLinkResolution = {
+      ok: true,
+      kind: 'text',
+      resolved_path: 'brain/topics/related.md',
+      vault_relative_path: 'brain/topics/related.md',
+      source_path: 'topics/active.md',
+      file_url: '/api/workspaces/brain/markdown-link/file?path=brain%2Ftopics%2Frelated.md',
+    };
+    const mod = (window as any).__canvasModule;
+    mod.renderCanvas({
+      event_id: 'in-brain-markdown-link',
+      kind: 'text_artifact',
+      title: 'topics/active.md',
+      path: 'topics/active.md',
+      text: '[Related](related.md)',
+    });
+  });
+
+  await page.locator('#canvas-text a', { hasText: 'Related' }).evaluate((node) => {
+    if (node instanceof HTMLAnchorElement) node.click();
+  });
+
+  await expect(page.locator('#canvas-text')).toContainText('Brain note body');
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).toBe('brain');
+  const log = await getLog(page);
+  expect(log.some((entry) => entry.type === 'api_fetch' && entry.action === 'project_create')).toBe(false);
+});
+
 test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {
   await clearLog(page);
   await page.evaluate(() => {
