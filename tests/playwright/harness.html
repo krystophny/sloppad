@@ -1672,7 +1672,12 @@
           action: 'project_create',
           method: opts?.method || 'POST',
           url: u,
-          payload: { kind, workspace_id: id, source_workspace_id: String(body?.source_workspace_id || '').trim() },
+          payload: {
+            kind,
+            path: String(body?.path || '').trim(),
+            workspace_id: id,
+            source_workspace_id: String(body?.source_workspace_id || '').trim(),
+          },
         });
         return new Response(JSON.stringify({
           ok: true,

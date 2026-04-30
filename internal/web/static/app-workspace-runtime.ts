@@ -725,6 +725,41 @@ export async function createTemporaryProject(kind, sourceWorkspaceID = '') {
   }
 }
 
+export async function createLinkedWorkspaceAtPath(workspacePath) {
+  const path = String(workspacePath || '').trim();
+  if (!path) return;
+  if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return;
+  showStatus('opening linked workspace...');
+  try {
+    const resp = await fetch(apiURL('runtime/workspaces'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'linked',
+        path,
+        activate: true,
+      }),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    const responsePayload = await resp.json();
+    const project = responsePayload?.workspace || {};
+    const workspaceID = String(project?.id || '').trim();
+    await fetchProjects();
+    if (workspaceID) {
+      await switchProject(workspaceID);
+      return;
+    }
+    showStatus('linked workspace ready');
+  } catch (err) {
+    const message = String(err?.message || err || 'linked workspace open failed');
+    appendPlainMessage('system', `Linked workspace open failed: ${message}`);
+    showStatus(`linked workspace open failed: ${message}`);
+  }
+}
+
 export async function persistTemporaryProject(workspaceID) {
   const id = String(workspaceID || '').trim();
   if (!id) return;

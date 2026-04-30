@@ -22,6 +22,7 @@ func buildLeanLocalAssistantPrompt(
 ) string {
 	var b strings.Builder
 	appendLeanLocalAssistantWorkspace(&b, workspace)
+	appendWorkspaceInstructionContext(&b, workspaceInstructionBasePath(workspace))
 	appendLeanLocalAssistantCanvas(&b, canvas)
 	appendLeanLocalAssistantCompanion(&b, companion)
 	if isVoiceOutputMode(outputMode) && !detailRequested {

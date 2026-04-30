@@ -1,9 +1,44 @@
 import { apiURL } from './paths.js';
 import { normalizeCanvasPath } from './canvas-visual.js';
+import { createLinkedWorkspaceAtPath } from './app-workspace-runtime.js';
 
 function currentWorkspaceID() {
   const state = (window._slopshellApp || {}).getState ? window._slopshellApp.getState() : {};
   return String(state.activeWorkspaceId || 'active').trim() || 'active';
+}
+
+function currentWorkspaceProject() {
+  const state = (window._slopshellApp || {}).getState ? window._slopshellApp.getState() : {};
+  const projects = Array.isArray(state.projects) ? state.projects : [];
+  const activeWorkspaceId = String(state.activeWorkspaceId || '').trim();
+  return projects.find((project) => String(project?.id || '') === activeWorkspaceId) || null;
+}
+
+function parentPath(rawPath) {
+  const cleaned = String(rawPath || '').trim().replace(/[\\/]+$/, '');
+  if (!cleaned) return '';
+  return cleaned.replace(/[\\/]+[^\\/]+$/, '');
+}
+
+function joinWorkspacePath(basePath, relativePath) {
+  const base = String(basePath || '').trim().replace(/[\\/]+$/, '');
+  const rel = String(relativePath || '').trim().replace(/[\\/]+/g, '/').replace(/^\/+/, '');
+  if (!base) return rel;
+  if (!rel) return base;
+  const sep = base.includes('\\') ? '\\' : '/';
+  return `${base}${sep}${rel.replaceAll('/', sep)}`;
+}
+
+function resolveLinkedWorkspacePath(vaultRelativePath) {
+  const project = currentWorkspaceProject();
+  const rootPath = String(project?.root_path || project?.workspace_path || '').trim();
+  if (!rootPath) throw new Error('workspace root unavailable');
+  if (!/brain$/i.test(rootPath.replace(/[\\/]+$/, ''))) {
+    throw new Error('linked folders can only open from a brain workspace');
+  }
+  const vaultRoot = parentPath(rootPath);
+  if (!vaultRoot) throw new Error('vault root unavailable');
+  return joinWorkspacePath(vaultRoot, vaultRelativePath);
 }
 
 function canvasMarkdownSourcePath(event) {
@@ -48,11 +83,16 @@ function showMarkdownLinkBlocked(link, reasonRaw) {
 
 async function openResolvedMarkdownLink(resolution, renderCanvas) {
   const link = resolution?.link || resolution || {};
-  const fileURL = String(link.file_url || '').trim();
-  if (!fileURL) throw new Error('link target unavailable');
   const kind = String(link.kind || 'text').trim();
   const path = String(link.vault_relative_path || link.resolved_path || '').trim();
   const title = path || 'Linked note';
+  if (kind === 'folder') {
+    const linkedWorkspacePath = resolveLinkedWorkspacePath(path);
+    await createLinkedWorkspaceAtPath(linkedWorkspacePath);
+    return;
+  }
+  const fileURL = String(link.file_url || '').trim();
+  if (!fileURL) throw new Error('link target unavailable');
   if (kind === 'image') {
     renderCanvas({
       kind: 'image_artifact',
