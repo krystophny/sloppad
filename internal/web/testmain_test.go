@@ -2,6 +2,7 @@ package web
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -10,5 +11,6 @@ import (
 // httptest-backed MCPs and must not fork a real subprocess.
 func TestMain(m *testing.M) {
 	_ = os.Setenv("SLOPSHELL_HELPY_BIN", "off")
+	_ = os.Setenv("SLOPTOOLS_VAULT_CONFIG", filepath.Join(os.TempDir(), "slopshell-test-vaults.toml"))
 	os.Exit(m.Run())
 }

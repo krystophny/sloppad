@@ -8,6 +8,7 @@ const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const openWorkspaceSidebarFile = (...args) => refs.openWorkspaceSidebarFile(...args);
 const switchProject = (...args) => refs.switchProject(...args);
+const startAgentHereAtPath = (...args) => refs.startAgentHereAtPath(...args);
 const showCanvasColumn = (...args) => refs.showCanvasColumn(...args);
 const chatHistoryEl = (...args) => refs.chatHistoryEl(...args);
 const syncChatScroll = (...args) => refs.syncChatScroll(...args);
@@ -562,7 +563,7 @@ export function activeWelcomeWorkspaceID() {
 export async function handleWelcomeAction(action) {
   const type = String(action?.type || '').trim();
   if (!type) return;
-  if (type === 'switch_workspace' || type === 'switch_workspace') {
+  if (type === 'switch_workspace') {
     const workspaceID = String(action?.workspace_id || action?.workspace_id || '').trim();
     if (!workspaceID) return;
     await switchProject(workspaceID);
@@ -585,6 +586,12 @@ export async function handleWelcomeAction(action) {
   }
   if (type === 'set_startup_behavior') {
     await updateRuntimePreferences({ startup_behavior: 'resume_active' });
+    return;
+  }
+  if (type === 'start_agent_here') {
+    const path = String(action?.path || '').trim();
+    if (!path) return;
+    await startAgentHereAtPath(path);
   }
 }
 

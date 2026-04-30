@@ -179,6 +179,55 @@ func TestNewAppPrefersLocalProjectWorkspaceOnStartup(t *testing.T) {
 	}
 }
 
+func TestStartupWorkspacePrefersBrainPresetOverLocalProject(t *testing.T) {
+	rootDir := t.TempDir()
+	dataDir := filepath.Join(rootDir, "data")
+	localProjectDir := filepath.Join(rootDir, "tabula")
+	workVault := filepath.Join(rootDir, "work-vault")
+	brainRoot := filepath.Join(workVault, "brain")
+	if err := os.MkdirAll(localProjectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localProjectDir) error: %v", err)
+	}
+	if err := os.MkdirAll(brainRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(brainRoot) error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localProjectDir, "go.mod"), []byte("module github.com/sloppy-org/slopshell\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(go.mod) error: %v", err)
+	}
+	configPath := filepath.Join(rootDir, "vaults.toml")
+	config := `[[vault]]
+sphere = "work"
+root = "` + workVault + `"
+brain = "brain"
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("WriteFile(vault config) error: %v", err)
+	}
+	t.Setenv("SLOPTOOLS_VAULT_CONFIG", configPath)
+
+	app, err := New(dataDir, localProjectDir, "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if err := app.store.AddAuthSession(testAuthToken); err != nil {
+		t.Fatalf("add auth session: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Shutdown(context.Background())
+	})
+
+	startupWorkspace, err := app.ensureStartupWorkspace()
+	if err != nil {
+		t.Fatalf("ensureStartupWorkspace() error: %v", err)
+	}
+	if startupWorkspace.DirPath != brainRoot {
+		t.Fatalf("startup dir_path = %q, want %q", startupWorkspace.DirPath, brainRoot)
+	}
+	if startupWorkspace.Name != "Work brain" {
+		t.Fatalf("startup name = %q, want %q", startupWorkspace.Name, "Work brain")
+	}
+}
+
 func TestProjectAPIModelIncludesWorkspaceChatSession(t *testing.T) {
 	app := newAuthedTestApp(t)
 
@@ -1315,6 +1364,41 @@ func TestProjectWelcomeIncludesRuntimeCards(t *testing.T) {
 	}
 	if !strings.Contains(rrWelcome.Body.String(), "Silent mode") {
 		t.Fatalf("welcome missing runtime card: %s", rrWelcome.Body.String())
+	}
+}
+
+func TestProjectWelcomeIncludesStartAgentCardForLinkedWorkspaces(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	linkedRoot := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir linked root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	if _, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork); err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+	linked, _, err := app.createWorkspace2(runtimeWorkspaceCreateRequest{
+		Name: "Linked source",
+		Kind: "linked",
+		Path: linkedRoot,
+	})
+	if err != nil {
+		t.Fatalf("create linked workspace: %v", err)
+	}
+	workspaceID := workspaceIDStr(linked.ID)
+	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/runtime/workspaces/"+workspaceID+"/welcome", nil)
+	if rrWelcome.Code != http.StatusOK {
+		t.Fatalf("expected linked welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
+	}
+	if !strings.Contains(rrWelcome.Body.String(), "Start agent here") {
+		t.Fatalf("welcome missing start-agent card: %s", rrWelcome.Body.String())
 	}
 }
 

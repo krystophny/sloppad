@@ -43,6 +43,7 @@ func (a *App) brainPresets() []brainPreset {
 		{brainPresetIDWork, "Work brain", store.SphereWork},
 		{brainPresetIDPrivate, "Private brain", store.SpherePrivate},
 	}
+	configRoots := loadSloptoolsBrainRoots()
 	out := make([]brainPreset, 0, len(defs))
 	for _, def := range defs {
 		preset := brainPreset{
@@ -50,11 +51,13 @@ func (a *App) brainPresets() []brainPreset {
 			Label:  def.label,
 			Sphere: def.sphere,
 		}
-		root := a.brainPresetRootEnv(def.id)
+		root := strings.TrimSpace(configRoots[def.sphere])
+		if root == "" {
+			root = a.brainPresetRootEnv(def.id)
+		}
 		if root != "" {
 			preset.RootPath = filepath.Clean(root)
-			info, err := os.Stat(preset.RootPath)
-			preset.Available = err == nil && info.IsDir()
+			preset.Available = presetRootAvailable(preset.RootPath)
 		}
 		out = append(out, preset)
 	}

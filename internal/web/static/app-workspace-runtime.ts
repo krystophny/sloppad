@@ -725,11 +725,11 @@ export async function createTemporaryProject(kind, sourceWorkspaceID = '') {
   }
 }
 
-export async function createLinkedWorkspaceAtPath(workspacePath) {
+async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefix, readyText) {
   const path = String(workspacePath || '').trim();
   if (!path) return;
   if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return;
-  showStatus('opening linked workspace...');
+  showStatus(statusText);
   try {
     const resp = await fetch(apiURL('runtime/workspaces'), {
       method: 'POST',
@@ -752,12 +752,20 @@ export async function createLinkedWorkspaceAtPath(workspacePath) {
       await switchProject(workspaceID);
       return;
     }
-    showStatus('linked workspace ready');
+    showStatus(readyText);
   } catch (err) {
-    const message = String(err?.message || err || 'linked workspace open failed');
-    appendPlainMessage('system', `Linked workspace open failed: ${message}`);
-    showStatus(`linked workspace open failed: ${message}`);
+    const message = String(err?.message || err || 'workspace open failed');
+    appendPlainMessage('system', `${failurePrefix}: ${message}`);
+    showStatus(`${failurePrefix}: ${message}`);
   }
+}
+
+export async function createLinkedWorkspaceAtPath(workspacePath) {
+  await openLinkedWorkspaceAtPath(workspacePath, 'opening linked workspace...', 'Linked workspace open failed', 'linked workspace ready');
+}
+
+export async function startAgentHereAtPath(workspacePath) {
+  await openLinkedWorkspaceAtPath(workspacePath, 'starting agent here...', 'Start agent here failed', 'agent ready');
 }
 
 export async function persistTemporaryProject(workspaceID) {

@@ -24,11 +24,11 @@ type workspacePresetsListResponse struct {
 }
 
 type workspacePresetActivateResponse struct {
-	OK                bool                  `json:"ok"`
-	ActiveWorkspaceID string                `json:"active_workspace_id"`
-	ActiveSphere      string                `json:"active_sphere"`
-	Preset            workspacePresetEntry  `json:"preset"`
-	Workspace         workspaceListEntry    `json:"workspace"`
+	OK                bool                 `json:"ok"`
+	ActiveWorkspaceID string               `json:"active_workspace_id"`
+	ActiveSphere      string               `json:"active_sphere"`
+	Preset            workspacePresetEntry `json:"preset"`
+	Workspace         workspaceListEntry   `json:"workspace"`
 }
 
 func findPreset(presets []workspacePresetEntry, id string) *workspacePresetEntry {
@@ -90,6 +90,59 @@ func TestBrainPresetsListResolvesFromEnv(t *testing.T) {
 	}
 	if priv.Sphere != store.SpherePrivate {
 		t.Fatalf("private sphere = %q, want %q", priv.Sphere, store.SpherePrivate)
+	}
+}
+
+func TestBrainPresetsPreferSloptoolsVaultConfig(t *testing.T) {
+	rootDir := t.TempDir()
+	workVault := filepath.Join(rootDir, "work-vault")
+	privateVault := filepath.Join(rootDir, "private-vault")
+	if err := os.MkdirAll(filepath.Join(workVault, "brain"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(work brain): %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(privateVault, "brain"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(private brain): %v", err)
+	}
+	configPath := filepath.Join(rootDir, "vaults.toml")
+	config := `[[vault]]
+sphere = "work"
+root = "` + workVault + `"
+brain = "brain"
+
+[[vault]]
+sphere = "private"
+root = "` + privateVault + `"
+brain = "brain"
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write vault config: %v", err)
+	}
+	t.Setenv("SLOPTOOLS_VAULT_CONFIG", configPath)
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", filepath.Join(rootDir, "env-work"))
+	t.Setenv("SLOPSHELL_BRAIN_PRIVATE_ROOT", filepath.Join(rootDir, "env-private"))
+
+	app := newAuthedTestApp(t)
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/runtime/workspace-presets", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	var payload workspacePresetsListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	work := findPreset(payload.Presets, brainPresetIDWork)
+	if work == nil || !work.Available {
+		t.Fatalf("work preset missing or unavailable: %#v", work)
+	}
+	if work.RootPath != filepath.Join(workVault, "brain") {
+		t.Fatalf("work root = %q, want %q", work.RootPath, filepath.Join(workVault, "brain"))
+	}
+	priv := findPreset(payload.Presets, brainPresetIDPrivate)
+	if priv == nil || !priv.Available {
+		t.Fatalf("private preset missing or unavailable: %#v", priv)
+	}
+	if priv.RootPath != filepath.Join(privateVault, "brain") {
+		t.Fatalf("private root = %q, want %q", priv.RootPath, filepath.Join(privateVault, "brain"))
 	}
 }
 

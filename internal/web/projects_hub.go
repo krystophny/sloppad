@@ -158,6 +158,24 @@ func discoverProjectWelcomeCards(rootPath string) ([]workspaceWelcomeCard, []wor
 func (a *App) buildProjectWelcomeSections(project store.Workspace) []workspaceWelcomeSection {
 	docCards, recentCards := discoverProjectWelcomeCards(project.RootPath)
 	sections := make([]workspaceWelcomeSection, 0, 3)
+	if strings.EqualFold(strings.TrimSpace(project.Kind), "linked") && strings.TrimSpace(project.RootPath) != "" {
+		sections = append(sections, workspaceWelcomeSection{
+			ID:    "agent",
+			Title: "Agent",
+			Cards: []workspaceWelcomeCard{
+				{
+					ID:          "start-agent-here",
+					Title:       "Start agent here",
+					Subtitle:    filepath.Base(strings.TrimSpace(project.RootPath)),
+					Description: "Use the nearest AGENTS.md or CLAUDE.md from this source folder.",
+					Action: workspaceWelcomeAction{
+						Type: "start_agent_here",
+						Path: project.RootPath,
+					},
+				},
+			},
+		})
+	}
 	if len(recentCards) > 0 {
 		sections = append(sections, workspaceWelcomeSection{
 			ID:    "recent",

@@ -496,6 +496,45 @@ test('folder markdown links open a linked workspace rooted at the vault target',
   await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
 });
 
+test('start agent here welcome action opens the linked source folder', async ({ page }) => {
+  await seedBrainWorkspace(page);
+  await page.evaluate(async () => {
+    const mod = await import(`../../internal/web/static/app-chat-ui.js?ts=${Date.now()}`);
+    mod.renderWelcomeSurface({
+      workspace_id: 'brain',
+      title: 'Linked source',
+      sections: [{
+        id: 'agent',
+        title: 'Agent',
+        cards: [{
+          id: 'start-agent-here',
+          title: 'Start agent here',
+          subtitle: 'project/path',
+          description: 'Use nearest instructions',
+          action: {
+            type: 'start_agent_here',
+            path: '/tmp/vault/project/path',
+          },
+        }],
+      }],
+    });
+  });
+
+  await page.locator('#canvas-text .welcome-card', { hasText: 'Start agent here' }).click();
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.kind || '') === 'linked'
+        && String(entry.payload?.path || '') === '/tmp/vault/project/path',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
+});
+
 test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {
   await page.evaluate(() => {
     (window as any).__mockMarkdownLinkResolution = {
