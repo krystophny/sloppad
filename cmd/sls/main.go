@@ -43,12 +43,15 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if isBrainSubcommand(args) || isTopLevelLinkFollow(args) {
+	if isBrainSubcommand(args) || isTopLevelLinkFollow(args) || isTopLevelAgentHere(args) {
 		brainArgs := commandArgs(args)
 		opts, _, err := parseFlags(args)
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
+		}
+		if isTopLevelAgentHere(args) {
+			return handleAgentHereCommand(brainArgs, opts, stdout, stderr)
 		}
 		return handleBrainCommand(brainArgs, opts)
 	}
@@ -211,6 +214,7 @@ Brain commands (standalone, before chat flags):
 
 Link follow (top-level):
   sls link follow <note> <target> [<sphere>]    same as sls brain link follow
+  sls agent-here <path-or-link>       start an agent in a resolved folder
 
 REPL commands (type inside sls):
   /help                 show this help
@@ -285,7 +289,7 @@ func runOneShot(ctx context.Context, client *chatClient, session *chatSessionInf
 	}
 	turnCtx, cancel := context.WithTimeout(ctx, opts.timeout)
 	defer cancel()
-	final, err := client.sendAndWaitForFinal(turnCtx, session.ID, prompt, renderer)
+	final, err := client.sendAndWaitForFinal(turnCtx, session.ID, prompt, nil, renderer)
 	if err != nil {
 		if errors.Is(err, errAssistantError) {
 			fmt.Fprintf(stderr, "sls: %v\n", err)
@@ -357,7 +361,7 @@ func runREPL(ctx context.Context, client *chatClient, session *chatSessionInfo, 
 		}
 		prompt := buildPromptWithDirectives(line, activeOpts)
 		turnCtx, cancel := context.WithTimeout(ctx, activeOpts.timeout)
-		_, err := client.sendAndWaitForFinal(turnCtx, session.ID, prompt, renderer)
+		_, err := client.sendAndWaitForFinal(turnCtx, session.ID, prompt, nil, renderer)
 		cancel()
 		if err != nil {
 			fmt.Fprintln(stderr, renderer.colorize(colorRed, fmt.Sprintf("turn failed: %v", err)))

@@ -43,6 +43,41 @@ type chatSessionInfo struct {
 	CanvasSessionID string `json:"canvas_session_id"`
 }
 
+type chatMessageCursor struct {
+	View          string  `json:"view,omitempty"`
+	Element       string  `json:"element,omitempty"`
+	Title         string  `json:"title,omitempty"`
+	Page          int     `json:"page,omitempty"`
+	Line          int     `json:"line,omitempty"`
+	RelativeX     float64 `json:"relative_x,omitempty"`
+	RelativeY     float64 `json:"relative_y,omitempty"`
+	SelectedText  string  `json:"selected_text,omitempty"`
+	Surrounding   string  `json:"surrounding_text,omitempty"`
+	ItemID        int64   `json:"item_id,omitempty"`
+	ItemTitle     string  `json:"item_title,omitempty"`
+	ItemState     string  `json:"item_state,omitempty"`
+	WorkspaceID   int64   `json:"workspace_id,omitempty"`
+	WorkspaceName string  `json:"workspace_name,omitempty"`
+	Path          string  `json:"path,omitempty"`
+	IsDir         bool    `json:"is_dir,omitempty"`
+}
+
+type linkedWorkspaceInfo struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	RootPath      string `json:"root_path"`
+	WorkspacePath string `json:"workspace_path"`
+	ChatSessionID string `json:"chat_session_id"`
+}
+
+type runtimeWorkspaceCreateResponse struct {
+	OK        bool                `json:"ok"`
+	Created   bool                `json:"created"`
+	Activated bool                `json:"activated"`
+	Workspace linkedWorkspaceInfo `json:"workspace"`
+}
+
 func newClient(ctx context.Context, cfg clientConfig) (*chatClient, error) {
 	base, err := url.Parse(strings.TrimSpace(cfg.baseURL))
 	if err != nil {
@@ -91,6 +126,37 @@ func (c *chatClient) cliLogin(ctx context.Context, tokenFile string) error {
 		return fmt.Errorf("cli login failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func (c *chatClient) openLinkedWorkspace(ctx context.Context, path string) (*linkedWorkspaceInfo, error) {
+	payload, _ := json.Marshal(map[string]any{
+		"kind":     "linked",
+		"path":     strings.TrimSpace(path),
+		"activate": true,
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.urlFor("/api/runtime/workspaces"), bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("open linked workspace: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var wrapped runtimeWorkspaceCreateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+		return nil, fmt.Errorf("decode workspace: %w", err)
+	}
+	workspace := wrapped.Workspace
+	if strings.TrimSpace(workspace.ChatSessionID) == "" {
+		return nil, errors.New("server returned empty chat session id for linked workspace")
+	}
+	return &workspace, nil
 }
 
 // newClientForBrain creates a minimal HTTP client for brain commands that
@@ -314,7 +380,7 @@ func (c *chatClient) sendCommand(ctx context.Context, sessionID, command string)
 	return result, nil
 }
 
-func (c *chatClient) sendAndWaitForFinal(ctx context.Context, sessionID, prompt string, renderer *renderer) (string, error) {
+func (c *chatClient) sendAndWaitForFinal(ctx context.Context, sessionID, prompt string, cursor *chatMessageCursor, renderer *renderer) (string, error) {
 	ws, err := c.dialChatWS(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("ws dial: %w", err)
@@ -326,6 +392,7 @@ func (c *chatClient) sendAndWaitForFinal(ctx context.Context, sessionID, prompt 
 		"text":        prompt,
 		"output_mode": "silent",
 		"local_only":  false,
+		"cursor":      cursor,
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.urlFor("/api/chat/sessions/"+url.PathEscape(sessionID)+"/messages"), bytes.NewReader(payload))
 	if err != nil {
