@@ -49,10 +49,29 @@ strip_block() {
   ' "$input" >"$output"
 }
 
+strip_tables() {
+  local input="$1"
+  local output="$2"
+  local table_pattern="$3"
+  awk -v table_pattern="$table_pattern" '
+    /^\[[^]]+\]$/ {
+      table = $0
+      gsub(/^\[/, "", table)
+      gsub(/\]$/, "", table)
+      skip = (table ~ table_pattern)
+    }
+    !skip && $0 !~ /^# (BEGIN|END) sloppy\/helpy stdio MCP servers/ { print }
+  ' "$input" >"$output"
+}
+
 if [[ -f "$CONFIG_PATH" ]]; then
   strip_block "$CONFIG_PATH" "$TMP_BASE.mcp" "$MCP_MARKER_BEGIN" "$MCP_MARKER_END"
-  strip_block "$TMP_BASE.mcp" "$TMP_BASE" "$MODELS_MARKER_BEGIN" "$MODELS_MARKER_END"
-  rm -f "$TMP_BASE.mcp"
+  strip_block "$TMP_BASE.mcp" "$TMP_BASE.models" "$MODELS_MARKER_BEGIN" "$MODELS_MARKER_END"
+  strip_tables \
+    "$TMP_BASE.models" \
+    "$TMP_BASE" \
+    '^(mcp_servers[.](sloppy|helpy|sloptools|slopshell)|model_providers[.](local|fast)|profiles[.](local|fast))$'
+  rm -f "$TMP_BASE.mcp" "$TMP_BASE.models"
 else
   : >"$TMP_BASE"
 fi
