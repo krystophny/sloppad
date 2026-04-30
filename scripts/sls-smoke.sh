@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# slsh-smoke.sh — interactive one-shot smoke against the live slopshell stack
+# sls-smoke.sh — interactive one-shot smoke against the live slopshell stack
 # running on this machine. Not invoked from CI; for manual verification.
 #
 # Requires:
@@ -7,16 +7,16 @@
 #   - embedded sloptools MCP  (unix socket under $XDG_RUNTIME_DIR/sloppy)
 #   - optional: codex-app-server.service (port 8787) for --gpt smoke
 #
-# Usage: scripts/slsh-smoke.sh
+# Usage: scripts/sls-smoke.sh
 
 set -euo pipefail
 
 BASE_URL="${SLOPSHELL_BASE_URL:-http://127.0.0.1:8420}"
-SLSH_BIN="${SLSH_BIN:-$(command -v slsh || true)}"
+SLS_BIN="${SLS_BIN:-$(command -v sls || true)}"
 RESULTS=()
 
-if [ -z "$SLSH_BIN" ]; then
-  echo "slsh not found in PATH. Run scripts/build-slsh.sh first or set SLSH_BIN." >&2
+if [ -z "$SLS_BIN" ]; then
+  echo "sls not found in PATH. Run scripts/build-sls.sh first or set SLS_BIN." >&2
   exit 1
 fi
 
@@ -31,8 +31,8 @@ run_case() {
   shift 2
   printf '\n=== %s\n' "$label"
   local out
-  if ! out="$("$SLSH_BIN" --base-url "$BASE_URL" --no-color "$@" 2>&1)"; then
-    RESULTS+=("FAIL  ${label} (slsh exited non-zero)")
+  if ! out="$("$SLS_BIN" --base-url "$BASE_URL" --no-color "$@" 2>&1)"; then
+    RESULTS+=("FAIL  ${label} (sls exited non-zero)")
     printf '%s\n' "$out"
     return
   fi
@@ -44,8 +44,8 @@ run_case() {
   fi
 }
 
-run_case "shell-echo via shell tool" "hello-from-slsh" \
-  -p "Use shell to run: echo hello-from-slsh"
+run_case "shell-echo via shell tool" "hello-from-sls" \
+  -p "Use shell to run: echo hello-from-sls"
 
 run_case "email accounts via sloptools MCP" "@" \
   -p "list my email accounts briefly"

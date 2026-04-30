@@ -20,18 +20,18 @@ import (
 	"github.com/sloppy-org/slopshell/internal/web"
 )
 
-// buildSlshBinary compiles cmd/slsh into a tempdir and returns the absolute path.
-func buildSlshBinary(t *testing.T) string {
+// buildSlsBinary compiles cmd/sls into a tempdir and returns the absolute path.
+func buildSlsBinary(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "slsh-e2e")
+	bin := filepath.Join(t.TempDir(), "sls-e2e")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/slsh")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/sls")
 	cmd.Dir = projectRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go build ./cmd/slsh: %v\n%s", err, out)
+		t.Fatalf("go build ./cmd/sls: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -190,7 +190,7 @@ func newFakeMCPMailServer(t *testing.T, address string) *httptest.Server {
 
 // setupE2EHarness spins up a slopshell web.App backed by the provided mock
 // LLM and MCP URLs, writes a CLI token file, and returns everything needed
-// to exercise the slsh binary against it.
+// to exercise the sls binary against it.
 func setupE2EHarness(t *testing.T, llmURL, mcpURL string) (webBaseURL, tokenFile string) {
 	t.Helper()
 
@@ -223,14 +223,14 @@ func setupE2EHarness(t *testing.T, llmURL, mcpURL string) (webBaseURL, tokenFile
 	return srv.URL, tokenPath
 }
 
-// runSlsh invokes the prebuilt slsh binary and returns stdout+stderr.
-func runSlsh(t *testing.T, bin string, args ...string) (stdout, stderr string, exit int) {
+// runSls invokes the prebuilt sls binary and returns stdout+stderr.
+func runSls(t *testing.T, bin string, args ...string) (stdout, stderr string, exit int) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(),
 		// Ensure no ambient token file path leaks in; tests always pass --token-file.
 		"SLOPSHELL_CLI_TOKEN_FILE=",
-		"SLOPSHELL_CLI_STATE_FILE="+filepath.Join(t.TempDir(), "slsh-state.json"),
+		"SLOPSHELL_CLI_STATE_FILE="+filepath.Join(t.TempDir(), "sls-state.json"),
 	)
 	outBuf, errBuf := &strings.Builder{}, &strings.Builder{}
 	cmd.Stdout = outBuf
@@ -243,19 +243,19 @@ func runSlsh(t *testing.T, bin string, args ...string) (stdout, stderr string, e
 			exit = exitErr.ExitCode()
 			return stdout, stderr, exit
 		}
-		t.Fatalf("run slsh: %v\nstderr=%s", runErr, stderr)
+		t.Fatalf("run sls: %v\nstderr=%s", runErr, stderr)
 	}
 	return stdout, stderr, 0
 }
 
-func TestSlshOneShotShellToolProducesExpectedFinalText(t *testing.T) {
-	bin := buildSlshBinary(t)
+func TestSlsOneShotShellToolProducesExpectedFinalText(t *testing.T) {
+	bin := buildSlsBinary(t)
 	llm := newFakeShellLLM(t, "printf e2e-shell-hello", "Shell tool printed: e2e-shell-hello")
 	// MCP server is never contacted for shell family, but the app requires a URL.
 	mcp := newFakeMCPMailServer(t, "never-used@example.test")
 	baseURL, tokenFile := setupE2EHarness(t, llm.server.URL, mcp.URL)
 
-	stdout, stderr, exit := runSlsh(t, bin,
+	stdout, stderr, exit := runSls(t, bin,
 		"--base-url", baseURL,
 		"--token-file", tokenFile,
 		"--no-color",
@@ -263,7 +263,7 @@ func TestSlshOneShotShellToolProducesExpectedFinalText(t *testing.T) {
 		"-p", "Use shell to print e2e-shell-hello",
 	)
 	if exit != 0 {
-		t.Fatalf("slsh exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
+		t.Fatalf("sls exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
 	}
 	if !strings.Contains(stdout, "Shell tool printed: e2e-shell-hello") {
 		t.Fatalf("stdout missing final reply; got:\n%s\nstderr:\n%s", stdout, stderr)
@@ -273,13 +273,13 @@ func TestSlshOneShotShellToolProducesExpectedFinalText(t *testing.T) {
 	}
 }
 
-func TestSlshOneShotMailAccountListRoutesThroughMCP(t *testing.T) {
-	bin := buildSlshBinary(t)
+func TestSlsOneShotMailAccountListRoutesThroughMCP(t *testing.T) {
+	bin := buildSlsBinary(t)
 	llm := newFakeMailLLM(t, "Account fake@e2e.test is enabled.")
 	mcp := newFakeMCPMailServer(t, "fake@e2e.test")
 	baseURL, tokenFile := setupE2EHarness(t, llm.server.URL, mcp.URL)
 
-	stdout, stderr, exit := runSlsh(t, bin,
+	stdout, stderr, exit := runSls(t, bin,
 		"--base-url", baseURL,
 		"--token-file", tokenFile,
 		"--no-color",
@@ -287,7 +287,7 @@ func TestSlshOneShotMailAccountListRoutesThroughMCP(t *testing.T) {
 		"-p", "List my email accounts briefly",
 	)
 	if exit != 0 {
-		t.Fatalf("slsh exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
+		t.Fatalf("sls exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
 	}
 	if !strings.Contains(stdout, "Account fake@e2e.test is enabled.") {
 		t.Fatalf("stdout missing final reply; got:\n%s\nstderr:\n%s", stdout, stderr)
@@ -297,13 +297,13 @@ func TestSlshOneShotMailAccountListRoutesThroughMCP(t *testing.T) {
 	}
 }
 
-func TestSlshOneShotJSONModeEmitsNDJSON(t *testing.T) {
-	bin := buildSlshBinary(t)
+func TestSlsOneShotJSONModeEmitsNDJSON(t *testing.T) {
+	bin := buildSlsBinary(t)
 	llm := newFakeShellLLM(t, "printf json-ok", "Done.")
 	mcp := newFakeMCPMailServer(t, "unused@example.test")
 	baseURL, tokenFile := setupE2EHarness(t, llm.server.URL, mcp.URL)
 
-	stdout, stderr, exit := runSlsh(t, bin,
+	stdout, stderr, exit := runSls(t, bin,
 		"--base-url", baseURL,
 		"--token-file", tokenFile,
 		"--no-color",
@@ -312,7 +312,7 @@ func TestSlshOneShotJSONModeEmitsNDJSON(t *testing.T) {
 		"-p", "Use shell to print json-ok",
 	)
 	if exit != 0 {
-		t.Fatalf("slsh exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
+		t.Fatalf("sls exit = %d\nstderr:\n%s\nstdout:\n%s", exit, stderr, stdout)
 	}
 	sawFinal := false
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {

@@ -58,17 +58,17 @@ resolve_helpy_bin() {
   printf 'helpy'
 }
 
-install_slsh_binary() {
-  local slsh_bin_dir slsh_bin_path
-  slsh_bin_dir="${SLOPSHELL_BIN_DIR:-${HOME}/.local/bin}"
-  slsh_bin_path="${slsh_bin_dir}/slsh"
-  log "Building slsh terminal client -> ${slsh_bin_path}"
-  mkdir -p "$slsh_bin_dir"
-  if ! (cd "$REPO_ROOT" && go build -o "$slsh_bin_path" ./cmd/slsh); then
-    fail "go build failed for slsh"
+install_sls_binary() {
+  local sls_bin_dir sls_bin_path
+  sls_bin_dir="${SLOPSHELL_BIN_DIR:-${HOME}/.local/bin}"
+  sls_bin_path="${sls_bin_dir}/sls"
+  log "Building sls terminal client -> ${sls_bin_path}"
+  mkdir -p "$sls_bin_dir"
+  if ! (cd "$REPO_ROOT" && go build -o "$sls_bin_path" ./cmd/sls); then
+    fail "go build failed for sls"
   fi
-  if ! printf ':%s:' "$PATH" | grep -Fq ":${slsh_bin_dir}:"; then
-    log "${slsh_bin_dir} is not in PATH; add it to your shell profile to use slsh"
+  if ! printf ':%s:' "$PATH" | grep -Fq ":${sls_bin_dir}:"; then
+    log "${sls_bin_dir} is not in PATH; add it to your shell profile to use sls"
   fi
 }
 
@@ -215,7 +215,7 @@ install_linux() {
   )
   local -a optional_units=()
 
-  install_slsh_binary
+  install_sls_binary
   helpy_bin="$(resolve_helpy_bin)"
   mkdir -p "$unit_dst"
   for f in "$unit_src"/*.service; do
@@ -346,7 +346,7 @@ install_macos() {
   if ! (cd "$REPO_ROOT" && go build -o "$REPO_ROOT/slopshell" ./cmd/slopshell); then
     fail "go build failed"
   fi
-  install_slsh_binary
+  install_sls_binary
 
   BIN_PATH="$REPO_ROOT/slopshell"
   CODEX_PATH="$(command -v codex 2>/dev/null || true)"

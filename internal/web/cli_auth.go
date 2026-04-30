@@ -39,7 +39,7 @@ func resolveCLITokenPath(dataDir string) string {
 // hex token and writing it with 0600 perms. Adopt-if-exists keeps the
 // in-memory token and the on-disk file in sync across restarts and avoids
 // clobbering the file when a second slopshell instance starts against the
-// same $XDG_RUNTIME_DIR path (which previously desynced slsh from a
+// same $XDG_RUNTIME_DIR path (which previously desynced sls from a
 // long-running server).
 func initCLIToken(dataDir string) (string, string, error) {
 	path := resolveCLITokenPath(dataDir)

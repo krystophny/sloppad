@@ -25,10 +25,10 @@ func sessionStorePath() string {
 		return override
 	}
 	if state := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); state != "" {
-		return filepath.Join(state, "slopshell", "slsh-sessions.json")
+		return filepath.Join(state, "slopshell", "sls-sessions.json")
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".local", "state", "slopshell", "slsh-sessions.json")
+		return filepath.Join(home, ".local", "state", "slopshell", "sls-sessions.json")
 	}
 	return ""
 }
@@ -38,10 +38,10 @@ func historyFilePath() string {
 		return override
 	}
 	if state := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); state != "" {
-		return filepath.Join(state, "slopshell", "slsh-history")
+		return filepath.Join(state, "slopshell", "sls-history")
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".local", "state", "slopshell", "slsh-history")
+		return filepath.Join(home, ".local", "state", "slopshell", "sls-history")
 	}
 	return ""
 }
@@ -49,7 +49,7 @@ func historyFilePath() string {
 func loadSessionStore() (*sessionStore, string, error) {
 	path := sessionStorePath()
 	if path == "" {
-		return nil, "", errors.New("cannot resolve slsh state path")
+		return nil, "", errors.New("cannot resolve sls state path")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

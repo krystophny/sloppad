@@ -23,18 +23,18 @@ const (
 )
 
 type cliOptions struct {
-	baseURL    string
-	projectDir string
-	resumeID   string
-	prompt     string
-	model      string
-	gpt        bool
-	think      string
-	timeout    time.Duration
-	tokenFile  string
-	jsonOut    bool
-	noColor    bool
-	verbose    bool
+	baseURL     string
+	projectDir  string
+	resumeID    string
+	prompt      string
+	model       string
+	gpt         bool
+	think       string
+	timeout     time.Duration
+	tokenFile   string
+	jsonOut     bool
+	noColor     bool
+	verbose     bool
 	stdinPrompt bool
 }
 
@@ -43,6 +43,16 @@ func main() {
 }
 
 func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if isBrainSubcommand(args) || isTopLevelLinkFollow(args) {
+		brainArgs := commandArgs(args)
+		opts, _, err := parseFlags(args)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		return handleBrainCommand(brainArgs, opts)
+	}
+
 	opts, tail, err := parseFlags(args)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -59,7 +69,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if opts.prompt == "" && isPipedStdin(stdin) {
 		body, readErr := io.ReadAll(stdin)
 		if readErr != nil {
-			fmt.Fprintf(stderr, "slsh: reading stdin: %v\n", readErr)
+			fmt.Fprintf(stderr, "sls: reading stdin: %v\n", readErr)
 			return 1
 		}
 		trimmed := strings.TrimSpace(string(body))
@@ -80,17 +90,17 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		stderr:    stderr,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "slsh: %v\n", err)
+		fmt.Fprintf(stderr, "sls: %v\n", err)
 		return 1
 	}
 
 	session, err := client.startChatSession(ctx, opts.projectDir, opts.resumeID)
 	if err != nil {
-		fmt.Fprintf(stderr, "slsh: %v\n", err)
+		fmt.Fprintf(stderr, "sls: %v\n", err)
 		return 1
 	}
 	if err := persistSessionForWorkspace(session.WorkspacePath, session.ID); err != nil && opts.verbose {
-		fmt.Fprintf(stderr, "slsh: warning: persist session: %v\n", err)
+		fmt.Fprintf(stderr, "sls: warning: persist session: %v\n", err)
 	}
 
 	renderer := newRenderer(stdout, opts.jsonOut, !opts.noColor && isTerminal(stdout))
@@ -102,7 +112,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 }
 
 func parseFlags(args []string) (cliOptions, []string, error) {
-	fs := flag.NewFlagSet("slsh", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sls", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	cwd, _ := os.Getwd()
 	opts := cliOptions{
@@ -169,11 +179,13 @@ func (e errHelp) Error() string { return e.Usage }
 
 func usage() string {
 	return strings.TrimSpace(`
-slsh — SlopShell terminal chat client
+sls — SlopShell terminal chat client
 
 usage:
-  slsh [flags] [prompt words...]
-  echo "..." | slsh [flags]
+  sls [flags] [prompt words...]
+  echo "..." | sls [flags]
+  sls brain <subcommand> [args...]
+  sls link follow <note> <target>     resolves a wiki link (top-level)
 
 flags:
   --base-url URL        slopshell server (default http://127.0.0.1:8420 or $SLOPSHELL_BASE_URL)
@@ -190,7 +202,17 @@ flags:
   --verbose             log websocket events to stderr
   -h, --help            show this message
 
-REPL commands (type inside slsh):
+Brain commands (standalone, before chat flags):
+  sls brain open work|private        activate a brain workspace preset
+  sls brain search <query>           search brain vaults with rg
+  sls brain links <note> [<sphere>]  show links in a brain note
+  sls brain backlinks <note> [<sphere>] find backlinks to a brain note
+  sls brain link follow <note> <target> [<sphere>] resolve a wiki link
+
+Link follow (top-level):
+  sls link follow <note> <target> [<sphere>]    same as sls brain link follow
+
+REPL commands (type inside sls):
   /help                 show this help
   /exit, /quit          leave
   /clear                wipe all chat state on the server
@@ -258,7 +280,7 @@ func buildPromptWithDirectives(raw string, opts cliOptions) string {
 func runOneShot(ctx context.Context, client *chatClient, session *chatSessionInfo, opts cliOptions, renderer *renderer, stderr io.Writer) int {
 	prompt := buildPromptWithDirectives(opts.prompt, opts)
 	if prompt == "" {
-		fmt.Fprintln(stderr, "slsh: empty prompt")
+		fmt.Fprintln(stderr, "sls: empty prompt")
 		return 2
 	}
 	turnCtx, cancel := context.WithTimeout(ctx, opts.timeout)
@@ -266,10 +288,10 @@ func runOneShot(ctx context.Context, client *chatClient, session *chatSessionInf
 	final, err := client.sendAndWaitForFinal(turnCtx, session.ID, prompt, renderer)
 	if err != nil {
 		if errors.Is(err, errAssistantError) {
-			fmt.Fprintf(stderr, "slsh: %v\n", err)
+			fmt.Fprintf(stderr, "sls: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(stderr, "slsh: %v\n", err)
+		fmt.Fprintf(stderr, "sls: %v\n", err)
 		return 1
 	}
 	if !opts.jsonOut {
@@ -282,24 +304,24 @@ func runOneShot(ctx context.Context, client *chatClient, session *chatSessionInf
 }
 
 func runREPL(ctx context.Context, client *chatClient, session *chatSessionInfo, opts cliOptions, renderer *renderer, stdin io.Reader, stdout, stderr io.Writer) int {
-	info := renderer.colorize(colorDim, fmt.Sprintf("slsh session %s @ %s", session.ID, session.WorkspacePath))
+	info := renderer.colorize(colorDim, fmt.Sprintf("sls session %s @ %s", session.ID, session.WorkspacePath))
 	fmt.Fprintln(stdout, info)
 	fmt.Fprintln(stdout, renderer.colorize(colorDim, "type /help for commands, /exit to leave"))
 
 	if strings.TrimSpace(opts.resumeID) != "" {
 		if err := client.printRecentHistory(ctx, session.ID, renderer); err != nil && opts.verbose {
-			fmt.Fprintf(stderr, "slsh: history: %v\n", err)
+			fmt.Fprintf(stderr, "sls: history: %v\n", err)
 		}
 	} else {
 		// Fresh context: drop the app-server thread so the next turn starts clean.
 		if _, err := client.sendCommand(ctx, session.ID, "/compact"); err != nil && opts.verbose {
-			fmt.Fprintf(stderr, "slsh: compact: %v\n", err)
+			fmt.Fprintf(stderr, "sls: compact: %v\n", err)
 		}
 	}
 
 	rl, err := newReadline(stdin, stdout, stderr, renderer.colorize(colorCyan, "› "), opts.verbose)
 	if err != nil {
-		fmt.Fprintf(stderr, "slsh: input: %v\n", err)
+		fmt.Fprintf(stderr, "sls: input: %v\n", err)
 		return 1
 	}
 	defer rl.Close()
@@ -312,7 +334,7 @@ func runREPL(ctx context.Context, client *chatClient, session *chatSessionInfo, 
 				fmt.Fprintln(stdout)
 				return 0
 			}
-			fmt.Fprintf(stderr, "slsh: input: %v\n", readErr)
+			fmt.Fprintf(stderr, "sls: input: %v\n", readErr)
 			return 1
 		}
 		line = strings.TrimSpace(line)
@@ -351,7 +373,7 @@ func newReadline(stdin io.Reader, stdout, stderr io.Writer, prompt string, verbo
 	historyPath := historyFilePath()
 	if historyPath != "" {
 		if err := os.MkdirAll(filepath.Dir(historyPath), 0o700); err != nil && verbose {
-			fmt.Fprintf(stderr, "slsh: history dir: %v\n", err)
+			fmt.Fprintf(stderr, "sls: history dir: %v\n", err)
 		}
 	}
 	cfg := &readline.Config{

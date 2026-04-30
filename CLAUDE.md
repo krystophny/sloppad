@@ -147,22 +147,22 @@ systemctl --user restart slopshell-codex-app-server.service slopshell-piper-tts.
 - CLI login endpoint: `POST /api/cli/login` (loopback-only; consumes the token
   written to `$XDG_RUNTIME_DIR/slopshell/cli-token` at server start)
 
-## Terminal client (`slsh`)
+## Terminal client (`sls`)
 
-Source in `cmd/slsh/`. Single binary, HTTP+WS client over the same API the
-browser uses. Build with `./scripts/build-slsh.sh` (or have the user-units
-installer place it in `$HOME/.local/bin/slsh`). One-shot with `-p`, interactive
+Source in `cmd/sls/`. Single binary, HTTP+WS client over the same API the
+browser uses. Build with `./scripts/build-sls.sh` (or have the user-units
+installer place it in `$HOME/.local/bin/sls`). One-shot with `-p`, interactive
 REPL otherwise. Routes to GPT by prefixing prompts that match the existing
 `parseTurnRoutingDirectives` in `internal/web/routing_policy.go`:
 
-- `slsh --gpt -p "…"` → "use gpt to …"
-- `slsh --think high -p "…"` → "think hard, …"
+- `sls --gpt -p "…"` → "use gpt to …"
+- `sls --think high -p "…"` → "think hard, …"
 
-E2E tests are gated with `//go:build e2e` in `cmd/slsh/e2e_test.go` and use
+E2E tests are gated with `//go:build e2e` in `cmd/sls/e2e_test.go` and use
 mock LLM + mock MCP — never real EWS/TUGonline. Run with:
 
 ```bash
-go test -tags=e2e ./cmd/slsh/...
+go test -tags=e2e ./cmd/sls/...
 ```
 
 Environment toggles:

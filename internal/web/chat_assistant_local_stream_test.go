@@ -9,7 +9,7 @@ import (
 // SSE stream decoder against swallowing whitespace-only chunks. Local OpenAI
 // compatible servers frequently emit a lone "\n" as its own content delta
 // between bullets or paragraphs; dropping those collapses the assistant's
-// formatting when the web/slsh clients render the final message.
+// formatting when the web/sls clients render the final message.
 func TestDecodeLocalAssistantStreamingPayloadPreservesBulletNewlines(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"choices":[{"delta":{"content":"- First bullet."}}]}`,

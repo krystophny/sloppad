@@ -2,7 +2,7 @@ package web
 
 // Helpers exposed only for out-of-package end-to-end tests. Do NOT use these
 // in production code; they bypass normal configuration paths and exist so
-// tests under cmd/slsh can point a real App at mock LLM/MCP endpoints and
+// tests under cmd/sls can point a real App at mock LLM/MCP endpoints and
 // supply a known CLI token without racing with the runtime's file-backed
 // token initialisation.
 
