@@ -282,16 +282,33 @@ var wikilinkPattern = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
 // brainLinks extracts links from a brain note file.
 func brainLinks(notePath string, sphere string, baseURL, tokenFile string) error {
-	s, root, err := resolveSphereWithGuard(sphere)
-	if err != nil {
-		return err
+	if sphere != "" {
+		s, root, err := resolveSphereWithGuard(sphere)
+		if err != nil {
+			return err
+		}
+		return brainLinksInVault(notePath, s, root)
 	}
 
+	roots := findBrainRoots()
+	if len(roots) == 0 {
+		return fmt.Errorf("no brain vaults configured or available")
+	}
+	for sphere, root := range roots {
+		fmt.Printf("  [%s]\n", sphere)
+		if err := brainLinksInVault(notePath, sphere, root); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func brainLinksInVault(notePath, sphere string, root string) error {
 	fullPath, err := resolveBrainPath(root, notePath)
 	if err != nil {
-		return fmt.Errorf("note path escapes brain vault for %s", s)
+		return fmt.Errorf("note path escapes brain vault for %s", sphere)
 	}
-	if err := rejectWorkPersonalPath(s, root, fullPath); err != nil {
+	if err := rejectWorkPersonalPath(sphere, root, fullPath); err != nil {
 		return err
 	}
 
@@ -320,11 +337,28 @@ func brainLinks(notePath string, sphere string, baseURL, tokenFile string) error
 
 // brainBacklinks finds notes that link to the target note.
 func brainBacklinks(targetNote string, sphere string, baseURL, tokenFile string) error {
-	s, root, err := resolveSphereWithGuard(sphere)
-	if err != nil {
-		return err
+	if sphere != "" {
+		s, root, err := resolveSphereWithGuard(sphere)
+		if err != nil {
+			return err
+		}
+		return brainBacklinksInVault(targetNote, s, root)
 	}
 
+	roots := findBrainRoots()
+	if len(roots) == 0 {
+		return fmt.Errorf("no brain vaults configured or available")
+	}
+	for sphere, root := range roots {
+		fmt.Printf("  [%s]\n", sphere)
+		if err := brainBacklinksInVault(targetNote, sphere, root); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func brainBacklinksInVault(targetNote, sphere string, root string) error {
 	brainDir := filepath.Join(root, "brain")
 
 	// Escape the target for rg regex.
@@ -343,7 +377,7 @@ func brainBacklinks(targetNote string, sphere string, baseURL, tokenFile string)
 		return err
 	}
 	if output == "" {
-		fmt.Printf("  (no backlinks to %s in %s)\n", targetNote, s)
+		fmt.Printf("  (no backlinks to %s in %s)\n", targetNote, sphere)
 		return nil
 	}
 
@@ -368,11 +402,67 @@ func brainBacklinks(targetNote string, sphere string, baseURL, tokenFile string)
 
 // linkFollow resolves a link target to a file path and prints it.
 func linkFollow(sourceNote string, linkTarget string, sphere string, baseURL, tokenFile string) error {
-	s, root, err := resolveSphereWithGuard(sphere)
-	if err != nil {
-		return err
+	if sphere != "" {
+		s, root, err := resolveSphereWithGuard(sphere)
+		if err != nil {
+			return err
+		}
+		return linkFollowInVault(sourceNote, linkTarget, s, root)
 	}
 
+	roots := findBrainRoots()
+	if len(roots) == 0 {
+		return fmt.Errorf("no brain vaults configured or available")
+	}
+
+	// Check personal guard across all vaults before attempting resolution.
+	for sphere, root := range roots {
+		if err := checkLinkFollowPersonal(sourceNote, linkTarget, sphere, root); err != nil {
+			return err
+		}
+	}
+
+	var lastErr error
+	for sphere, root := range roots {
+		err := linkFollowInVault(sourceNote, linkTarget, sphere, root)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("link target %q not found in any brain vault", linkTarget)
+}
+
+func checkLinkFollowPersonal(sourceNote, linkTarget, sphere string, root string) error {
+	if sphere != "work" {
+		return nil
+	}
+	brainDir := filepath.Join(root, "brain")
+
+	// Check source note path.
+	if strings.TrimSpace(sourceNote) != "" {
+		sourcePath, err := resolveBrainPath(root, sourceNote)
+		if err == nil {
+			if err := rejectWorkPersonalPath(sphere, root, sourcePath); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Check link target candidate.
+	candidate := filepath.Clean(filepath.Join(brainDir, linkTarget))
+	if strings.HasPrefix(candidate, filepath.Clean(brainDir)) {
+		if err := rejectWorkPersonalPath(sphere, root, candidate); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func linkFollowInVault(sourceNote, linkTarget, sphere string, root string) error {
 	brainDir := filepath.Join(root, "brain")
 
 	// Try resolving the link target as a path relative to the source note's directory.
@@ -380,9 +470,9 @@ func linkFollow(sourceNote string, linkTarget string, sphere string, baseURL, to
 	if strings.TrimSpace(sourceNote) != "" {
 		sourcePath, err := resolveBrainPath(root, sourceNote)
 		if err != nil {
-			return fmt.Errorf("source note escapes brain vault for %s", s)
+			return fmt.Errorf("source note escapes brain vault for %s", sphere)
 		}
-		if err := rejectWorkPersonalPath(s, root, sourcePath); err != nil {
+		if err := rejectWorkPersonalPath(sphere, root, sourcePath); err != nil {
 			return err
 		}
 		sourceDir = filepath.Dir(sourcePath)
@@ -394,7 +484,7 @@ func linkFollow(sourceNote string, linkTarget string, sphere string, baseURL, to
 	// If candidate is under brain dir, check if it exists.
 	if strings.HasPrefix(candidate, filepath.Clean(brainDir)) {
 		if _, err := os.Stat(candidate); err == nil {
-			if err := rejectWorkPersonalPath(s, root, candidate); err != nil {
+			if err := rejectWorkPersonalPath(sphere, root, candidate); err != nil {
 				return err
 			}
 			rel, _ := filepath.Rel(root, candidate)
@@ -416,7 +506,7 @@ func linkFollow(sourceNote string, linkTarget string, sphere string, baseURL, to
 		return err
 	}
 	if output == "" {
-		return fmt.Errorf("link target %q not found in %s brain", linkTarget, s)
+		return fmt.Errorf("link target %q not found in %s brain", linkTarget, sphere)
 	}
 
 	// Return first match.
@@ -460,9 +550,9 @@ func printBrainUsage() {
 	fmt.Fprintln(os.Stderr, "subcommands:")
 	fmt.Fprintln(os.Stderr, "  open work|private        activate a brain workspace preset")
 	fmt.Fprintln(os.Stderr, "  search <query> [--limit N]  search brain vaults with rg")
-	fmt.Fprintln(os.Stderr, "  links <note> <sphere>    show links in a brain note")
-	fmt.Fprintln(os.Stderr, "  backlinks <note> <sphere> find backlinks to a brain note")
-	fmt.Fprintln(os.Stderr, "  link follow <note> <target> <sphere> resolve a wiki link")
+	fmt.Fprintln(os.Stderr, "  links <note> [<sphere>]  show links in a brain note")
+	fmt.Fprintln(os.Stderr, "  backlinks <note> [<sphere>] find backlinks to a brain note")
+	fmt.Fprintln(os.Stderr, "  link follow <note> <target> [<sphere>] resolve a wiki link")
 }
 
 func handleBrainOpen(args []string, opts cliOptions) int {
@@ -502,11 +592,15 @@ func searchQueryArgs(args []string) []string {
 }
 
 func handleBrainLinks(args []string, opts cliOptions) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sls brain links <note> <sphere>")
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: sls brain links <note> [<sphere>]")
 		return 2
 	}
-	if err := brainLinks(args[0], args[1], opts.baseURL, opts.effectiveTokenFile()); err != nil {
+	sphere := ""
+	if len(args) >= 2 {
+		sphere = args[1]
+	}
+	if err := brainLinks(args[0], sphere, opts.baseURL, opts.effectiveTokenFile()); err != nil {
 		fmt.Fprintf(os.Stderr, "sls brain links: %v\n", err)
 		return 1
 	}
@@ -514,11 +608,15 @@ func handleBrainLinks(args []string, opts cliOptions) int {
 }
 
 func handleBrainBacklinks(args []string, opts cliOptions) int {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sls brain backlinks <note> <sphere>")
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: sls brain backlinks <note> [<sphere>]")
 		return 2
 	}
-	if err := brainBacklinks(args[0], args[1], opts.baseURL, opts.effectiveTokenFile()); err != nil {
+	sphere := ""
+	if len(args) >= 2 {
+		sphere = args[1]
+	}
+	if err := brainBacklinks(args[0], sphere, opts.baseURL, opts.effectiveTokenFile()); err != nil {
 		fmt.Fprintf(os.Stderr, "sls brain backlinks: %v\n", err)
 		return 1
 	}
@@ -527,18 +625,22 @@ func handleBrainBacklinks(args []string, opts cliOptions) int {
 
 func handleBrainLink(args []string, opts cliOptions) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: sls brain link follow <note> <target> <sphere>")
+		fmt.Fprintln(os.Stderr, "usage: sls brain link follow <note> <target> [<sphere>]")
 		return 2
 	}
 	if strings.ToLower(args[0]) != "follow" {
 		fmt.Fprintf(os.Stderr, "unknown link subcommand %q (want follow)\n", args[0])
 		return 2
 	}
-	if len(args) < 4 {
-		fmt.Fprintln(os.Stderr, "usage: sls brain link follow <note> <target> <sphere>")
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: sls brain link follow <note> <target> [<sphere>]")
 		return 2
 	}
-	if err := linkFollow(args[1], args[2], args[3], opts.baseURL, opts.effectiveTokenFile()); err != nil {
+	sphere := ""
+	if len(args) >= 4 {
+		sphere = args[3]
+	}
+	if err := linkFollow(args[1], args[2], sphere, opts.baseURL, opts.effectiveTokenFile()); err != nil {
 		fmt.Fprintf(os.Stderr, "sls brain link follow: %v\n", err)
 		return 1
 	}

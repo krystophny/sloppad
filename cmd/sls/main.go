@@ -205,12 +205,12 @@ flags:
 Brain commands (standalone, before chat flags):
   sls brain open work|private        activate a brain workspace preset
   sls brain search <query>           search brain vaults with rg
-  sls brain links <note> <sphere>    show links in a brain note
-  sls brain backlinks <note> <sphere> find backlinks to a brain note
-  sls brain link follow <note> <target> <sphere> resolve a wiki link
+  sls brain links <note> [<sphere>]  show links in a brain note
+  sls brain backlinks <note> [<sphere>] find backlinks to a brain note
+  sls brain link follow <note> <target> [<sphere>] resolve a wiki link
 
 Link follow (top-level):
-  sls link follow <note> <target> <sphere>    same as sls brain link follow
+  sls link follow <note> <target> [<sphere>]    same as sls brain link follow
 
 REPL commands (type inside sls):
   /help                 show this help

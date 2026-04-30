@@ -163,6 +163,18 @@ func TestCommandArgsForTopLevelLinkFollow(t *testing.T) {
 	}
 }
 
+func TestCommandArgsForTopLevelLinkFollowNoSphere(t *testing.T) {
+	args := []string{"link", "follow", "note.md", "Target"}
+	if !isTopLevelLinkFollow(args) {
+		t.Fatalf("isTopLevelLinkFollow(%v) = false, want true", args)
+	}
+	got := commandArgs(args)
+	want := []string{"link", "follow", "note.md", "Target"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("commandArgs(%v) = %v, want %v", args, got, want)
+	}
+}
+
 func captureStdout(fn func() error) (string, error) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
@@ -380,5 +392,113 @@ func TestBrainSubcommandRequiresRg(t *testing.T) {
 	_, err := exec.LookPath("rg")
 	if err != nil {
 		t.Skipf("rg not available: %v", err)
+	}
+}
+
+func TestBrainLinksNoSphere(t *testing.T) {
+	tmp := t.TempDir()
+	brainDir := filepath.Join(tmp, "brain")
+	if err := os.MkdirAll(brainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	notePath := filepath.Join(brainDir, "test-note.md")
+	noteContent := "# Test Note\n\nSee [[Topic A]] and [[Topic B]].\n"
+	if err := os.WriteFile(notePath, []byte(noteContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", tmp)
+	output, err := captureStdout(func() error {
+		return brainLinks("test-note.md", "", "", "")
+	})
+	if err != nil {
+		t.Fatalf("brainLinks() without sphere error = %v", err)
+	}
+	if !strings.Contains(output, "Topic A") {
+		t.Errorf("output missing link 'Topic A': %s", output)
+	}
+	if !strings.Contains(output, "Topic B") {
+		t.Errorf("output missing link 'Topic B': %s", output)
+	}
+}
+
+func TestBrainBacklinksNoSphere(t *testing.T) {
+	tmp := t.TempDir()
+	brainDir := filepath.Join(tmp, "brain")
+	if err := os.MkdirAll(brainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(brainDir, "backlink-target.md")
+	if err := os.WriteFile(note, []byte("# Target\n\nSee [[target]]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", tmp)
+	output, err := captureStdout(func() error {
+		return brainBacklinks("target", "", "", "")
+	})
+	if err != nil {
+		t.Fatalf("brainBacklinks() without sphere error = %v", err)
+	}
+	if !strings.Contains(output, "backlink-target") {
+		t.Errorf("output missing backlink: %s", output)
+	}
+}
+
+func TestLinkFollowNoSphere(t *testing.T) {
+	tmp := t.TempDir()
+	brainDir := filepath.Join(tmp, "brain")
+	if err := os.MkdirAll(brainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(brainDir, "target.md")
+	if err := os.WriteFile(target, []byte("# Target"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", tmp)
+	output, err := captureStdout(func() error {
+		return linkFollow("", "target.md", "", "", "")
+	})
+	if err != nil {
+		t.Fatalf("linkFollow() without sphere error = %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Errorf("linkFollow() without sphere produced empty output")
+	}
+}
+
+func TestBrainLinksBlocksWorkPersonalNoSphere(t *testing.T) {
+	tmp := t.TempDir()
+	personalDir := filepath.Join(tmp, "brain", "personal")
+	if err := os.MkdirAll(personalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(personalDir, "secret.md"), []byte("[[Target]]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", tmp)
+	err := brainLinks("personal/secret.md", "", "", "")
+	if err == nil {
+		t.Fatal("brainLinks() on work brain/personal note without sphere: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "brain/personal") {
+		t.Fatalf("brainLinks() error = %v, want brain/personal guard", err)
+	}
+}
+
+func TestLinkFollowBlocksWorkPersonalNoSphere(t *testing.T) {
+	tmp := t.TempDir()
+	personalDir := filepath.Join(tmp, "brain", "personal")
+	if err := os.MkdirAll(personalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(personalDir, "secret.md"), []byte("# Secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", tmp)
+	err := linkFollow("", "personal/secret.md", "", "", "")
+	if err == nil {
+		t.Fatal("linkFollow() on work brain/personal target without sphere: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "brain/personal") {
+		t.Fatalf("linkFollow() error = %v, want brain/personal guard", err)
 	}
 }
