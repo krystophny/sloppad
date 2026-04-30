@@ -479,9 +479,28 @@ test('markdown image paths are rewritten through the canvas file proxy', async (
 test('folder markdown links start an agent in the linked workspace rooted at the vault target', async ({ page }) => {
   await seedBrainWorkspace(page);
   await clearLog(page);
-  await page.evaluate(async () => {
-    const mod = await import(`../../internal/web/static/app-workspace-runtime.js?ts=${Date.now()}`);
-    await mod.startAgentHereAtPath('/tmp/vault/project/path', 'brain', 'topics/active.md');
+  await page.evaluate(() => {
+    const app = (window as any)._slopshellApp;
+    if (app?.getState) app.getState().activeWorkspaceId = 'brain';
+    (window as any).__mockMarkdownLinkResolution = {
+      ok: true,
+      kind: 'folder',
+      resolved_path: 'project/path',
+      vault_relative_path: 'project/path',
+      source_path: 'topics/active.md',
+    };
+    const mod = (window as any).__canvasModule;
+    mod.renderCanvas({
+      event_id: 'folder-markdown-link',
+      kind: 'text_artifact',
+      title: 'topics/active.md',
+      path: 'topics/active.md',
+      text: '[Project folder](../../project/path/)',
+    });
+  });
+
+  await page.locator('#canvas-text a', { hasText: 'Project folder' }).evaluate((node) => {
+    if (node instanceof HTMLAnchorElement) node.click();
   });
 
   await expect.poll(async () => {
@@ -613,8 +632,12 @@ test('file markdown links open the parent folder as source context', async ({ pa
     if (app?.getState) {
       app.getState().activeWorkspaceId = 'brain';
     }
-  });
-  await page.evaluate(() => {
+    (window as any).__mockWorkspaceFiles = {
+      'active|': [
+        { name: 'AGENTS.md', path: 'AGENTS.md', is_dir: false },
+        { name: 'notes.md', path: 'notes.md', is_dir: false },
+      ],
+    };
     (window as any).__mockMarkdownLinkResolution = {
       ok: true,
       kind: 'text',
@@ -673,21 +696,7 @@ test('file markdown links open the parent folder as source context', async ({ pa
     );
   }, { timeout: 5_000 }).toBe(true);
 
-  await page.evaluate(() => {
-    const app = (window as any)._slopshellApp;
-    const state = app?.getState?.();
-    if (!state) return;
-    state.fileSidebarMode = 'workspace';
-    state.workspaceBrowserPath = 'project/path';
-    state.workspaceBrowserActivePath = 'project/path';
-    state.workspaceBrowserActiveIsDir = true;
-    state.workspaceBrowserLoading = false;
-    state.workspaceBrowserError = '';
-    state.workspaceBrowserEntries = [
-      { name: 'AGENTS.md', path: 'AGENTS.md', is_dir: false },
-      { name: 'notes.md', path: 'notes.md', is_dir: false },
-    ];
-  });
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
 
   await page.locator('#edge-left-tap').click();
   await page.getByRole('button', { name: 'Files' }).click();

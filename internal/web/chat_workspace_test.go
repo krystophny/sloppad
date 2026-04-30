@@ -706,3 +706,95 @@ func int64FromAny(v any) int64 {
 		return 0
 	}
 }
+
+func TestApplyWorkspacePromptContextLoadsNearestInstructionsFromLinkedSource(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	linkedRoot := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir linked root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "AGENTS.md"), []byte("brain-only-agents"), 0o644); err != nil {
+		t.Fatalf("write brain AGENTS: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linkedRoot, "AGENTS.md"), []byte("linked-source-agents"), 0o644); err != nil {
+		t.Fatalf("write linked AGENTS: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	brain, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+	linked, _, err := app.createWorkspace2(runtimeWorkspaceCreateRequest{
+		Name:              "Linked source",
+		Kind:              "linked",
+		Path:              linkedRoot,
+		SourceWorkspaceID: workspaceIDStr(brain.ID),
+		SourcePath:        "topics/active.md",
+	})
+	if err != nil {
+		t.Fatalf("create linked workspace: %v", err)
+	}
+	if err := app.store.SetActiveWorkspaceID(workspaceIDStr(linked.ID)); err != nil {
+		t.Fatalf("SetActiveWorkspaceID(linked) error: %v", err)
+	}
+	prompt := app.applyWorkspacePromptContext(linked.WorkspacePath, "Conversation transcript:\nUSER:\nstart agent here")
+	if !strings.Contains(prompt, "Local instructions from AGENTS.md:") {
+		t.Fatalf("prompt missing nearest instructions header: %q", prompt)
+	}
+	if !strings.Contains(prompt, "linked-source-agents") {
+		t.Fatalf("prompt missing linked source AGENTS content: %q", prompt)
+	}
+	if strings.Contains(prompt, "brain-only-agents") {
+		t.Fatalf("prompt unexpectedly carried brain-only AGENTS instead of linked-source AGENTS: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Default repo workspace: Linked source ("+linkedRoot+")") {
+		t.Fatalf("prompt missing linked workspace anchor: %q", prompt)
+	}
+}
+
+func TestApplyWorkspacePromptContextWalksUpToVaultAGENTSWhenLinkedSourceLacksOne(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	linkedRoot := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir linked root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultRoot, "CLAUDE.md"), []byte("vault-claude"), 0o644); err != nil {
+		t.Fatalf("write vault CLAUDE: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	brain, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+	linked, _, err := app.createWorkspace2(runtimeWorkspaceCreateRequest{
+		Name:              "Linked source",
+		Kind:              "linked",
+		Path:              linkedRoot,
+		SourceWorkspaceID: workspaceIDStr(brain.ID),
+		SourcePath:        "topics/active.md",
+	})
+	if err != nil {
+		t.Fatalf("create linked workspace: %v", err)
+	}
+	prompt := app.applyWorkspacePromptContext(linked.WorkspacePath, "Conversation transcript:\nUSER:\nstart agent here")
+	if !strings.Contains(prompt, "Local instructions from CLAUDE.md:") {
+		t.Fatalf("prompt missing ancestor CLAUDE header: %q", prompt)
+	}
+	if !strings.Contains(prompt, "vault-claude") {
+		t.Fatalf("prompt missing ancestor CLAUDE content: %q", prompt)
+	}
+}
