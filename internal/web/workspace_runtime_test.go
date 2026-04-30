@@ -1536,6 +1536,9 @@ func TestProjectWelcomeIncludesStartAgentCardForLinkedWorkspaces(t *testing.T) {
 	if !strings.Contains(rrWelcome.Body.String(), "Start agent here") {
 		t.Fatalf("welcome missing start-agent card: %s", rrWelcome.Body.String())
 	}
+	if !strings.Contains(rrWelcome.Body.String(), "Use the nearest AGENTS.md or CLAUDE.md from this source folder.") {
+		t.Fatalf("welcome missing nearest-instructions guidance: %s", rrWelcome.Body.String())
+	}
 }
 
 func TestLinkedWorkspaceCreationCopiesSourceSettings(t *testing.T) {

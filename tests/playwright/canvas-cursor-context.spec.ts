@@ -615,9 +615,36 @@ test('file markdown links open the parent folder as source context', async ({ pa
     const log = await getLog(page);
     return log.some(
       (entry) => entry.type === 'message_sent'
-        && String(entry.text || '') === 'Start agent here.',
+      && String(entry.text || '') === 'Start agent here.',
     );
   }, { timeout: 5_000 }).toBe(true);
+
+  await page.evaluate(() => {
+    const app = (window as any)._slopshellApp;
+    const state = app?.getState?.();
+    if (!state) return;
+    state.fileSidebarMode = 'workspace';
+    state.workspaceBrowserPath = 'project/path';
+    state.workspaceBrowserActivePath = 'project/path';
+    state.workspaceBrowserActiveIsDir = true;
+    state.workspaceBrowserLoading = false;
+    state.workspaceBrowserError = '';
+    state.workspaceBrowserEntries = [
+      { name: 'AGENTS.md', path: 'AGENTS.md', is_dir: false },
+      { name: 'notes.md', path: 'notes.md', is_dir: false },
+    ];
+  });
+
+  await page.locator('#edge-left-tap').click();
+  await page.getByRole('button', { name: 'Files' }).click();
+  await expect(page.locator('#pr-file-list')).toContainText('AGENTS.md');
+  await expect(page.locator('#pr-file-list')).toContainText('notes.md');
+
+  await page.evaluate(async () => {
+    const mod = await import(`../../internal/web/static/app-chat-transport.js?ts=${Date.now()}`);
+    await mod.switchProject('brain');
+  });
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).toBe('brain');
 });
 
 test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {
