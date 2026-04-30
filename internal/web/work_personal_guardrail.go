@@ -22,13 +22,32 @@ func isWorkPersonalGuardrailError(err error) bool {
 	return errors.As(err, &guardrailErr)
 }
 
-func workPersonalGuardrailRoot() string {
-	if workBrain := strings.TrimSpace(os.Getenv("SLOPSHELL_BRAIN_WORK_ROOT")); workBrain != "" {
-		clean := filepath.Clean(expandWorkspacePathReference(workBrain))
-		if filepath.Base(clean) == "brain" {
-			return filepath.Join(filepath.Dir(clean), "personal")
+func personalSubtreeRootFromBrainRoot(brainRoot string) string {
+	clean := absoluteCleanPath(brainRoot)
+	if clean == "" {
+		return ""
+	}
+	if filepath.Base(clean) == "brain" {
+		return filepath.Join(filepath.Dir(clean), "personal")
+	}
+	return filepath.Join(clean, "personal")
+}
+
+func configuredWorkBrainRoot() string {
+	if roots := currentBrainRoots(); len(roots) > 0 {
+		if root := strings.TrimSpace(roots[store.SphereWork]); root != "" {
+			return root
 		}
-		return filepath.Join(clean, "personal")
+	}
+	if workBrain := strings.TrimSpace(os.Getenv("SLOPSHELL_BRAIN_WORK_ROOT")); workBrain != "" {
+		return workBrain
+	}
+	return ""
+}
+
+func workPersonalGuardrailRoot() string {
+	if root := personalSubtreeRootFromBrainRoot(configuredWorkBrainRoot()); root != "" {
+		return root
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {

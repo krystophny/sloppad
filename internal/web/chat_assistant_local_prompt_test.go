@@ -1,6 +1,8 @@
 package web
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -94,6 +96,55 @@ func TestBuildLeanLocalAssistantPrompt_VoiceWithDetailIsNotBrief(t *testing.T) {
 	if strings.Contains(prompt, voiceBrevityGuidance) {
 		t.Fatalf("voice + detail should drop brevity guidance:\n%s", prompt)
 	}
+}
+
+func TestBuildLeanLocalAssistantPromptLoadsNearestWorkspaceInstructions(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, "repo")
+	childDir := filepath.Join(workspaceRoot, "src")
+	if err := os.MkdirAll(childDir, 0o755); err != nil {
+		t.Fatalf("mkdir child dir: %v", err)
+	}
+
+	t.Run("prefers AGENTS over CLAUDE in the same directory", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(workspaceRoot, "AGENTS.md"), []byte("repo-agents"), 0o644); err != nil {
+			t.Fatalf("write AGENTS: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(workspaceRoot, "CLAUDE.md"), []byte("repo-claude"), 0o644); err != nil {
+			t.Fatalf("write CLAUDE: %v", err)
+		}
+		workspace := &store.Workspace{Name: "Repo", DirPath: workspaceRoot, RootPath: workspaceRoot}
+		prompt := buildLeanLocalAssistantPrompt(workspace, nil, nil, nil, "", false)
+		if !strings.Contains(prompt, "Local instructions from AGENTS.md:") {
+			t.Fatalf("prompt missing AGENTS block: %q", prompt)
+		}
+		if !strings.Contains(prompt, "repo-agents") {
+			t.Fatalf("prompt missing AGENTS content: %q", prompt)
+		}
+		if strings.Contains(prompt, "repo-claude") {
+			t.Fatalf("prompt included CLAUDE content instead of AGENTS: %q", prompt)
+		}
+	})
+
+	t.Run("nearest ancestor wins", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(workspaceRoot, "AGENTS.md"), []byte("repo-agents"), 0o644); err != nil {
+			t.Fatalf("write root AGENTS: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(childDir, "CLAUDE.md"), []byte("child-claude"), 0o644); err != nil {
+			t.Fatalf("write child CLAUDE: %v", err)
+		}
+		workspace := &store.Workspace{Name: "Repo", DirPath: childDir, RootPath: childDir}
+		prompt := buildLeanLocalAssistantPrompt(workspace, nil, nil, nil, "", false)
+		if !strings.Contains(prompt, "Local instructions from CLAUDE.md:") {
+			t.Fatalf("prompt missing CLAUDE block: %q", prompt)
+		}
+		if !strings.Contains(prompt, "child-claude") {
+			t.Fatalf("prompt missing child CLAUDE content: %q", prompt)
+		}
+		if strings.Contains(prompt, "repo-agents") {
+			t.Fatalf("prompt included ancestor instructions instead of nearest file: %q", prompt)
+		}
+	})
 }
 
 func TestBuildLocalAssistantFastPromptAddsShortPlainGuidance(t *testing.T) {

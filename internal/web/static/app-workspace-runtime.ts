@@ -14,6 +14,7 @@ const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANIO
 const showStatus = (...args) => refs.showStatus(...args);
 const updateAssistantActivityIndicator = (...args) => refs.updateAssistantActivityIndicator(...args);
 const switchProject = (...args) => refs.switchProject(...args);
+const submitMessage = (...args) => refs.submitMessage(...args);
 const openChatWs = (...args) => refs.openChatWs(...args);
 const closeChatWs = (...args) => refs.closeChatWs(...args);
 const appendPlainMessage = (...args) => refs.appendPlainMessage(...args);
@@ -723,6 +724,53 @@ export async function createTemporaryProject(kind, sourceWorkspaceID = '') {
     appendPlainMessage('system', `${projectKind} start failed: ${message}`);
     showStatus(`${projectKind} start failed: ${message}`);
   }
+}
+
+async function openLinkedWorkspaceAtPath(workspacePath, statusText, failurePrefix, readyText) {
+  const path = String(workspacePath || '').trim();
+  if (!path) return '';
+  if (state.projectSwitchInFlight || state.projectModelSwitchInFlight) return '';
+  showStatus(statusText);
+  try {
+    const resp = await fetch(apiURL('runtime/workspaces'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'linked',
+        path,
+        activate: true,
+      }),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    const responsePayload = await resp.json();
+    const project = responsePayload?.workspace || {};
+    const workspaceID = String(project?.id || '').trim();
+    await fetchProjects();
+    if (workspaceID) {
+      await switchProject(workspaceID);
+      return workspaceID;
+    }
+    showStatus(readyText);
+    return '';
+  } catch (err) {
+    const message = String(err?.message || err || 'workspace open failed');
+    appendPlainMessage('system', `${failurePrefix}: ${message}`);
+    showStatus(`${failurePrefix}: ${message}`);
+    return '';
+  }
+}
+
+export async function createLinkedWorkspaceAtPath(workspacePath) {
+  await openLinkedWorkspaceAtPath(workspacePath, 'opening linked workspace...', 'Linked workspace open failed', 'linked workspace ready');
+}
+
+export async function startAgentHereAtPath(workspacePath) {
+  const workspaceID = await openLinkedWorkspaceAtPath(workspacePath, 'starting agent here...', 'Start agent here failed', 'agent ready');
+  if (!workspaceID) return;
+  await submitMessage('Start agent here.', { kind: 'start_agent_here' });
 }
 
 export async function persistTemporaryProject(workspaceID) {

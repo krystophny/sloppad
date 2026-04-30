@@ -267,6 +267,17 @@ func (a *App) ensureStartupWorkspace() (store.Workspace, error) {
 	workspace, err := a.store.ActiveWorkspace()
 	switch {
 	case err == nil:
+		localProjectDir := strings.TrimSpace(a.localProjectDir)
+		if localProjectDir != "" && workspaceMatchesPath(workspace, localProjectDir) {
+			defaultWorkspace, defaultErr := a.ensureDefaultWorkspace()
+			if defaultErr == nil && defaultWorkspace.ID != workspace.ID {
+				if err := a.store.SetActiveWorkspace(defaultWorkspace.ID); err != nil {
+					return store.Workspace{}, err
+				}
+				a.closeAllAppSessions()
+				workspace = defaultWorkspace
+			}
+		}
 		if _, err := a.store.GetOrCreateChatSessionForWorkspace(workspace.ID); err != nil {
 			return store.Workspace{}, err
 		}
@@ -278,7 +289,45 @@ func (a *App) ensureStartupWorkspace() (store.Workspace, error) {
 	}
 }
 
+func workspaceMatchesPath(workspace store.Workspace, path string) bool {
+	cleanPath := absoluteCleanPath(path)
+	if cleanPath == "" {
+		return false
+	}
+	for _, candidate := range []string{workspace.DirPath, workspace.RootPath, workspace.WorkspacePath} {
+		if absoluteCleanPath(candidate) == cleanPath {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) ensureDefaultWorkspace() (store.Workspace, error) {
+	for _, sphere := range configuredBrainPresetSphereOrder(a.runtimeActiveSphere()) {
+		preset, ok := a.findBrainPreset("brain." + sphere)
+		if !ok || !preset.Available {
+			continue
+		}
+		project, _, err := a.createWorkspace2(runtimeWorkspaceCreateRequest{
+			Name: preset.Label,
+			Kind: "linked",
+			Path: preset.RootPath,
+		})
+		if err == nil {
+			if err := a.applyBrainPresetSphere(project, preset.Sphere); err != nil {
+				return store.Workspace{}, err
+			}
+			if err := a.store.SetActiveSphere(preset.Sphere); err != nil {
+				return store.Workspace{}, err
+			}
+			workspace, readyErr := a.ensureWorkspaceReady(project, false)
+			if readyErr != nil {
+				return store.Workspace{}, readyErr
+			}
+			return workspace, nil
+		}
+		return store.Workspace{}, err
+	}
 	localWorkspacePath := strings.TrimSpace(a.localProjectDir)
 	if localWorkspacePath != "" {
 		existing, err := a.store.GetWorkspaceByStoredPath(localWorkspacePath)

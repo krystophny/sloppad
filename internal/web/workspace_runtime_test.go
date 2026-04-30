@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -176,6 +177,126 @@ func TestNewAppPrefersLocalProjectWorkspaceOnStartup(t *testing.T) {
 	}
 	if workspace.DirPath != localProjectDir {
 		t.Fatalf("resolved workspace dir_path = %q, want %q", workspace.DirPath, localProjectDir)
+	}
+}
+
+func TestStartupWorkspacePrefersBrainPresetOverLocalProject(t *testing.T) {
+	rootDir := t.TempDir()
+	dataDir := filepath.Join(rootDir, "data")
+	localProjectDir := filepath.Join(rootDir, "tabula")
+	workVault := filepath.Join(rootDir, "work-vault")
+	brainRoot := filepath.Join(workVault, "brain")
+	if err := os.MkdirAll(localProjectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(localProjectDir) error: %v", err)
+	}
+	if err := os.MkdirAll(brainRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(brainRoot) error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localProjectDir, "go.mod"), []byte("module github.com/sloppy-org/slopshell\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(go.mod) error: %v", err)
+	}
+	configPath := filepath.Join(rootDir, "vaults.toml")
+	config := `[[vault]]
+sphere = "work"
+root = "` + workVault + `"
+brain = "brain"
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("WriteFile(vault config) error: %v", err)
+	}
+	t.Setenv("SLOPTOOLS_VAULT_CONFIG", configPath)
+
+	app, err := New(dataDir, localProjectDir, "", "", "", "", "", false)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if err := app.store.AddAuthSession(testAuthToken); err != nil {
+		t.Fatalf("add auth session: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = app.Shutdown(context.Background())
+	})
+
+	localWorkspace, err := app.store.CreateWorkspace("Default Workspace", localProjectDir, store.SpherePrivate)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(local) error: %v", err)
+	}
+	if err := app.store.SetActiveWorkspace(localWorkspace.ID); err != nil {
+		t.Fatalf("SetActiveWorkspace(local) error: %v", err)
+	}
+
+	startupWorkspace, err := app.ensureStartupWorkspace()
+	if err != nil {
+		t.Fatalf("ensureStartupWorkspace() error: %v", err)
+	}
+	if startupWorkspace.DirPath != brainRoot {
+		t.Fatalf("startup dir_path = %q, want %q", startupWorkspace.DirPath, brainRoot)
+	}
+	if startupWorkspace.Name != "Work brain" {
+		t.Fatalf("startup name = %q, want %q", startupWorkspace.Name, "Work brain")
+	}
+	activeWorkspace, err := app.store.ActiveWorkspace()
+	if err != nil {
+		t.Fatalf("ActiveWorkspace() error: %v", err)
+	}
+	if activeWorkspace.DirPath != brainRoot {
+		t.Fatalf("active workspace dir_path = %q, want %q", activeWorkspace.DirPath, brainRoot)
+	}
+}
+
+func TestWorkPersonalGuardrailUsesBrainConfigGetRoot(t *testing.T) {
+	rootDir := t.TempDir()
+	workVault := filepath.Join(rootDir, "work-vault")
+	privateVault := filepath.Join(rootDir, "private-vault")
+	workBrainRoot := filepath.Join(workVault, "brain")
+	workPersonalRoot := filepath.Join(workVault, "personal")
+	if err := os.MkdirAll(workBrainRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workBrainRoot): %v", err)
+	}
+	if err := os.MkdirAll(workPersonalRoot, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workPersonalRoot): %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(privateVault, "brain"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(private brain): %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req["id"],
+			"result": map[string]any{
+				"structuredContent": map[string]any{
+					"vaults": []any{
+						map[string]any{"sphere": "work", "root": workVault, "brain": "brain"},
+						map[string]any{"sphere": "private", "root": privateVault, "brain": "brain"},
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", filepath.Join(rootDir, "env-work", "brain"))
+	t.Setenv("SLOPSHELL_BRAIN_PRIVATE_ROOT", filepath.Join(rootDir, "env-private", "brain"))
+
+	app := newAuthedTestApp(t)
+	app.tunnels.setEndpoint(LocalSessionID, mcpEndpoint{httpURL: server.URL})
+
+	if !pathInWorkPersonalGuardrail(filepath.Join(workPersonalRoot, "diary.md")) {
+		t.Fatalf("expected configured work personal subtree to be blocked")
+	}
+	if pathInWorkPersonalGuardrail(filepath.Join(rootDir, "env-work", "personal", "diary.md")) {
+		t.Fatalf("expected env fallback to be ignored when brain.config.get is available")
 	}
 }
 
@@ -1153,6 +1274,87 @@ func TestWorkspaceMarkdownLinkResolveRejectsOutOfVaultAndWorkPersonal(t *testing
 	}
 }
 
+func TestWorkspaceMarkdownLinkResolveOpensLinkedFolderWithinVault(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	sourceDir := filepath.Join(brainRoot, "topics")
+	targetDir := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	resolution := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../project/path/", "")
+	wantRel := filepath.ToSlash(filepath.Join("project", "path"))
+	if !resolution.OK {
+		t.Fatalf("resolution blocked: %+v", resolution)
+	}
+	if resolution.Kind != "folder" {
+		t.Fatalf("resolution kind = %q, want folder", resolution.Kind)
+	}
+	if resolution.FileURL != "" {
+		t.Fatalf("folder resolution file_url = %q, want empty", resolution.FileURL)
+	}
+	if resolution.ResolvedPath != wantRel || resolution.VaultRelativePath != wantRel {
+		t.Fatalf("resolution path = %+v, want relative %q", resolution, wantRel)
+	}
+	if strings.HasPrefix(resolution.ResolvedPath, string(filepath.Separator)) || strings.Contains(resolution.ResolvedPath, ":") {
+		t.Fatalf("resolution leaked absolute path: %+v", resolution)
+	}
+}
+
+func TestWorkspaceMarkdownLinkResolveUsesRelativeFileURLForVaultNotes(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	sourceDir := filepath.Join(brainRoot, "topics")
+	targetDir := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir target dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "file.md"), []byte("target"), 0o644); err != nil {
+		t.Fatalf("write target note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+
+	resolution := resolveMarkdownLinkForTest(t, app, workspace.ID, "topics/active.md", "../../project/path/file.md", "")
+	wantRel := filepath.ToSlash(filepath.Join("project", "path", "file.md"))
+	if !resolution.OK {
+		t.Fatalf("resolution blocked: %+v", resolution)
+	}
+	if resolution.Kind != "text" {
+		t.Fatalf("resolution kind = %q, want text", resolution.Kind)
+	}
+	if resolution.ResolvedPath != wantRel || resolution.VaultRelativePath != wantRel {
+		t.Fatalf("resolution path = %+v, want relative %q", resolution, wantRel)
+	}
+	if resolution.FileURL == "" || !strings.Contains(resolution.FileURL, "/api/workspaces/") {
+		t.Fatalf("resolution file_url = %q, want api path", resolution.FileURL)
+	}
+	if strings.Contains(resolution.FileURL, "file://") || strings.Contains(resolution.FileURL, vaultRoot) || strings.Contains(resolution.FileURL, string(filepath.Separator)+"home"+string(filepath.Separator)) {
+		t.Fatalf("resolution leaked machine path in file_url: %+v", resolution)
+	}
+}
+
 func resolveMarkdownLinkForTest(t *testing.T, app *App, workspaceID int64, sourcePath, target, linkType string) workspaceMarkdownLinkResolution {
 	t.Helper()
 	values := url.Values{}
@@ -1276,6 +1478,41 @@ func TestProjectWelcomeIncludesRuntimeCards(t *testing.T) {
 	}
 	if !strings.Contains(rrWelcome.Body.String(), "Silent mode") {
 		t.Fatalf("welcome missing runtime card: %s", rrWelcome.Body.String())
+	}
+}
+
+func TestProjectWelcomeIncludesStartAgentCardForLinkedWorkspaces(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	linkedRoot := filepath.Join(vaultRoot, "project", "path")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir brain topics: %v", err)
+	}
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatalf("mkdir linked root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("active"), 0o644); err != nil {
+		t.Fatalf("write active note: %v", err)
+	}
+	app := newAuthedTestApp(t)
+	if _, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork); err != nil {
+		t.Fatalf("CreateWorkspace(brain) error: %v", err)
+	}
+	linked, _, err := app.createWorkspace2(runtimeWorkspaceCreateRequest{
+		Name: "Linked source",
+		Kind: "linked",
+		Path: linkedRoot,
+	})
+	if err != nil {
+		t.Fatalf("create linked workspace: %v", err)
+	}
+	workspaceID := workspaceIDStr(linked.ID)
+	rrWelcome := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/runtime/workspaces/"+workspaceID+"/welcome", nil)
+	if rrWelcome.Code != http.StatusOK {
+		t.Fatalf("expected linked welcome 200, got %d: %s", rrWelcome.Code, rrWelcome.Body.String())
+	}
+	if !strings.Contains(rrWelcome.Body.String(), "Start agent here") {
+		t.Fatalf("welcome missing start-agent card: %s", rrWelcome.Body.String())
 	}
 }
 

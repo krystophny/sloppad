@@ -195,6 +195,7 @@ func resolveWorkspaceMarkdownLink(workspace store.Workspace, sourceRaw, targetRa
 	}
 	result.SourcePath = sourceRel
 	target := cleanMarkdownLinkTarget(targetRaw)
+	folderRequested := strings.HasSuffix(strings.TrimSpace(targetRaw), "/") || strings.HasSuffix(strings.TrimSpace(targetRaw), "\\")
 	wikilink := strings.EqualFold(strings.TrimSpace(linkType), "wikilink") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(targetRaw)), "slopshell-wiki:")
 	candidates := markdownLinkCandidatePaths(sourceAbs, brainRoot, vaultRoot, target, wikilink)
 	if wikilink {
@@ -214,7 +215,7 @@ func resolveWorkspaceMarkdownLink(workspace store.Workspace, sourceRaw, targetRa
 			return result
 		}
 		info, err := os.Stat(candidate)
-		if err != nil || info.IsDir() {
+		if err != nil {
 			continue
 		}
 		vaultRel, err := filepath.Rel(vaultRoot, candidate)
@@ -224,11 +225,20 @@ func resolveWorkspaceMarkdownLink(workspace store.Workspace, sourceRaw, targetRa
 			return result
 		}
 		vaultRel = filepath.ToSlash(filepath.Clean(vaultRel))
+		if info.IsDir() {
+			if !folderRequested {
+				if _, err := os.Stat(candidate + ".md"); err == nil {
+					continue
+				}
+			}
+			result.Kind = "folder"
+		} else {
+			result.Kind = markdownLinkKind(candidate)
+			result.FileURL = "/api/workspaces/" + workspaceIDStr(workspace.ID) + "/markdown-link/file?path=" + url.QueryEscape(vaultRel)
+		}
 		result.OK = true
 		result.ResolvedPath = vaultRel
 		result.VaultRelativePath = vaultRel
-		result.Kind = markdownLinkKind(candidate)
-		result.FileURL = "/api/workspaces/" + workspaceIDStr(workspace.ID) + "/markdown-link/file?path=" + url.QueryEscape(vaultRel)
 		return result
 	}
 	result.Blocked = true

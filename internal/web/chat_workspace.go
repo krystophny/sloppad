@@ -375,6 +375,70 @@ type workspacePromptContext struct {
 	OpenItemCount   int
 }
 
+type workspaceInstructionContext struct {
+	FileName string
+	Content  string
+}
+
+func workspaceInstructionBasePath(workspace *store.Workspace) string {
+	if workspace == nil {
+		return ""
+	}
+	for _, candidate := range []string{workspace.RootPath, workspace.DirPath, workspace.WorkspacePath} {
+		if cleaned := filepath.Clean(strings.TrimSpace(candidate)); cleaned != "" && cleaned != "." {
+			return cleaned
+		}
+	}
+	return ""
+}
+
+func loadNearestWorkspaceInstructionContext(workspacePath string) *workspaceInstructionContext {
+	base := filepath.Clean(strings.TrimSpace(workspacePath))
+	if base == "" || base == "." {
+		return nil
+	}
+	if pathInWorkPersonalGuardrail(base) {
+		return nil
+	}
+	current := base
+	for {
+		for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+			candidate := filepath.Join(current, name)
+			data, err := os.ReadFile(candidate)
+			if err != nil {
+				continue
+			}
+			content := strings.TrimSpace(string(data))
+			if content == "" {
+				continue
+			}
+			return &workspaceInstructionContext{
+				FileName: filepath.Base(candidate),
+				Content:  content,
+			}
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return nil
+		}
+		current = parent
+	}
+}
+
+func appendWorkspaceInstructionContext(b *strings.Builder, workspacePath string) {
+	if b == nil {
+		return
+	}
+	ctx := loadNearestWorkspaceInstructionContext(workspacePath)
+	if ctx == nil {
+		return
+	}
+	fmt.Fprintf(b, "Local instructions from %s:\n", ctx.FileName)
+	b.WriteString(ctx.Content)
+	b.WriteByte('\n')
+	b.WriteByte('\n')
+}
+
 func (a *App) loadWorkspacePromptContext(workspacePath string) *workspacePromptContext {
 	project, err := a.store.GetWorkspaceByStoredPath(strings.TrimSpace(workspacePath))
 	if err != nil {
@@ -428,6 +492,7 @@ func prependWorkspacePromptContext(prompt string, ctx *workspacePromptContext) s
 		fmt.Fprintf(&b, "Focused target workspace: %s (%s)\n", ctx.AnchorWorkspace.Name, ctx.AnchorWorkspace.DirPath)
 	}
 	fmt.Fprintf(&b, "Open items in focused workspace: %d\n\n", ctx.OpenItemCount)
+	appendWorkspaceInstructionContext(&b, ctx.ProjectRootPath)
 	b.WriteString(prompt)
 	return b.String()
 }

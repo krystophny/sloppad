@@ -213,6 +213,29 @@ async function renderMarkdownArtifactWithImage(page: Page) {
   });
 }
 
+async function seedBrainWorkspace(page: Page) {
+  await page.evaluate(() => {
+    (window as any).__setProjects([
+      {
+        id: 'brain',
+        name: 'Brain',
+        kind: 'linked',
+        sphere: 'work',
+        workspace_path: '/tmp/vault/brain',
+        root_path: '/tmp/vault/brain',
+        chat_session_id: 'chat-brain',
+        canvas_session_id: 'brain',
+        chat_mode: 'chat',
+        chat_model: 'local',
+        chat_model_reasoning_effort: 'none',
+        unread: false,
+        review_pending: false,
+        run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
+      },
+    ], 'brain');
+  });
+}
+
 async function setInteractionTool(page: Page, tool: 'pointer' | 'highlight' | 'ink' | 'text_note' | 'prompt') {
   await page.evaluate((mode) => {
     (window as any).__setRuntimeState?.({ tool: mode });
@@ -451,6 +474,81 @@ test('markdown image paths are rewritten through the canvas file proxy', async (
     return img instanceof HTMLImageElement ? img.src : '';
   })).toContain('/api/files/');
   await expect(page.locator('#canvas-text img')).toHaveAttribute('src', /docs%2Fimages%2Fdiagram\.png/);
+});
+
+test('folder markdown links start an agent in the linked workspace rooted at the vault target', async ({ page }) => {
+  await seedBrainWorkspace(page);
+  await page.evaluate(async () => {
+    const mod = await import(`../../internal/web/static/app-workspace-runtime.js?ts=${Date.now()}`);
+    await mod.startAgentHereAtPath('/tmp/vault/project/path');
+  });
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.kind || '') === 'linked'
+        && String(entry.payload?.path || '') === '/tmp/vault/project/path',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'message_sent'
+        && String(entry.text || '') === 'Start agent here.',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
+});
+
+test('start agent here welcome action opens the linked source folder and sends a starter turn', async ({ page }) => {
+  await seedBrainWorkspace(page);
+  await page.evaluate(async () => {
+    const mod = await import(`../../internal/web/static/app-chat-ui.js?ts=${Date.now()}`);
+    mod.renderWelcomeSurface({
+      workspace_id: 'brain',
+      title: 'Linked source',
+      sections: [{
+        id: 'agent',
+        title: 'Agent',
+        cards: [{
+          id: 'start-agent-here',
+          title: 'Start agent here',
+          subtitle: 'project/path',
+          description: 'Use nearest instructions',
+          action: {
+            type: 'start_agent_here',
+            path: '/tmp/vault/project/path',
+          },
+        }],
+      }],
+    });
+  });
+
+  await page.locator('#canvas-text .welcome-card', { hasText: 'Start agent here' }).click();
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'api_fetch'
+        && entry.action === 'project_create'
+        && String(entry.payload?.kind || '') === 'linked'
+        && String(entry.payload?.path || '') === '/tmp/vault/project/path',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => {
+    const log = await getLog(page);
+    return log.some(
+      (entry) => entry.type === 'message_sent'
+        && String(entry.text || '') === 'Start agent here.',
+    );
+  }, { timeout: 5_000 }).toBe(true);
+
+  await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
 });
 
 test('blocked markdown note links surface resolver reasons on canvas', async ({ page }) => {

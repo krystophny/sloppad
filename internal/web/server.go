@@ -176,6 +176,7 @@ func New(dataDir, localProjectDir, localMCPSocket, appServerURL, model, ttsURL, 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	cleanup := func() {
 		shutdownCancel()
+		setBrainRootsProvider(nil)
 		lc.Close()
 		_ = s.Close()
 	}
@@ -413,6 +414,9 @@ func New(dataDir, localProjectDir, localMCPSocket, appServerURL, model, ttsURL, 
 		bootID:                  strconv.FormatInt(time.Now().UnixNano(), 16),
 		startedAt:               time.Now().UTC().Format(time.RFC3339Nano),
 	}
+	setBrainRootsProvider(func() map[string]string {
+		return app.brainPresetRoots()
+	})
 	if strings.TrimSpace(localProjectDir) != "" {
 		if _, err := app.ensureDefaultWorkspace(); err != nil {
 			cleanup()
@@ -961,6 +965,7 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.llmCache != nil {
 		a.llmCache.Close()
 	}
+	setBrainRootsProvider(nil)
 	storeErr := a.store.Close()
 	if waitErr != nil {
 		return waitErr
