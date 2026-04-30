@@ -1,6 +1,24 @@
 package store
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
+
+func normalizeOptionalSidebarSectionFilter(raw string) (string, error) {
+	clean := strings.ToLower(strings.TrimSpace(raw))
+	if clean == "" {
+		return "", nil
+	}
+	switch clean {
+	case ItemSidebarSectionProject,
+		ItemSidebarSectionPeople,
+		ItemSidebarSectionDrift,
+		ItemSidebarSectionDedup:
+		return clean, nil
+	}
+	return "", errors.New("section must be one of project_items, people, drift, dedup")
+}
 
 func normalizeItemListFilter(filter ItemListFilter) (ItemListFilter, error) {
 	normalized := ItemListFilter{
@@ -12,6 +30,11 @@ func normalizeItemListFilter(filter ItemListFilter) (ItemListFilter, error) {
 		return ItemListFilter{}, err
 	}
 	normalized.Sphere = sphere
+	section, err := normalizeOptionalSidebarSectionFilter(filter.Section)
+	if err != nil {
+		return ItemListFilter{}, err
+	}
+	normalized.Section = section
 	if filter.WorkspaceID != nil {
 		if *filter.WorkspaceID <= 0 {
 			return ItemListFilter{}, errors.New("workspace_id must be a positive integer")
@@ -79,6 +102,31 @@ func appendItemFilterClauses(parts []string, args []any, filter ItemListFilter, 
 	}
 	if filter.WorkspaceUnassigned {
 		parts = append(parts, column("workspace_id")+" IS NULL")
+	}
+	switch filter.Section {
+	case ItemSidebarSectionProject:
+		parts = append(parts, column("kind")+" = ?")
+		args = append(args, ItemKindProject)
+	case ItemSidebarSectionPeople:
+		parts = append(parts, column("actor_id")+" IS NOT NULL")
+	case ItemSidebarSectionDrift:
+		parts = append(parts,
+			column("review_target")+" IS NOT NULL",
+			"trim("+column("review_target")+") <> ''",
+		)
+	case ItemSidebarSectionDedup:
+		parts = append(parts,
+			column("source")+" IS NOT NULL",
+			"trim("+column("source")+") <> ''",
+			column("source_ref")+" IS NOT NULL",
+			"trim("+column("source_ref")+") <> ''",
+			`EXISTS (
+SELECT 1 FROM items dup
+WHERE dup.id <> `+outerColumn("id")+`
+  AND lower(trim(dup.source)) = lower(trim(`+column("source")+`))
+  AND lower(trim(dup.source_ref)) = lower(trim(`+column("source_ref")+`))
+)`,
+		)
 	}
 	if filter.labelResolved {
 		if len(filter.resolvedLabelGroups) == 0 {

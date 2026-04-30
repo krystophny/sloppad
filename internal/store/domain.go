@@ -106,9 +106,17 @@ type ItemListFilter struct {
 	WorkspaceUnassigned bool   `json:"workspace_unassigned,omitempty"`
 	LabelID             *int64 `json:"label_id,omitempty"`
 	Label               string `json:"label,omitempty"`
+	Section             string `json:"section,omitempty"`
 	resolvedLabelGroups [][]int64
 	labelResolved       bool
 }
+
+const (
+	ItemSidebarSectionProject = "project_items"
+	ItemSidebarSectionPeople  = "people"
+	ItemSidebarSectionDrift   = "drift"
+	ItemSidebarSectionDedup   = "dedup"
+)
 
 type Label struct {
 	ID        int64  `json:"id"`

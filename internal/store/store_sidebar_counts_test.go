@@ -143,3 +143,172 @@ func TestCountSidebarSectionsFilteredExcludesAgedMeetings(t *testing.T) {
 		t.Fatalf("ArtifactKindTranscript constant changed: %q", string(ArtifactKindTranscript))
 	}
 }
+
+func TestCountSidebarSectionsFilteredCountsDistinctPeopleOnOpenItems(t *testing.T) {
+	s := newTestStore(t)
+
+	alice, err := s.CreateActor("Alice", ActorKindHuman)
+	if err != nil {
+		t.Fatalf("CreateActor(Alice) error: %v", err)
+	}
+	bob, err := s.CreateActor("Bob", ActorKindHuman)
+	if err != nil {
+		t.Fatalf("CreateActor(Bob) error: %v", err)
+	}
+	carol, err := s.CreateActor("Carol", ActorKindHuman)
+	if err != nil {
+		t.Fatalf("CreateActor(Carol) error: %v", err)
+	}
+
+	if _, err := s.CreateItem("Awaiting Alice", ItemOptions{State: ItemStateWaiting, ActorID: &alice.ID}); err != nil {
+		t.Fatalf("CreateItem(Alice) error: %v", err)
+	}
+	if _, err := s.CreateItem("Also awaiting Alice", ItemOptions{State: ItemStateNext, ActorID: &alice.ID}); err != nil {
+		t.Fatalf("CreateItem(Alice second) error: %v", err)
+	}
+	if _, err := s.CreateItem("Owe Bob", ItemOptions{State: ItemStateNext, ActorID: &bob.ID}); err != nil {
+		t.Fatalf("CreateItem(Bob) error: %v", err)
+	}
+	// Done item should not be counted even if it has an actor.
+	if _, err := s.CreateItem("Carol done", ItemOptions{State: ItemStateDone, ActorID: &carol.ID}); err != nil {
+		t.Fatalf("CreateItem(Carol done) error: %v", err)
+	}
+	// Item without actor should not contribute to people count.
+	if _, err := s.CreateItem("No actor", ItemOptions{State: ItemStateNext}); err != nil {
+		t.Fatalf("CreateItem(no actor) error: %v", err)
+	}
+
+	now := time.Date(2026, time.April, 30, 10, 0, 0, 0, time.UTC)
+	got, err := s.CountSidebarSectionsFiltered(now, ItemListFilter{})
+	if err != nil {
+		t.Fatalf("CountSidebarSectionsFiltered() error: %v", err)
+	}
+	if got.PeopleOpen != 2 {
+		t.Fatalf("PeopleOpen = %d, want 2 (Alice + Bob; Carol's done item excluded; un-actor-ed item ignored)", got.PeopleOpen)
+	}
+}
+
+func TestCountSidebarSectionsFilteredCountsDriftReviewItems(t *testing.T) {
+	s := newTestStore(t)
+
+	driftWithTarget, err := s.CreateItem("Drift with target", ItemOptions{State: ItemStateReview})
+	if err != nil {
+		t.Fatalf("CreateItem(drift target) error: %v", err)
+	}
+	target := ItemReviewTargetGitHub
+	reviewer := "krystophny"
+	if err := s.UpdateItemReviewDispatch(driftWithTarget.ID, &target, &reviewer); err != nil {
+		t.Fatalf("UpdateItemReviewDispatch() error: %v", err)
+	}
+	// Review state without target should not be counted as drift.
+	if _, err := s.CreateItem("Review no target", ItemOptions{State: ItemStateReview}); err != nil {
+		t.Fatalf("CreateItem(review no target) error: %v", err)
+	}
+	// Non-review items should not be counted even if they have a target later.
+	if _, err := s.CreateItem("Next item", ItemOptions{State: ItemStateNext}); err != nil {
+		t.Fatalf("CreateItem(next) error: %v", err)
+	}
+
+	now := time.Date(2026, time.April, 30, 10, 0, 0, 0, time.UTC)
+	got, err := s.CountSidebarSectionsFiltered(now, ItemListFilter{})
+	if err != nil {
+		t.Fatalf("CountSidebarSectionsFiltered() error: %v", err)
+	}
+	if got.DriftReview != 1 {
+		t.Fatalf("DriftReview = %d, want 1 (only review-state item with review_target set)", got.DriftReview)
+	}
+}
+
+func TestCountSidebarSectionsFilteredCountsDuplicateSourcePairs(t *testing.T) {
+	s := newTestStore(t)
+
+	source := "github"
+	ref := "krystophny/repo#42"
+	if _, err := s.CreateItem("Dup A", ItemOptions{
+		State:     ItemStateNext,
+		Source:    &source,
+		SourceRef: &ref,
+	}); err != nil {
+		t.Fatalf("CreateItem(dup A) error: %v", err)
+	}
+	if _, err := s.CreateItem("Dup B", ItemOptions{
+		State:     ItemStateInbox,
+		Source:    &source,
+		SourceRef: &ref,
+	}); err != nil {
+		t.Fatalf("CreateItem(dup B) error: %v", err)
+	}
+	uniqueRef := "krystophny/repo#1"
+	if _, err := s.CreateItem("Unique source/ref", ItemOptions{
+		State:     ItemStateNext,
+		Source:    &source,
+		SourceRef: &uniqueRef,
+	}); err != nil {
+		t.Fatalf("CreateItem(unique) error: %v", err)
+	}
+	if _, err := s.CreateItem("No source", ItemOptions{State: ItemStateNext}); err != nil {
+		t.Fatalf("CreateItem(no source) error: %v", err)
+	}
+	// Done duplicates should not be counted as live dedup work.
+	doneRef := "krystophny/repo#9"
+	if _, err := s.CreateItem("Dup done A", ItemOptions{
+		State:     ItemStateDone,
+		Source:    &source,
+		SourceRef: &doneRef,
+	}); err != nil {
+		t.Fatalf("CreateItem(done dup A) error: %v", err)
+	}
+	if _, err := s.CreateItem("Dup done B", ItemOptions{
+		State:     ItemStateDone,
+		Source:    &source,
+		SourceRef: &doneRef,
+	}); err != nil {
+		t.Fatalf("CreateItem(done dup B) error: %v", err)
+	}
+
+	now := time.Date(2026, time.April, 30, 10, 0, 0, 0, time.UTC)
+	got, err := s.CountSidebarSectionsFiltered(now, ItemListFilter{})
+	if err != nil {
+		t.Fatalf("CountSidebarSectionsFiltered() error: %v", err)
+	}
+	if got.DedupReview != 2 {
+		t.Fatalf("DedupReview = %d, want 2 (the two open rows sharing source/source_ref; done duplicates excluded)", got.DedupReview)
+	}
+}
+
+func TestSidebarSectionFilterDrillsDownToProjectItemsOnly(t *testing.T) {
+	s := newTestStore(t)
+
+	if _, err := s.CreateItem("Plan outcome", ItemOptions{Kind: ItemKindProject, State: ItemStateNext}); err != nil {
+		t.Fatalf("CreateItem(project) error: %v", err)
+	}
+	if _, err := s.CreateItem("Routine action", ItemOptions{State: ItemStateNext}); err != nil {
+		t.Fatalf("CreateItem(action) error: %v", err)
+	}
+
+	all, err := s.ListNextItemsFiltered(ItemListFilter{})
+	if err != nil {
+		t.Fatalf("ListNextItemsFiltered() error: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("baseline len(all) = %d, want 2", len(all))
+	}
+
+	scoped, err := s.ListNextItemsFiltered(ItemListFilter{Section: ItemSidebarSectionProject})
+	if err != nil {
+		t.Fatalf("ListNextItemsFiltered(section=project_items) error: %v", err)
+	}
+	if len(scoped) != 1 {
+		t.Fatalf("project section len = %d, want 1", len(scoped))
+	}
+	if scoped[0].Kind != ItemKindProject {
+		t.Fatalf("project section item.Kind = %q, want %q", scoped[0].Kind, ItemKindProject)
+	}
+}
+
+func TestSidebarSectionFilterRejectsUnknownValue(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.ListNextItemsFiltered(ItemListFilter{Section: "garbage"}); err == nil {
+		t.Fatal("expected error for unknown section filter, got nil")
+	}
+}

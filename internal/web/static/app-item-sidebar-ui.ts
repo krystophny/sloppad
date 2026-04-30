@@ -442,6 +442,24 @@ function applySidebarSourceFilter(sourceID) {
   void loadItemSidebarView(state.itemSidebarView, nextFilters);
 }
 
+const SIDEBAR_SECTION_DRILLDOWN = {
+  'project-items': { section: 'project_items', view: null },
+  people: { section: 'people', view: 'waiting' },
+  drift: { section: 'drift', view: 'review' },
+  dedup: { section: 'dedup', view: null },
+  'recent-meetings': { section: '', view: 'review' },
+};
+
+function applySidebarSectionDrilldown(sectionID) {
+  const config = SIDEBAR_SECTION_DRILLDOWN[String(sectionID || '')] || null;
+  if (!config) return;
+  const currentSection = String(state.itemSidebarFilters?.section || '').trim().toLowerCase();
+  const nextSection = currentSection === config.section ? '' : config.section;
+  const nextFilters = { ...state.itemSidebarFilters, section: nextSection };
+  const targetView = nextSection && config.view ? config.view : state.itemSidebarView;
+  void loadItemSidebarView(targetView, nextFilters);
+}
+
 export function renderSidebarSecondary(list) {
   const secondary = document.createElement('div');
   secondary.className = 'sidebar-secondary';
@@ -473,21 +491,50 @@ export function renderSidebarSecondary(list) {
   body.id = 'sidebar-secondary-body';
   body.hidden = !state.itemSidebarSecondaryOpen;
 
-  const sectionCounts = state.itemSidebarSectionCounts || { project_items_open: 0, recent_meetings: 0 };
+  const sectionCounts: Record<string, number> = state.itemSidebarSectionCounts || {};
   const projectItemsCount = Number(sectionCounts.project_items_open || 0);
+  const peopleCount = Number(sectionCounts.people_open || 0);
+  const driftCount = Number(sectionCounts.drift_review || 0);
+  const dedupCount = Number(sectionCounts.dedup_review || 0);
   const recentMeetingsCount = Number(sectionCounts.recent_meetings || 0);
+  const activeSection = String(state.itemSidebarFilters?.section || '').trim().toLowerCase();
 
   const sections = [
     {
       id: 'project-items',
       label: 'Project items',
       count: projectItemsCount,
-      title: 'Project items are Item(kind=project), surfaced as filters – not Workspaces.',
+      sectionFilter: 'project_items',
+      title: 'Filter to open project items (Item kind=project). Project items stay surfaced as filters, not Workspaces.',
     },
-    { id: 'people', label: 'People', count: 0, title: 'People owe / waiting counts (preview)' },
-    { id: 'drift', label: 'Drift', count: 0, title: 'Source drift review (preview)' },
-    { id: 'dedup', label: 'Dedup', count: 0, title: 'Duplicate review (preview)' },
-    { id: 'recent-meetings', label: 'Recent meetings (7d)', count: recentMeetingsCount, title: 'Meeting notes from the last 7 days' },
+    {
+      id: 'people',
+      label: 'People',
+      count: peopleCount,
+      sectionFilter: 'people',
+      title: 'Filter to delegated/awaited items: distinct people the active queue owes work to or waits on.',
+    },
+    {
+      id: 'drift',
+      label: 'Drift',
+      count: driftCount,
+      sectionFilter: 'drift',
+      title: 'Filter to review-state items with a review_target set: source drift review backlog.',
+    },
+    {
+      id: 'dedup',
+      label: 'Dedup',
+      count: dedupCount,
+      sectionFilter: 'dedup',
+      title: 'Filter to open items whose (source, source_ref) collides with another row: duplicate review backlog.',
+    },
+    {
+      id: 'recent-meetings',
+      label: 'Recent meetings (7d)',
+      count: recentMeetingsCount,
+      sectionFilter: '',
+      title: 'Switch to the review queue to triage meeting notes from the last seven days.',
+    },
   ];
   for (const section of sections) {
     const row = document.createElement('button');
@@ -498,6 +545,12 @@ export function renderSidebarSecondary(list) {
     if (section.count <= 0) {
       row.classList.add('is-empty');
     }
+    if (section.sectionFilter && section.sectionFilter === activeSection) {
+      row.classList.add('is-active');
+      row.setAttribute('aria-pressed', 'true');
+    } else {
+      row.setAttribute('aria-pressed', 'false');
+    }
     const labelEl = document.createElement('span');
     labelEl.className = 'sidebar-secondary-row-label';
     labelEl.textContent = section.label;
@@ -507,7 +560,7 @@ export function renderSidebarSecondary(list) {
     badge.textContent = section.count > 0 ? String(section.count) : '—';
     row.appendChild(badge);
     row.addEventListener('click', () => {
-      showStatus(`${section.label}: filter coming online`);
+      applySidebarSectionDrilldown(section.id);
     });
     body.appendChild(row);
   }

@@ -89,8 +89,9 @@ func (a *App) resurfaceDueItemsForRead(w http.ResponseWriter) bool {
 
 func parseItemListFilterQuery(r *http.Request) (store.ItemListFilter, error) {
 	filter := store.ItemListFilter{
-		Sphere: strings.TrimSpace(r.URL.Query().Get("sphere")),
-		Source: strings.TrimSpace(r.URL.Query().Get("source")),
+		Sphere:  strings.TrimSpace(r.URL.Query().Get("sphere")),
+		Source:  strings.TrimSpace(r.URL.Query().Get("source")),
+		Section: strings.TrimSpace(r.URL.Query().Get("section")),
 	}
 	if rawWorkspaceID := strings.TrimSpace(r.URL.Query().Get("workspace_id")); rawWorkspaceID != "" {
 		if strings.EqualFold(rawWorkspaceID, "null") {

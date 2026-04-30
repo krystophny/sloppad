@@ -2058,9 +2058,12 @@
         };
         const sectionFixture = window.__itemSidebarSectionCounts && typeof window.__itemSidebarSectionCounts === 'object'
           ? window.__itemSidebarSectionCounts
-          : { project_items_open: 0, recent_meetings: 0 };
+          : { project_items_open: 0, people_open: 0, drift_review: 0, dedup_review: 0, recent_meetings: 0 };
         const sections = {
           project_items_open: Math.max(0, Number(sectionFixture.project_items_open || 0) || 0),
+          people_open: Math.max(0, Number(sectionFixture.people_open || 0) || 0),
+          drift_review: Math.max(0, Number(sectionFixture.drift_review || 0) || 0),
+          dedup_review: Math.max(0, Number(sectionFixture.dedup_review || 0) || 0),
           recent_meetings: Math.max(0, Number(sectionFixture.recent_meetings || 0) || 0),
         };
         const delayMs = nextItemSidebarResponseDelay('counts');

@@ -11,13 +11,25 @@ async function waitReady(page: Page) {
   }, null, { timeout: 8_000 });
 }
 
-async function seedSectionFixture(page: Page, projectItemsOpen: number, recentMeetings: number) {
-  await page.evaluate(([open, meetings]) => {
+async function seedSectionFixture(
+  page: Page,
+  counts: {
+    projectItemsOpen?: number;
+    peopleOpen?: number;
+    driftReview?: number;
+    dedupReview?: number;
+    recentMeetings?: number;
+  },
+) {
+  await page.evaluate((data) => {
     (window as any).__itemSidebarSectionCounts = {
-      project_items_open: open,
-      recent_meetings: meetings,
+      project_items_open: data.projectItemsOpen ?? 0,
+      people_open: data.peopleOpen ?? 0,
+      drift_review: data.driftReview ?? 0,
+      dedup_review: data.dedupReview ?? 0,
+      recent_meetings: data.recentMeetings ?? 0,
     };
-  }, [projectItemsOpen, recentMeetings]);
+  }, counts);
 }
 
 async function openInbox(page: Page) {
@@ -71,7 +83,13 @@ test.describe('compact sidebar navigation (#746)', () => {
   test('expandable secondary section keeps project items as filters with backend counts and source pills', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
-    await seedSectionFixture(page, 3, 2);
+    await seedSectionFixture(page, {
+      projectItemsOpen: 3,
+      peopleOpen: 4,
+      driftReview: 1,
+      dedupReview: 2,
+      recentMeetings: 2,
+    });
     await openInbox(page);
     await page.evaluate(async () => {
       const mod = await import('../../internal/web/static/app-item-sidebar-utils.js');
@@ -92,17 +110,11 @@ test.describe('compact sidebar navigation (#746)', () => {
     await expect(projectRow.locator('.sidebar-secondary-row-label')).toHaveText('Project items');
     await expect(projectRow.locator('.sidebar-secondary-row-count')).toHaveText('3');
 
+    await expect(body.locator('.sidebar-secondary-row[data-section-id="people"] .sidebar-secondary-row-count')).toHaveText('4');
+    await expect(body.locator('.sidebar-secondary-row[data-section-id="drift"] .sidebar-secondary-row-count')).toHaveText('1');
+    await expect(body.locator('.sidebar-secondary-row[data-section-id="dedup"] .sidebar-secondary-row-count')).toHaveText('2');
     const meetingsRow = body.locator('.sidebar-secondary-row[data-section-id="recent-meetings"]');
     await expect(meetingsRow.locator('.sidebar-secondary-row-count')).toHaveText('2');
-
-    const peopleRow = body.locator('.sidebar-secondary-row[data-section-id="people"]');
-    const driftRow = body.locator('.sidebar-secondary-row[data-section-id="drift"]');
-    const dedupRow = body.locator('.sidebar-secondary-row[data-section-id="dedup"]');
-    for (const row of [peopleRow, driftRow, dedupRow]) {
-      await expect(row).toBeVisible();
-      await expect(row).toHaveClass(/is-empty/);
-      await expect(row.locator('.sidebar-secondary-row-count')).toHaveText('—');
-    }
 
     const sourceLabels = await body.locator('.sidebar-source-pill').allTextContents();
     expect(sourceLabels).toEqual(['Email', 'Todoist', 'GitHub', 'GitLab', 'Markdown', 'Local']);
@@ -116,10 +128,43 @@ test.describe('compact sidebar navigation (#746)', () => {
     await expect(page.locator('.sidebar-source-pill[data-source-id="github"]')).toHaveClass(/is-active/);
   });
 
+  test('clicking a secondary row drills the queue down with a section filter', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await waitReady(page);
+    await seedSectionFixture(page, {
+      projectItemsOpen: 3,
+      peopleOpen: 0,
+      driftReview: 0,
+      dedupReview: 0,
+      recentMeetings: 0,
+    });
+    await openInbox(page);
+    await page.evaluate(async () => {
+      const mod = await import('../../internal/web/static/app-item-sidebar-utils.js');
+      await mod.refreshItemSidebarCounts();
+    });
+    await page.locator('#sidebar-secondary-toggle').click();
+
+    await page.locator('.sidebar-secondary-row[data-section-id="project-items"]').click();
+    await expect.poll(async () => page.evaluate(() => {
+      const app = (window as any)._slopshellApp;
+      const filters = app?.getState?.().itemSidebarFilters || {};
+      return String(filters.section || '');
+    })).toBe('project_items');
+    await expect(page.locator('.sidebar-secondary-row[data-section-id="project-items"]')).toHaveClass(/is-active/);
+
+    await page.locator('.sidebar-secondary-row[data-section-id="project-items"]').click();
+    await expect.poll(async () => page.evaluate(() => {
+      const app = (window as any)._slopshellApp;
+      const filters = app?.getState?.().itemSidebarFilters || {};
+      return String(filters.section || '');
+    })).toBe('');
+  });
+
   test('does not conflate project items with the active workspace pin', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
-    await seedSectionFixture(page, 5, 0);
+    await seedSectionFixture(page, { projectItemsOpen: 5, recentMeetings: 0 });
     await openInbox(page);
     await page.evaluate(async () => {
       const mod = await import('../../internal/web/static/app-item-sidebar-utils.js');
