@@ -239,6 +239,10 @@ JOIN contexts c ON c.parent_id IS NULL AND lower(c.name) = lower(m.sphere)`); er
 	}
 
 	if tableColumns["items"]["sphere"] {
+		kindExpr := "'action'"
+		if tableColumns["items"]["kind"] {
+			kindExpr = "COALESCE(kind, 'action')"
+		}
 		if _, err := tx.Exec(`CREATE TEMP TABLE scope_items_migration AS
 SELECT id, sphere
 FROM items
@@ -251,6 +255,7 @@ WHERE lower(trim(sphere)) IN ('work', 'private')`); err != nil {
 		if _, err := tx.Exec(`CREATE TABLE items (
   id INTEGER PRIMARY KEY,
   title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'action' CHECK (kind IN ('action', 'project')),
   state TEXT NOT NULL DEFAULT 'inbox' CHECK (state IN ('inbox', 'waiting', 'someday', 'done')),
   workspace_id INTEGER REFERENCES workspaces(id) ON DELETE SET NULL,
   artifact_id INTEGER REFERENCES artifacts(id) ON DELETE SET NULL,
@@ -268,10 +273,10 @@ WHERE lower(trim(sphere)) IN ('work', 'private')`); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO items (
-	id, title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+	id, title, kind, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 )
 SELECT
-	id, title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+	id, title, ` + kindExpr + `, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 FROM items_scope_legacy`); err != nil {
 			return err
 		}

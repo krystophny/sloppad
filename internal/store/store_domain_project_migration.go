@@ -73,11 +73,15 @@ FROM workspaces_project_legacy`); err != nil {
 	if _, err := tx.Exec(strings.Replace(itemsTableSchema, "IF NOT EXISTS ", "", 1)); err != nil {
 		return err
 	}
+	kindExpr := "'action'"
+	if tableColumns["items"]["kind"] {
+		kindExpr = "COALESCE(kind, 'action')"
+	}
 	if _, err := tx.Exec(`INSERT INTO items (
-id, title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+id, title, kind, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 )
 SELECT
-id, title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+id, title, ` + kindExpr + `, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 FROM items_project_legacy`); err != nil {
 		return err
 	}
@@ -193,6 +197,21 @@ func (s *Store) repairProjectLegacyForeignKeyTargets() error {
   ON item_artifacts(artifact_id)`,
 			},
 			columns: []string{"item_id", "artifact_id", "role", "created_at"},
+		},
+		{
+			table: "item_children",
+			createTableSQL: `CREATE TABLE item_children (
+  parent_item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  child_item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'next_action' CHECK (role IN ('next_action', 'support', 'blocked_by')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (parent_item_id, child_item_id)
+);`,
+			postCopySQL: []string{
+				`CREATE INDEX idx_item_children_child_item_id
+  ON item_children(child_item_id)`,
+			},
+			columns: []string{"parent_item_id", "child_item_id", "role", "created_at"},
 		},
 		{
 			table: "batch_runs",

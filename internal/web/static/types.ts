@@ -26,6 +26,7 @@ export interface Artifact {
 export interface Item {
   id: number;
   title: string;
+  kind?: 'action' | 'project';
   state: 'inbox' | 'waiting' | 'someday' | 'done';
   workspace_id?: number | null;
   artifact_id?: number | null;

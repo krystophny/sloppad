@@ -10,9 +10,13 @@ import (
 
 func (s *Store) CreateItem(title string, opts ItemOptions) (Item, error) {
 	cleanTitle := strings.TrimSpace(title)
+	cleanKind := normalizeItemKind(opts.Kind)
 	cleanState := normalizeItemState(opts.State)
 	if cleanTitle == "" {
 		return Item{}, errors.New("item title is required")
+	}
+	if cleanKind == "" {
+		return Item{}, errors.New("invalid item kind")
 	}
 	if cleanState == "" {
 		return Item{}, errors.New("invalid item state")
@@ -48,9 +52,10 @@ func (s *Store) CreateItem(title string, opts ItemOptions) (Item, error) {
 
 	res, err := tx.Exec(
 		`INSERT INTO items (
-			title, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			title, kind, state, workspace_id, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		cleanTitle,
+		cleanKind,
 		cleanState,
 		opts.WorkspaceID,
 		opts.ArtifactID,
@@ -89,7 +94,7 @@ func (s *Store) CreateItem(title string, opts ItemOptions) (Item, error) {
 
 func (s *Store) GetItem(id int64) (Item, error) {
 	return scanItem(s.db.QueryRow(
-		`SELECT id, title, state, workspace_id, `+scopedContextSelect("context_items", "item_id", "items.id")+` AS sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+		`SELECT id, title, kind, state, workspace_id, `+scopedContextSelect("context_items", "item_id", "items.id")+` AS sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 		 FROM items
 		 WHERE id = ?`,
 		id,
@@ -103,7 +108,7 @@ func (s *Store) GetItemBySource(source, sourceRef string) (Item, error) {
 		return Item{}, errors.New("item source and source_ref are required")
 	}
 	return scanItem(s.db.QueryRow(
-		`SELECT id, title, state, workspace_id, `+scopedContextSelect("context_items", "item_id", "items.id")+` AS sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
+		`SELECT id, title, kind, state, workspace_id, `+scopedContextSelect("context_items", "item_id", "items.id")+` AS sphere, artifact_id, actor_id, visible_after, follow_up_at, source, source_ref, review_target, reviewer, reviewed_at, created_at, updated_at
 		 FROM items
 		 WHERE source = ? AND source_ref = ?`,
 		cleanSource,
@@ -300,6 +305,14 @@ func (s *Store) UpdateItem(id int64, updates ItemUpdate) error {
 		}
 		parts = append(parts, "title = ?")
 		args = append(args, title)
+	}
+	if updates.Kind != nil {
+		kind := normalizeItemKind(*updates.Kind)
+		if kind == "" {
+			return errors.New("invalid item kind")
+		}
+		parts = append(parts, "kind = ?")
+		args = append(args, kind)
 	}
 	if updates.State != nil {
 		next := normalizeItemState(*updates.State)

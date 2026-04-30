@@ -70,12 +70,13 @@ func TestStoreMigratesDomainTablesOnFreshDatabase(t *testing.T) {
 		"external_accounts":                   {"id", "provider", "label", "config_json", "enabled", "created_at", "updated_at"},
 		"external_container_mappings":         {"id", "provider", "container_type", "container_ref", "workspace_id"},
 		"item_artifacts":                      {"item_id", "artifact_id", "role", "created_at"},
+		"item_children":                       {"parent_item_id", "child_item_id", "role", "created_at"},
 		"workspace_artifact_links":            {"workspace_id", "artifact_id", "created_at"},
 		"external_bindings":                   {"id", "account_id", "provider", "object_type", "remote_id", "item_id", "artifact_id", "container_ref", "remote_updated_at", "last_synced_at"},
 		"batch_runs":                          {"id", "workspace_id", "started_at", "finished_at", "config_json", "status"},
 		"batch_run_items":                     {"batch_id", "item_id", "status", "pr_number", "pr_url", "error_msg", "started_at", "finished_at"},
 		"workspace_watches":                   {"workspace_id", "config_json", "poll_interval_seconds", "enabled", "current_batch_id", "created_at", "updated_at"},
-		"items":                               {"id", "title", "state", "workspace_id", "artifact_id", "actor_id", "visible_after", "follow_up_at", "source", "source_ref", "review_target", "reviewer", "reviewed_at", "created_at", "updated_at"},
+		"items":                               {"id", "title", "kind", "state", "workspace_id", "artifact_id", "actor_id", "visible_after", "follow_up_at", "source", "source_ref", "review_target", "reviewer", "reviewed_at", "created_at", "updated_at"},
 		"time_entries":                        {"id", "workspace_id", "started_at", "ended_at", "activity", "notes"},
 	} {
 		got := make(map[string]bool, len(columns[table]))
@@ -162,7 +163,7 @@ CREATE TABLE chat_messages (
 	if err != nil {
 		t.Fatalf("TableColumns() error: %v", err)
 	}
-	for _, table := range []string{"workspaces", "contexts", "context_items", "context_artifacts", "context_workspaces", "context_external_accounts", "context_external_container_mappings", "context_time_entries", "actors", "artifacts", "external_accounts", "external_container_mappings", "item_artifacts", "workspace_artifact_links", "external_bindings", "batch_runs", "batch_run_items", "items", "time_entries"} {
+	for _, table := range []string{"workspaces", "contexts", "context_items", "context_artifacts", "context_workspaces", "context_external_accounts", "context_external_container_mappings", "context_time_entries", "actors", "artifacts", "external_accounts", "external_container_mappings", "item_artifacts", "item_children", "workspace_artifact_links", "external_bindings", "batch_runs", "batch_run_items", "items", "time_entries"} {
 		if _, ok := columns[table]; !ok {
 			t.Fatalf("expected migrated table %s to exist", table)
 		}
@@ -214,6 +215,9 @@ INSERT INTO items (title, state) VALUES ('legacy waiting', 'waiting');
 	}
 	if item.State != ItemStateWaiting {
 		t.Fatalf("legacy item state = %q, want %q", item.State, ItemStateWaiting)
+	}
+	if item.Kind != ItemKindAction {
+		t.Fatalf("legacy item kind = %q, want %q", item.Kind, ItemKindAction)
 	}
 
 	for _, state := range []string{ItemStateNext, ItemStateDeferred, ItemStateSomeday, ItemStateReview} {

@@ -3,6 +3,8 @@ package store
 import "time"
 
 type ArtifactKind string
+type ItemKind string
+type ItemLinkRole string
 
 const (
 	SphereWork    = "work"
@@ -46,6 +48,13 @@ const (
 	ItemStateReview   = "review"
 	ItemStateDone     = "done"
 
+	ItemKindAction  = "action"
+	ItemKindProject = "project"
+
+	ItemLinkRoleNextAction = "next_action"
+	ItemLinkRoleSupport    = "support"
+	ItemLinkRoleBlockedBy  = "blocked_by"
+
 	ItemReviewTargetAgent  = "agent"
 	ItemReviewTargetGitHub = "github"
 	ItemReviewTargetEmail  = "email"
@@ -61,6 +70,7 @@ type ArtifactUpdate struct {
 
 type ItemUpdate struct {
 	Title        *string `json:"title,omitempty"`
+	Kind         *string `json:"kind,omitempty"`
 	State        *string `json:"state,omitempty"`
 	WorkspaceID  *int64  `json:"workspace_id,omitempty"`
 	Sphere       *string `json:"sphere,omitempty"`
@@ -76,6 +86,7 @@ type ItemUpdate struct {
 
 type ItemOptions struct {
 	State        string  `json:"state,omitempty"`
+	Kind         string  `json:"kind,omitempty"`
 	WorkspaceID  *int64  `json:"workspace_id,omitempty"`
 	Sphere       *string `json:"sphere,omitempty"`
 	ArtifactID   *int64  `json:"artifact_id,omitempty"`
@@ -223,6 +234,7 @@ type Artifact struct {
 type Item struct {
 	ID           int64   `json:"id"`
 	Title        string  `json:"title"`
+	Kind         string  `json:"kind"`
 	State        string  `json:"state"`
 	WorkspaceID  *int64  `json:"workspace_id,omitempty"`
 	Sphere       string  `json:"sphere"`
@@ -244,6 +256,21 @@ type ItemSummary struct {
 	ArtifactTitle *string       `json:"artifact_title,omitempty"`
 	ArtifactKind  *ArtifactKind `json:"artifact_kind,omitempty"`
 	ActorName     *string       `json:"actor_name,omitempty"`
+}
+
+type ItemChildLink struct {
+	ParentItemID int64  `json:"parent_item_id"`
+	ChildItemID  int64  `json:"child_item_id"`
+	Role         string `json:"role"`
+	CreatedAt    string `json:"created_at"`
+}
+
+type ProjectItemHealth struct {
+	HasNextAction bool `json:"has_next_action"`
+	HasWaiting    bool `json:"has_waiting"`
+	HasDeferred   bool `json:"has_deferred"`
+	HasSomeday    bool `json:"has_someday"`
+	Stalled       bool `json:"stalled"`
 }
 
 type TimeEntry struct {

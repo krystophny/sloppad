@@ -13,6 +13,7 @@ import (
 const itemsTableSchema = `CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY,
   title TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'action' CHECK (kind IN ('action', 'project')),
   state TEXT NOT NULL DEFAULT 'inbox' CHECK (state IN ('inbox', 'next', 'waiting', 'deferred', 'someday', 'review', 'done')),
   workspace_id INTEGER REFERENCES workspaces(id) ON DELETE SET NULL,
   artifact_id INTEGER REFERENCES artifacts(id) ON DELETE SET NULL,
@@ -241,6 +242,9 @@ CREATE TABLE IF NOT EXISTS context_time_entries (
 	if err := s.migrateItemTableStateSupport(); err != nil {
 		return err
 	}
+	if err := s.migrateItemTableKindSupport(); err != nil {
+		return err
+	}
 	if err := s.migrateProjectRemovalSupport(); err != nil {
 		return err
 	}
@@ -262,7 +266,10 @@ CREATE TABLE IF NOT EXISTS context_time_entries (
 	if err := s.migrateMailTriageReviewActionSupport(); err != nil {
 		return err
 	}
-	return s.migrateItemArtifactLinkSupport()
+	if err := s.migrateItemArtifactLinkSupport(); err != nil {
+		return err
+	}
+	return s.migrateItemChildLinkSupport()
 }
 
 func (s *Store) migrateMailTriageReviewActionSupport() error {
@@ -484,6 +491,30 @@ func normalizeArtifactKind(kind ArtifactKind) ArtifactKind {
 	return ArtifactKind(strings.TrimSpace(string(kind)))
 }
 
+func normalizeItemKind(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "", ItemKindAction:
+		return ItemKindAction
+	case ItemKindProject:
+		return ItemKindProject
+	default:
+		return ""
+	}
+}
+
+func normalizeItemLinkRole(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case ItemLinkRoleNextAction:
+		return ItemLinkRoleNextAction
+	case ItemLinkRoleSupport:
+		return ItemLinkRoleSupport
+	case ItemLinkRoleBlockedBy:
+		return ItemLinkRoleBlockedBy
+	default:
+		return ""
+	}
+}
+
 func normalizeItemState(state string) string {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "", ItemStateInbox:
@@ -655,6 +686,7 @@ func scanItem(
 	err := row.Scan(
 		&out.ID,
 		&out.Title,
+		&out.Kind,
 		&out.State,
 		&workspaceID,
 		&sphere,
@@ -674,6 +706,7 @@ func scanItem(
 		return Item{}, err
 	}
 	out.Title = strings.TrimSpace(out.Title)
+	out.Kind = normalizeItemKind(out.Kind)
 	out.State = normalizeItemState(out.State)
 	out.WorkspaceID = nullInt64Pointer(workspaceID)
 	out.Sphere = normalizeSphere(sphere)
@@ -712,6 +745,7 @@ func scanItemSummary(
 	err := row.Scan(
 		&out.ID,
 		&out.Title,
+		&out.Kind,
 		&out.State,
 		&workspaceID,
 		&sphere,
@@ -734,6 +768,7 @@ func scanItemSummary(
 		return ItemSummary{}, err
 	}
 	out.Title = strings.TrimSpace(out.Title)
+	out.Kind = normalizeItemKind(out.Kind)
 	out.State = normalizeItemState(out.State)
 	out.WorkspaceID = nullInt64Pointer(workspaceID)
 	out.Sphere = normalizeSphere(sphere)

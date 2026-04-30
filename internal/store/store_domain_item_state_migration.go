@@ -57,7 +57,7 @@ func (s *Store) migrateItemTableStateSupport() error {
 		return err
 	}
 	copyColumns := []string{
-		"id", "title", "state", "workspace_id", "artifact_id", "actor_id", "visible_after", "follow_up_at",
+		"id", "title", "kind", "state", "workspace_id", "artifact_id", "actor_id", "visible_after", "follow_up_at",
 		"source", "source_ref", "review_target", "reviewer", "reviewed_at", "created_at", "updated_at",
 	}
 	var kept []string
@@ -120,6 +120,14 @@ func (s *Store) repairItemLegacyForeignKeys() error {
 	}
 	for _, stmt := range itemChildIndexSQL {
 		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if columns, err := s.tableColumnNames("item_children"); err != nil {
+		return err
+	} else if len(columns) > 0 {
+		if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_item_children_child_item_id
+  ON item_children(child_item_id)`); err != nil {
 			return err
 		}
 	}
