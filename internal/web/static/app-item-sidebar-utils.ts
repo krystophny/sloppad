@@ -116,8 +116,27 @@ export function setInboxTriggerCount(count) {
   edgeLeftTap.classList.remove('has-inbox-count');
 }
 
-export function applyItemSidebarCounts(rawCounts) {
+export function defaultItemSidebarSectionCounts() {
+  return { project_items_open: 0, recent_meetings: 0 };
+}
+
+export function normalizeItemSidebarSectionCounts(rawSections) {
+  const out = defaultItemSidebarSectionCounts();
+  if (!rawSections || typeof rawSections !== 'object') return out;
+  const project = Number(rawSections.project_items_open ?? 0);
+  if (Number.isFinite(project) && project > 0) {
+    out.project_items_open = Math.trunc(project);
+  }
+  const meetings = Number(rawSections.recent_meetings ?? 0);
+  if (Number.isFinite(meetings) && meetings > 0) {
+    out.recent_meetings = Math.trunc(meetings);
+  }
+  return out;
+}
+
+export function applyItemSidebarCounts(rawCounts, rawSections = null) {
   state.itemSidebarCounts = normalizeItemSidebarCounts(rawCounts);
+  state.itemSidebarSectionCounts = normalizeItemSidebarSectionCounts(rawSections);
   setInboxTriggerCount(state.itemSidebarCounts.inbox);
   maybeShowSomedayReviewNudge();
 }
@@ -144,7 +163,7 @@ export function maybeShowSomedayReviewNudge() {
 export async function refreshItemSidebarCounts() {
   const workspaceID = String(state.activeWorkspaceId || '').trim();
   if (!workspaceID) {
-    applyItemSidebarCounts(defaultItemSidebarCounts());
+    applyItemSidebarCounts(defaultItemSidebarCounts(), null);
     return false;
   }
   const resp = await fetch(apiURL(itemSidebarCountsEndpoint(state.itemSidebarFilters)), { cache: 'no-store' });
@@ -154,7 +173,7 @@ export async function refreshItemSidebarCounts() {
   }
   const payload = await resp.json();
   if (workspaceID !== String(state.activeWorkspaceId || '').trim()) return false;
-  applyItemSidebarCounts(payload?.counts);
+  applyItemSidebarCounts(payload?.counts, payload?.sections);
   return true;
 }
 

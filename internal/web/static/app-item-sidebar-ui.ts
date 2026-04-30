@@ -5,9 +5,10 @@ import {
   horizontalSwipeDelta,
   isHorizontalSwipeIntent,
 } from './app-swipe.js';
+import { workspaceDisplayName } from './app-workspace-status.js';
 
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
-const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES, SPHERE_OPTIONS } = context;
+const { refs, state, getState, isVoiceTurn, COMPANION_VIEW_PATH_PREFIX, COMPANION_TRANSCRIPT_VIEW_PATH, COMPANION_SUMMARY_VIEW_PATH, COMPANION_REFERENCES_VIEW_PATH, MEETING_TRANSCRIPT_LABEL, MEETING_SUMMARY_LABEL, MEETING_REFERENCES_LABEL, MEETING_SUMMARY_ITEMS_PANEL_ID, CHAT_CTRL_LONG_PRESS_MS, ARTIFACT_EDIT_LONG_TAP_MS, ITEM_SIDEBAR_VIEWS, ITEM_SIDEBAR_GESTURE_CANCEL_PX, ITEM_SIDEBAR_GESTURE_COMMIT_PX, ITEM_SIDEBAR_GESTURE_LONG_PX, ITEM_SIDEBAR_DEFAULT_LATER_HOUR_UTC, ITEM_SIDEBAR_MENU_ID, DEV_UI_RELOAD_POLL_MS, ASSISTANT_ACTIVITY_POLL_MS, CHAT_WS_STALE_THRESHOLD_MS, ACTIVE_TURN_NO_ID_CLEAR_GRACE_MS, ACTIVE_TURN_ACTIVITY_CLEAR_GRACE_MS, PROJECT_CHAT_MODEL_ALIASES, PROJECT_CHAT_MODEL_REASONING_EFFORTS, TTS_SILENT_STORAGE_KEY, YOLO_MODE_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_ENABLED_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_LAST_SHOWN_STORAGE_KEY, SOMEDAY_REVIEW_NUDGE_INTERVAL_MS, ACTIVE_PROJECT_STORAGE_KEY, LAST_VIEW_STORAGE_KEY, RUNTIME_RELOAD_CONTEXT_STORAGE_KEY, SIDEBAR_IMAGE_EXTENSIONS, PANEL_MOTION_WATCH_QUERIES, VOICE_LIFECYCLE, COMPANION_IDLE_SURFACES, COMPANION_RUNTIME_STATES, TOOL_PALETTE_MODES, SPHERE_OPTIONS, SIDEBAR_SOURCE_FILTERS } = context;
 
 const showStatus = (...args) => refs.showStatus(...args);
 const setActiveSphere = (...args) => refs.setActiveSphere(...args);
@@ -43,6 +44,8 @@ const launchNewMailAuthoring = (...args) => refs.launchNewMailAuthoring(...args)
 const launchReplyAuthoring = (...args) => refs.launchReplyAuthoring(...args);
 const launchReplyAllAuthoring = (...args) => refs.launchReplyAllAuthoring(...args);
 const launchForwardAuthoring = (...args) => refs.launchForwardAuthoring(...args);
+const activeProject = (...args) => refs.activeProject(...args);
+const normalizeActiveSphere = (...args) => refs.normalizeActiveSphere(...args);
 
 export async function openItemSidebarView(view = state.itemSidebarView, filters = null) {
   state.fileSidebarMode = 'items';
@@ -134,7 +137,7 @@ export async function loadItemSidebarView(view = state.itemSidebarView, filters 
     } catch (_) {}
     state.itemSidebarItems = [];
     state.itemSidebarLoading = false;
-    applyItemSidebarCounts(defaultItemSidebarCounts());
+    applyItemSidebarCounts(defaultItemSidebarCounts(), null);
     renderPrReviewFileList();
     return false;
   }
@@ -157,7 +160,7 @@ export async function loadItemSidebarView(view = state.itemSidebarView, filters 
     state.itemSidebarItems = Array.isArray(itemsPayload?.items) ? itemsPayload.items : [];
     state.itemSidebarLoading = false;
     state.itemSidebarError = '';
-    applyItemSidebarCounts(countsPayload?.counts);
+    applyItemSidebarCounts(countsPayload?.counts, countsPayload?.sections);
     renderPrReviewFileList();
     return true;
   } catch (err) {
@@ -352,6 +355,194 @@ function bindSidebarTabActivation(button, onActivate) {
     }
     onActivate();
   });
+}
+
+export function renderSidebarPrimary(list) {
+  const primary = document.createElement('div');
+  primary.className = 'sidebar-primary';
+  primary.id = 'sidebar-primary';
+
+  const sphereRow = document.createElement('div');
+  sphereRow.className = 'sidebar-sphere-row';
+  sphereRow.id = 'sidebar-sphere-row';
+  sphereRow.setAttribute('role', 'group');
+  sphereRow.setAttribute('aria-label', 'Active sphere');
+  const activeSphere = String(state.activeSphere || '').trim().toLowerCase();
+  for (const opt of SPHERE_OPTIONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sidebar-sphere-btn';
+    btn.dataset.sphere = opt.id;
+    if (activeSphere === opt.id) {
+      btn.classList.add('is-active');
+      btn.setAttribute('aria-current', 'true');
+    }
+    btn.textContent = opt.label;
+    btn.title = `Switch to ${opt.label.toLowerCase()} sphere`;
+    btn.addEventListener('click', () => { void setActiveSphere(opt.id); });
+    sphereRow.appendChild(btn);
+  }
+  primary.appendChild(sphereRow);
+
+  const pinRow = document.createElement('div');
+  pinRow.className = 'sidebar-workspace-pin';
+  pinRow.id = 'sidebar-workspace-pin';
+  const project = activeProject();
+  const pinIcon = document.createElement('span');
+  pinIcon.className = 'sidebar-workspace-pin-icon';
+  pinIcon.setAttribute('aria-hidden', 'true');
+  pinIcon.textContent = '◉';
+  pinRow.appendChild(pinIcon);
+  const pinBody = document.createElement('span');
+  pinBody.className = 'sidebar-workspace-pin-body';
+  const pinKicker = document.createElement('span');
+  pinKicker.className = 'sidebar-workspace-pin-kicker';
+  pinKicker.textContent = 'Workspace';
+  pinBody.appendChild(pinKicker);
+  const pinName = document.createElement('span');
+  pinName.className = 'sidebar-workspace-pin-name';
+  const projectName = project
+    ? String(workspaceDisplayName(project) || project?.name || project?.id || 'Workspace').trim() || 'Workspace'
+    : 'No workspace';
+  pinName.textContent = projectName;
+  pinName.title = project ? String(project?.root_path || projectName) : 'No workspace pinned';
+  pinBody.appendChild(pinName);
+  pinRow.appendChild(pinBody);
+  primary.appendChild(pinRow);
+
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'sidebar-primary-actions';
+  const captureBtn = document.createElement('button');
+  captureBtn.type = 'button';
+  captureBtn.className = 'sidebar-capture-btn edge-btn';
+  captureBtn.id = 'sidebar-capture-trigger';
+  captureBtn.textContent = 'Capture';
+  captureBtn.title = 'Quick capture an item to the inbox';
+  captureBtn.addEventListener('click', () => {
+    const x = Math.max(16, Math.floor(window.innerWidth / 2) - 140);
+    const y = Math.max(40, Math.floor(window.innerHeight * 0.18));
+    showTextInput(x, y, null);
+  });
+  actionsRow.appendChild(captureBtn);
+  primary.appendChild(actionsRow);
+
+  list.appendChild(primary);
+}
+
+export function toggleSidebarSecondary() {
+  state.itemSidebarSecondaryOpen = !Boolean(state.itemSidebarSecondaryOpen);
+  refs.renderPrReviewFileList?.();
+}
+
+function applySidebarSourceFilter(sourceID) {
+  const cleanSource = String(sourceID || '').trim().toLowerCase();
+  const current = String(state.itemSidebarFilters?.source || '').trim().toLowerCase();
+  const nextSource = current === cleanSource ? '' : cleanSource;
+  const nextFilters = { ...state.itemSidebarFilters, source: nextSource };
+  void loadItemSidebarView(state.itemSidebarView, nextFilters);
+}
+
+export function renderSidebarSecondary(list) {
+  const secondary = document.createElement('div');
+  secondary.className = 'sidebar-secondary';
+  secondary.id = 'sidebar-secondary';
+  if (state.itemSidebarSecondaryOpen) {
+    secondary.classList.add('is-open');
+  }
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'sidebar-secondary-toggle';
+  toggle.id = 'sidebar-secondary-toggle';
+  toggle.setAttribute('aria-expanded', state.itemSidebarSecondaryOpen ? 'true' : 'false');
+  toggle.setAttribute('aria-controls', 'sidebar-secondary-body');
+  const caret = document.createElement('span');
+  caret.className = 'sidebar-secondary-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  caret.textContent = state.itemSidebarSecondaryOpen ? '▾' : '▸';
+  const toggleLabel = document.createElement('span');
+  toggleLabel.className = 'sidebar-secondary-toggle-label';
+  toggleLabel.textContent = 'Filters & sources';
+  toggle.appendChild(caret);
+  toggle.appendChild(toggleLabel);
+  toggle.addEventListener('click', () => { toggleSidebarSecondary(); });
+  secondary.appendChild(toggle);
+
+  const body = document.createElement('div');
+  body.className = 'sidebar-secondary-body';
+  body.id = 'sidebar-secondary-body';
+  body.hidden = !state.itemSidebarSecondaryOpen;
+
+  const sectionCounts = state.itemSidebarSectionCounts || { project_items_open: 0, recent_meetings: 0 };
+  const projectItemsCount = Number(sectionCounts.project_items_open || 0);
+  const recentMeetingsCount = Number(sectionCounts.recent_meetings || 0);
+
+  const sections = [
+    {
+      id: 'project-items',
+      label: 'Project items',
+      count: projectItemsCount,
+      title: 'Project items are Item(kind=project), surfaced as filters – not Workspaces.',
+    },
+    { id: 'people', label: 'People', count: 0, title: 'People owe / waiting counts (preview)' },
+    { id: 'drift', label: 'Drift', count: 0, title: 'Source drift review (preview)' },
+    { id: 'dedup', label: 'Dedup', count: 0, title: 'Duplicate review (preview)' },
+    { id: 'recent-meetings', label: 'Recent meetings (7d)', count: recentMeetingsCount, title: 'Meeting notes from the last 7 days' },
+  ];
+  for (const section of sections) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'sidebar-secondary-row';
+    row.dataset.sectionId = section.id;
+    row.title = section.title;
+    if (section.count <= 0) {
+      row.classList.add('is-empty');
+    }
+    const labelEl = document.createElement('span');
+    labelEl.className = 'sidebar-secondary-row-label';
+    labelEl.textContent = section.label;
+    row.appendChild(labelEl);
+    const badge = document.createElement('span');
+    badge.className = 'sidebar-secondary-row-count';
+    badge.textContent = section.count > 0 ? String(section.count) : '—';
+    row.appendChild(badge);
+    row.addEventListener('click', () => {
+      showStatus(`${section.label}: filter coming online`);
+    });
+    body.appendChild(row);
+  }
+
+  const sourcesGroup = document.createElement('div');
+  sourcesGroup.className = 'sidebar-secondary-sources';
+  sourcesGroup.id = 'sidebar-secondary-sources';
+  const sourcesLabel = document.createElement('div');
+  sourcesLabel.className = 'sidebar-secondary-sources-label';
+  sourcesLabel.textContent = 'Sources';
+  sourcesGroup.appendChild(sourcesLabel);
+  const sourcesPills = document.createElement('div');
+  sourcesPills.className = 'sidebar-secondary-sources-pills';
+  const activeSource = String(state.itemSidebarFilters?.source || '').trim().toLowerCase();
+  for (const source of SIDEBAR_SOURCE_FILTERS) {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'sidebar-source-pill';
+    pill.dataset.sourceId = source.id;
+    if (activeSource === source.id) {
+      pill.classList.add('is-active');
+      pill.setAttribute('aria-pressed', 'true');
+    } else {
+      pill.setAttribute('aria-pressed', 'false');
+    }
+    pill.textContent = source.label;
+    pill.title = `Filter by ${source.label} source container`;
+    pill.addEventListener('click', () => { applySidebarSourceFilter(source.id); });
+    sourcesPills.appendChild(pill);
+  }
+  sourcesGroup.appendChild(sourcesPills);
+  body.appendChild(sourcesGroup);
+
+  secondary.appendChild(body);
+  list.appendChild(secondary);
 }
 
 export function renderSidebarTabs(list) {

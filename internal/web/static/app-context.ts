@@ -109,6 +109,15 @@ export const SPHERE_OPTIONS = [
   { id: 'private', label: 'Private' },
 ];
 
+export const SIDEBAR_SOURCE_FILTERS = [
+  { id: 'email', label: 'Email' },
+  { id: 'todoist', label: 'Todoist' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'gitlab', label: 'GitLab' },
+  { id: 'markdown', label: 'Markdown' },
+  { id: 'local', label: 'Local' },
+];
+
 export const state = {
   sessionId: 'local',
   canvasWs: null,
@@ -274,6 +283,8 @@ export const state = {
   itemSidebarLabelName: '',
   itemSidebarItems: [],
   itemSidebarCounts: { inbox: 0, next: 0, waiting: 0, deferred: 0, someday: 0, review: 0, done: 0 },
+  itemSidebarSectionCounts: { project_items_open: 0, recent_meetings: 0 },
+  itemSidebarSecondaryOpen: false,
   itemSidebarLoading: false,
   itemSidebarLoadSeq: 0,
   itemSidebarError: '',
