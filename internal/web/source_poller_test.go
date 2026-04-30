@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sloppy-org/slopshell/internal/email"
+	"github.com/sloppy-org/slopshell/internal/providerdata"
 	"github.com/sloppy-org/slopshell/internal/store"
 	tabsync "github.com/sloppy-org/slopshell/internal/sync"
 )
@@ -288,6 +290,67 @@ func TestSyncSourcesNowPopulatesUnifiedInboxAcrossProviders(t *testing.T) {
 	}
 	if got := strFromAny(imapItems[0].(map[string]any)["title"]); got != "Reply to architecture review" {
 		t.Fatalf("imap inbox title = %q, want %q", got, "Reply to architecture review")
+	}
+}
+
+func TestSyncEmailAccountKeepsReadInboxMailAsOpenLoop(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	account, err := app.store.CreateExternalAccount(store.SphereWork, store.ExternalProviderGmail, "Read Inbox", nil)
+	if err != nil {
+		t.Fatalf("CreateExternalAccount() error: %v", err)
+	}
+	provider := &fakeEmailSyncProvider{
+		listFunc: func(opts email.SearchOptions) ([]string, error) {
+			if opts.Folder == "INBOX" {
+				return []string{"gmail-read-inbox"}, nil
+			}
+			if opts.IsFlagged != nil && *opts.IsFlagged {
+				return nil, nil
+			}
+			if !opts.Since.IsZero() {
+				return []string{"gmail-read-inbox"}, nil
+			}
+			return nil, nil
+		},
+		messages: map[string]*providerdata.EmailMessage{
+			"gmail-read-inbox": {
+				ID:         "gmail-read-inbox",
+				ThreadID:   "thread-read-inbox",
+				Subject:    "Read but still in inbox",
+				Sender:     "Ops <ops@example.com>",
+				Recipients: []string{"team@example.com"},
+				Date:       time.Date(2026, time.March, 18, 10, 0, 0, 0, time.UTC),
+				Labels:     []string{"INBOX"},
+				IsRead:     true,
+			},
+		},
+	}
+	app.newEmailSyncProvider = func(context.Context, store.ExternalAccount) (emailSyncProvider, error) {
+		return provider, nil
+	}
+
+	if _, err := app.syncEmailAccount(context.Background(), account); err != nil {
+		t.Fatalf("syncEmailAccount() error: %v", err)
+	}
+	item, err := app.store.GetItemBySource(store.ExternalProviderGmail, "message:gmail-read-inbox")
+	if err != nil {
+		t.Fatalf("GetItemBySource(read inbox) error: %v", err)
+	}
+	if item.State != store.ItemStateInbox {
+		t.Fatalf("read inbox item state = %q, want inbox", item.State)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/inbox?sphere=work&source=gmail", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /api/items/inbox status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	items, ok := decodeJSONResponse(t, rr)["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("inbox payload = %#v, want one read inbox email", decodeJSONResponse(t, rr))
+	}
+	if got := strFromAny(items[0].(map[string]any)["title"]); got != "Read but still in inbox" {
+		t.Fatalf("inbox title = %q, want read inbox mail", got)
 	}
 }
 

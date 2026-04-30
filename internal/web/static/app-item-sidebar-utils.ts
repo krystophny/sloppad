@@ -204,7 +204,7 @@ export function itemSidebarActionLabel(action, item = null) {
     return isEmailSidebarItem(item) ? 'Archive' : 'Done';
   }
   if (normalized === 'inbox') return 'Back to Inbox';
-  if (normalized === 'next') return 'Next';
+  if (normalized === 'next') return 'Clarify...';
   if (normalized === 'delete') return 'Delete';
   if (normalized === 'delegate') return 'Delegate';
   if (normalized === 'later') return 'Later';
@@ -213,15 +213,16 @@ export function itemSidebarActionLabel(action, item = null) {
 }
 
 export function itemSidebarStatusText(action, item = null, actorName = '') {
+  const normalized = String(action || '').trim().toLowerCase();
   const label = itemSidebarActionLabel(action, item).toLowerCase();
-  if (String(action || '').trim().toLowerCase() === 'delegate' && String(actorName || '').trim()) {
+  if (normalized === 'delegate' && String(actorName || '').trim()) {
     return `delegated to ${String(actorName || '').trim()}`;
   }
   if (!label) return 'updated';
   if (label === 'back to inbox') return 'returned to inbox';
-  if (label === 'next') return 'moved to next';
-  if (label === 'later') return 'moved to later';
-  if (label === 'someday') return 'moved to someday';
+  if (normalized === 'next') return 'moved to next';
+  if (normalized === 'later') return 'moved to later';
+  if (normalized === 'someday') return 'moved to someday';
   return `${label}d`;
 }
 
@@ -302,9 +303,14 @@ export function showItemSidebarMenu(entries, x, y) {
     if (entry.action) {
       button.dataset.action = String(entry.action);
     }
+    if (entry.disabled) {
+      button.disabled = true;
+      button.classList.add('is-disabled');
+    }
     button.textContent = String(entry.label || '');
     button.addEventListener('click', (event) => {
       event.preventDefault();
+      if (entry.disabled) return;
       const handler = typeof entry.onClick === 'function' ? entry.onClick : null;
       hideItemSidebarMenu();
       if (handler) {
@@ -346,6 +352,23 @@ export async function fetchItemSidebarWorkspaces() {
       name: String(workspace?.name || '').trim(),
     }))
     .filter((workspace) => workspace.id > 0 && workspace.name);
+}
+
+export async function fetchItemSidebarProjectItems() {
+  const resp = await fetch(apiURL(appendSphereQuery('items?section=project_items')), { cache: 'no-store' });
+  if (!resp.ok) {
+    const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+    throw new Error(detail);
+  }
+  const payload = await resp.json();
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return items
+    .map((item) => ({
+      id: Number(item?.id || 0),
+      title: String(item?.title || '').trim(),
+      state: String(item?.state || '').trim().toLowerCase(),
+    }))
+    .filter((item) => item.id > 0 && item.title && item.state !== 'done');
 }
 
 export async function fetchItemSidebarLabels() {
@@ -531,6 +554,100 @@ export async function performItemSidebarWorkspaceUpdate(item, workspaceID = null
   }
 }
 
+export async function performItemSidebarProjectItemLink(item, projectItemID, projectTitle = '', role = 'next_action') {
+  const itemID = Number(item?.id || 0);
+  const parentID = Number(projectItemID || 0);
+  if (itemID <= 0 || parentID <= 0 || itemID === parentID) return false;
+  try {
+    const resp = await fetch(apiURL(`items/${encodeURIComponent(String(itemID))}/project-item-link`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_item_id: parentID,
+        role: String(role || 'next_action').trim() || 'next_action',
+      }),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    state.itemSidebarActiveItemID = itemID;
+    await loadItemSidebarView(state.itemSidebarView);
+    showStatus(`linked to ${String(projectTitle || '').trim() || 'project item'}`);
+    return true;
+  } catch (err) {
+    showStatus(`project link failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
+}
+
+export async function showItemSidebarProjectItemMenu(item, x, y) {
+  try {
+    const itemID = Number(item?.id || 0);
+    const projectItems = (await fetchItemSidebarProjectItems()).filter((entry) => entry.id !== itemID);
+    if (projectItems.length === 0) {
+      showStatus('no project items available');
+      return false;
+    }
+    showItemSidebarMenu(projectItems.map((projectItem) => ({
+      label: projectItem.title,
+      action: 'link_project_item',
+      onClick: () => performItemSidebarProjectItemLink(item, projectItem.id, projectItem.title),
+    })), x, y);
+    return true;
+  } catch (err) {
+    showStatus(`project picker failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
+}
+
+export function sourceURLForItem(item) {
+  const direct = String(item?.source_url || item?.url || '').trim();
+  if (/^https?:\/\//i.test(direct)) return direct;
+  const ref = String(item?.source_ref || '').trim();
+  if (/^https?:\/\//i.test(ref)) return ref;
+  return '';
+}
+
+export function openItemSource(item) {
+  const url = sourceURLForItem(item);
+  if (!url) {
+    showStatus('source link unavailable');
+    return false;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+  showStatus('source opened');
+  return true;
+}
+
+export async function materializeSidebarItemArtifact(item) {
+  const artifactID = Number(item?.artifact_id || 0);
+  if (artifactID <= 0) return false;
+  const workspaceID = Number(item?.workspace_id || 0);
+  try {
+    const body: Record<string, any> = {};
+    if (workspaceID > 0) {
+      body.workspace_id = workspaceID;
+    }
+    const resp = await fetch(apiURL(`artifacts/${encodeURIComponent(String(artifactID))}/materialize`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
+      throw new Error(detail);
+    }
+    const payload = await resp.json();
+    const relativePath = String(payload?.data?.relative_path || payload?.relative_path || '').trim();
+    showStatus(relativePath ? `materialized: ${relativePath}` : 'materialized');
+    return true;
+  } catch (err) {
+    showStatus(`materialize failed: ${String(err?.message || err || 'unknown error')}`);
+    return false;
+  }
+}
+
 export async function performItemSidebarTriage(item, action, options: Record<string, any> = {}) {
   const itemID = Number(item?.id || 0);
   if (itemID <= 0) return false;
@@ -680,129 +797,131 @@ export function showItemSidebarReviewMenu(item, x, y) {
   return true;
 }
 
-export function showItemSidebarActionMenu(item, x, y) {
-  const itemState = normalizeItemSidebarView(item?.state || state.itemSidebarView);
-  const reviewEntry = isGitHubPRSidebarItem(item)
-    ? [{
-        label: 'Review...',
-        action: 'review_dispatch',
-        onClick: () => showItemSidebarReviewMenu(item, x, y),
-      }]
-    : [];
+function itemSidebarReviewEntries(item, x, y) {
+  if (!isGitHubPRSidebarItem(item)) return [];
+  return [{
+    label: 'Review...',
+    action: 'review_dispatch',
+    onClick: () => showItemSidebarReviewMenu(item, x, y),
+  }];
+}
+
+function itemSidebarSourceEntries(item) {
+  const sourceLabel = normalizeDisplayText(item?.source || '').toLowerCase();
+  if (!sourceLabel) return [];
+  const sourceAction = sourceURLForItem(item)
+    ? {
+        label: 'Open source',
+        action: 'open_source',
+        onClick: () => openItemSource(item),
+      }
+    : {
+        label: 'Open source unavailable',
+        action: 'open_source_unavailable',
+        disabled: true,
+      };
+  return [{
+    label: `Source: ${sourceLabel}`,
+    action: 'source_authority',
+    disabled: true,
+  }, sourceAction];
+}
+
+function itemSidebarMaterializeEntries(item) {
+  if (Number(item?.artifact_id || 0) <= 0) return [];
+  return [{
+    label: 'Materialize artifact...',
+    action: 'materialize_artifact',
+    onClick: () => materializeSidebarItemArtifact(item),
+  }];
+}
+
+function itemSidebarSphereEntries(item) {
   const nextSphere = normalizeActiveSphere(item?.sphere) === 'work' ? 'private' : 'work';
-  const sphereEntry = Number(item?.workspace_id || 0) > 0
-    ? []
-    : [{
-        label: nextSphere === 'work' ? 'Move to Work' : 'Move to Private',
-        action: 'move_sphere',
-        onClick: () => performItemSidebarSphereUpdate(item, nextSphere),
-      }];
+  if (Number(item?.workspace_id || 0) > 0) return [];
+  return [{
+    label: nextSphere === 'work' ? 'Move to Work' : 'Move to Private',
+    action: 'move_sphere',
+    onClick: () => performItemSidebarSphereUpdate(item, nextSphere),
+  }];
+}
+
+function itemSidebarSharedEntries(item, x, y) {
+  return [
+    {
+      label: 'Workspace...',
+      action: 'workspace',
+      onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
+    },
+    {
+      label: 'Project item...',
+      action: 'project_item',
+      onClick: () => showItemSidebarProjectItemMenu(item, x, y),
+    },
+    ...itemSidebarSourceEntries(item),
+    ...itemSidebarMaterializeEntries(item),
+    ...itemSidebarSphereEntries(item),
+  ];
+}
+
+function itemSidebarTriageEntry(item, action, onClick = null) {
+  return {
+    label: itemSidebarActionLabel(action, item),
+    action,
+    onClick: onClick || (() => performItemSidebarTriage(item, action)),
+  };
+}
+
+function itemSidebarStateEntries(item, itemState, x, y) {
   const reopenEntry = {
     label: itemSidebarActionLabel('inbox', item),
     action: 'inbox',
     onClick: () => performItemSidebarStateUpdate(item, 'inbox'),
   };
-  const entries = itemState === 'done'
-    ? [
+  const shared = itemSidebarSharedEntries(item, x, y);
+  const review = itemSidebarReviewEntries(item, x, y);
+  if (itemState === 'done') {
+    return [
       reopenEntry,
-      ...reviewEntry,
-      {
-        label: 'Workspace...',
-        action: 'workspace',
-        onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      ...sphereEntry,
-      {
-        label: itemSidebarActionLabel('delete', item),
-        action: 'delete',
-        onClick: () => performItemSidebarTriage(item, 'delete'),
-      },
-    ]
-    : itemState === 'someday'
-    ? [
-      reopenEntry,
-      ...reviewEntry,
-      {
-        label: itemSidebarActionLabel('done', item),
-        action: 'done',
-        onClick: () => performItemSidebarTriage(item, 'done'),
-      },
-      {
-        label: 'Workspace...',
-        action: 'workspace',
-        onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      ...sphereEntry,
-      {
-        label: itemSidebarActionLabel('delete', item),
-        action: 'delete',
-        onClick: () => performItemSidebarTriage(item, 'delete'),
-      },
-    ]
-    : itemState === 'waiting' || itemState === 'deferred' || itemState === 'review'
-    ? [
-      reopenEntry,
-      ...reviewEntry,
-      {
-        label: itemSidebarActionLabel('next', item),
-        action: 'next',
-        onClick: () => performItemSidebarTriage(item, 'next'),
-      },
-      {
-        label: itemSidebarActionLabel('done', item),
-        action: 'done',
-        onClick: () => performItemSidebarTriage(item, 'done'),
-      },
-      {
-        label: 'Workspace...',
-        action: 'workspace',
-        onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      ...sphereEntry,
-      {
-        label: itemSidebarActionLabel('someday', item),
-        action: 'someday',
-        onClick: () => performItemSidebarTriage(item, 'someday'),
-      },
-      {
-        label: itemSidebarActionLabel('delete', item),
-        action: 'delete',
-        onClick: () => performItemSidebarTriage(item, 'delete'),
-      },
-    ]
-    : [
-      ...reviewEntry,
-      {
-        label: itemSidebarActionLabel('done', item),
-        action: 'done',
-        onClick: () => performItemSidebarTriage(item, 'done'),
-      },
-      {
-        label: 'Workspace...',
-        action: 'workspace',
-        onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
-      },
-      ...sphereEntry,
-      {
-        label: itemSidebarActionLabel('later', item),
-        action: 'later',
-        onClick: () => performItemSidebarTriage(item, 'later'),
-      },
-      {
-        label: itemSidebarActionLabel('delegate', item),
-        action: 'delegate',
-        onClick: () => showItemSidebarDelegateMenu(item, x, y),
-      },
-      {
-        label: itemSidebarActionLabel('someday', item),
-        action: 'someday',
-        onClick: () => performItemSidebarTriage(item, 'someday'),
-      },
-      {
-        label: itemSidebarActionLabel('delete', item),
-        action: 'delete',
-        onClick: () => performItemSidebarTriage(item, 'delete'),
-      },
+      ...review,
+      ...shared,
+      itemSidebarTriageEntry(item, 'delete'),
     ];
+  }
+  if (itemState === 'someday') {
+    return [
+      reopenEntry,
+      ...review,
+      itemSidebarTriageEntry(item, 'done'),
+      ...shared,
+      itemSidebarTriageEntry(item, 'delete'),
+    ];
+  }
+  if (itemState === 'waiting' || itemState === 'deferred' || itemState === 'review') {
+    return [
+      reopenEntry,
+      ...review,
+      itemSidebarTriageEntry(item, 'next'),
+      itemSidebarTriageEntry(item, 'done'),
+      ...shared,
+      itemSidebarTriageEntry(item, 'someday'),
+      itemSidebarTriageEntry(item, 'delete'),
+    ];
+  }
+  return [
+    ...review,
+    itemSidebarTriageEntry(item, 'next'),
+    itemSidebarTriageEntry(item, 'done'),
+    ...shared,
+    itemSidebarTriageEntry(item, 'later'),
+    itemSidebarTriageEntry(item, 'delegate', () => showItemSidebarDelegateMenu(item, x, y)),
+    itemSidebarTriageEntry(item, 'someday'),
+    itemSidebarTriageEntry(item, 'delete'),
+  ];
+}
+
+export function showItemSidebarActionMenu(item, x, y) {
+  const itemState = normalizeItemSidebarView(item?.state || state.itemSidebarView);
+  const entries = itemSidebarStateEntries(item, itemState, x, y);
   showItemSidebarMenu(entries, x, y);
 }

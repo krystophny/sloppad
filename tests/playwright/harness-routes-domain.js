@@ -5,11 +5,17 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
         const itemData = window.__itemSidebarData || defaultItemSidebarData();
         const sphere = requestedSphere(u);
         const filters = requestedItemFilters(u);
+        const countFor = (key) => Array.isArray(itemData[key])
+          ? itemData[key].filter((item) => matchesItemFilters(item, sphere, filters)).length
+          : 0;
         const counts = {
-          inbox: Array.isArray(itemData.inbox) ? itemData.inbox.filter((item) => matchesItemFilters(item, sphere, filters)).length : 0,
-          waiting: Array.isArray(itemData.waiting) ? itemData.waiting.filter((item) => matchesItemFilters(item, sphere, filters)).length : 0,
-          someday: Array.isArray(itemData.someday) ? itemData.someday.filter((item) => matchesItemFilters(item, sphere, filters)).length : 0,
-          done: Array.isArray(itemData.done) ? itemData.done.filter((item) => matchesItemFilters(item, sphere, filters)).length : 0,
+          inbox: countFor('inbox'),
+          next: countFor('next'),
+          waiting: countFor('waiting'),
+          deferred: countFor('deferred'),
+          someday: countFor('someday'),
+          review: countFor('review'),
+          done: countFor('done'),
         };
         const sectionFixture = window.__itemSidebarSectionCounts && typeof window.__itemSidebarSectionCounts === 'object'
           ? window.__itemSidebarSectionCounts
@@ -79,10 +85,12 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
         const action = String(body.action || '').trim().toLowerCase();
         const actors = Array.isArray(window.__itemSidebarActors) ? window.__itemSidebarActors : [];
         let item = null;
-        if (action === 'done') {
+        if (action === 'next') {
+          item = moveItemSidebarEntry(itemID, 'next');
+        } else if (action === 'done') {
           item = moveItemSidebarEntry(itemID, 'done');
         } else if (action === 'later') {
-          item = moveItemSidebarEntry(itemID, 'waiting', { visible_after: String(body.visible_after || '') });
+          item = moveItemSidebarEntry(itemID, 'deferred', { visible_after: String(body.visible_after || '') });
         } else if (action === 'delegate') {
           const actor = actors.find((entry) => Number(entry?.id || 0) === Number(body.actor_id || 0));
           item = moveItemSidebarEntry(itemID, 'waiting', { actor_name: String(actor?.name || '') });
@@ -105,6 +113,41 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
           return new Response(JSON.stringify({ ok: true, deleted: true, item_id: itemID }), { status: 200 });
         }
         return new Response(JSON.stringify({ ok: true, item }), { status: 200 });
+      }
+      if (/\/api\/items\/\d+\/project-item-link(?:\?|$)/.test(u) && opts?.method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        const match = u.match(/\/api\/items\/(\d+)\/project-item-link(?:\?|$)/);
+        const itemID = Number(match?.[1] || 0);
+        const projectItemID = Number(body.project_item_id || 0);
+        const rows = itemSidebarStateKeys()
+          .flatMap((stateKey) => Array.isArray((window.__itemSidebarData || {})[stateKey]) ? (window.__itemSidebarData || {})[stateKey] : []);
+        const project = rows.find((entry) => Number(entry?.id || 0) === projectItemID) || null;
+        if (!project || String(project?.kind || '').trim().toLowerCase() !== 'project' || itemID === projectItemID) {
+          return new Response('project item not found', { status: 400 });
+        }
+        const child = patchItemSidebarEntry(itemID, { project_item_id: projectItemID });
+        if (!child) {
+          return new Response('project item not found', { status: 400 });
+        }
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'item_project_item_link',
+          method: opts?.method || 'POST',
+          url: u,
+          payload: body,
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          item: child,
+          project_item_id: projectItemID,
+          links: [{
+            parent_item_id: projectItemID,
+            child_item_id: itemID,
+            role: String(body.role || 'next_action').trim() || 'next_action',
+          }],
+          health: { stalled: true },
+        }), { status: 200 });
       }
       if (/\/api\/items\/\d+\/dispatch-review(?:\?|$)/.test(u) && opts?.method === 'POST') {
         let body = {};
@@ -226,7 +269,7 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
         const match = u.match(/\/api\/items\/(\d+)\/state(?:\?|$)/);
         const itemID = Number(match?.[1] || 0);
         const nextState = String(body.state || '').trim().toLowerCase();
-        if (!['inbox', 'waiting', 'someday', 'done'].includes(nextState)) {
+        if (!['inbox', 'next', 'waiting', 'deferred', 'someday', 'review', 'done'].includes(nextState)) {
           return new Response('invalid state', { status: 400 });
         }
         const item = moveItemSidebarEntry(itemID, nextState);
@@ -364,6 +407,32 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
         });
         return new Response(JSON.stringify({ ok: true, draft }), { status: 201 });
       }
+      if (/\/api\/artifacts\/\d+\/materialize(?:\?|$)/.test(u) && opts?.method === 'POST') {
+        let body = {};
+        try { body = JSON.parse(String(opts?.body || '{}')); } catch (_) { body = {}; }
+        const match = u.match(/\/api\/artifacts\/(\d+)\/materialize(?:\?|$)/);
+        const artifactID = Number(match?.[1] || 0);
+        const artifacts = window.__itemSidebarArtifacts && typeof window.__itemSidebarArtifacts === 'object'
+          ? window.__itemSidebarArtifacts
+          : {};
+        const artifact = artifacts[String(artifactID)] || artifacts[artifactID];
+        if (!artifact) {
+          return new Response('artifact not found', { status: 404 });
+        }
+        const relativePath = `.slopshell/artifacts/materialized/${artifactID}.md`;
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'artifact_materialize',
+          method: opts?.method || 'POST',
+          url: u,
+          payload: { ...body, artifact_id: artifactID, relative_path: relativePath },
+        });
+        return new Response(JSON.stringify({
+          ok: true,
+          artifact: { ...artifact, ref_path: `/tmp/test/${relativePath}` },
+          relative_path: relativePath,
+        }), { status: 200 });
+      }
       if (/\/api\/artifacts\/\d+(?:\?|$)/.test(u)) {
         const match = u.match(/\/api\/artifacts\/(\d+)(?:\?|$)/);
         const artifactID = Number(match?.[1] || 0);
@@ -398,6 +467,22 @@ __harnessRouteHandlers.push(async function harnessRouteDomain(u, opts) {
           payload: { view: key, delay_ms: delayMs },
         });
         if (delayMs > 0) await sleep(delayMs);
+        return new Response(JSON.stringify({ ok: true, items }), { status: 200 });
+      }
+      if (/\/api\/items(?:\?|$)/.test(u) && (!opts?.method || opts.method === 'GET')) {
+        const itemData = window.__itemSidebarData || defaultItemSidebarData();
+        const sphere = requestedSphere(u);
+        const filters = requestedItemFilters(u);
+        const items = itemSidebarStateKeys()
+          .flatMap((key) => cloneItemSidebarEntries(itemData[key]))
+          .filter((item) => matchesItemFilters(item, sphere, filters));
+        window.__harnessLog.push({
+          type: 'api_fetch',
+          action: 'item_list_all',
+          method: opts?.method || 'GET',
+          url: u,
+          payload: { count: items.length },
+        });
         return new Response(JSON.stringify({ ok: true, items }), { status: 200 });
       }
       if (u.includes('/api/runtime/workspaces')) {

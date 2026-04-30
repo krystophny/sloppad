@@ -68,18 +68,19 @@
     function normalizeHarnessItemSidebarEntries(entries) {
       return Array.isArray(entries) ? entries.map((entry) => normalizeHarnessItemSidebarEntry(entry)) : [];
     }
+    function itemSidebarStateKeys() {
+      return ['inbox', 'next', 'waiting', 'deferred', 'someday', 'review', 'done'];
+    }
     window.__setItemSidebarData = (next) => {
       const incoming = next && typeof next === 'object' ? next : {};
       const data = {
         ...defaultItemSidebarData(),
         ...incoming,
       };
-      window.__itemSidebarData = {
-        inbox: normalizeHarnessItemSidebarEntries(data.inbox),
-        waiting: normalizeHarnessItemSidebarEntries(data.waiting),
-        someday: normalizeHarnessItemSidebarEntries(data.someday),
-        done: normalizeHarnessItemSidebarEntries(data.done),
-      };
+      window.__itemSidebarData = itemSidebarStateKeys().reduce((acc, key) => {
+        acc[key] = normalizeHarnessItemSidebarEntries(data[key]);
+        return acc;
+      }, {});
     };
     window.__setItemSidebarActors = (next) => {
       window.__itemSidebarActors = Array.isArray(next)
@@ -117,7 +118,7 @@
     };
     window.__queueItemSidebarResponseDelay = (view, delayMs) => {
       const key = String(view || '').trim().toLowerCase();
-      if (!['inbox', 'waiting', 'someday', 'done', 'counts'].includes(key)) return;
+      if (![...itemSidebarStateKeys(), 'counts'].includes(key)) return;
       const queue = window.__itemSidebarResponseDelays && typeof window.__itemSidebarResponseDelays === 'object'
         ? window.__itemSidebarResponseDelays
         : {};
@@ -159,9 +160,8 @@
     }
     function moveItemSidebarEntry(itemID, nextState, patch = {}) {
       const data = window.__itemSidebarData || defaultItemSidebarData();
-      const states = ['inbox', 'waiting', 'someday', 'done'];
       let found = null;
-      states.forEach((stateKey) => {
+      itemSidebarStateKeys().forEach((stateKey) => {
         const rows = Array.isArray(data[stateKey]) ? data[stateKey] : [];
         const index = rows.findIndex((entry) => Number(entry?.id || 0) === Number(itemID));
         if (index >= 0) {
@@ -184,9 +184,8 @@
     }
     function deleteItemSidebarEntry(itemID) {
       const data = window.__itemSidebarData || defaultItemSidebarData();
-      const states = ['inbox', 'waiting', 'someday', 'done'];
       let removed = null;
-      states.forEach((stateKey) => {
+      itemSidebarStateKeys().forEach((stateKey) => {
         const rows = Array.isArray(data[stateKey]) ? data[stateKey] : [];
         const index = rows.findIndex((entry) => Number(entry?.id || 0) === Number(itemID));
         if (index >= 0) {
@@ -200,9 +199,8 @@
     }
     function patchItemSidebarEntry(itemID, patch = {}) {
       const data = window.__itemSidebarData || defaultItemSidebarData();
-      const states = ['inbox', 'waiting', 'someday', 'done'];
       let updated = null;
-      states.forEach((stateKey) => {
+      itemSidebarStateKeys().forEach((stateKey) => {
         const rows = Array.isArray(data[stateKey]) ? data[stateKey] : [];
         const index = rows.findIndex((entry) => Number(entry?.id || 0) === Number(itemID));
         if (index < 0) return;
@@ -309,7 +307,7 @@
       return JSON.parse(JSON.stringify(normalizeMailDraft(draft)));
     }
     function existingItemSidebarRow(itemID) {
-      return ['inbox', 'waiting', 'someday', 'done']
+      return itemSidebarStateKeys()
         .flatMap((stateKey) => Array.isArray((window.__itemSidebarData || {})[stateKey]) ? (window.__itemSidebarData || {})[stateKey] : [])
         .find((entry) => Number(entry?.id || 0) === Number(itemID)) || null;
     }
@@ -569,16 +567,16 @@
         const parsed = new URL(url, window.location.origin);
         const source = String(parsed.searchParams.get('source') || '').trim().toLowerCase();
         const workspaceRaw = String(parsed.searchParams.get('workspace_id') || '').trim().toLowerCase();
-        const workspaceID = String(parsed.searchParams.get('workspace_id') || '').trim();
         const contextID = Number(parsed.searchParams.get('context_id') || 0);
+        const section = String(parsed.searchParams.get('section') || '').trim().toLowerCase();
         return {
           source,
-          workspace_id: workspaceRaw === 'null' || workspaceRaw === '' ? workspaceRaw : Number(workspaceRaw),
-          workspace_id: workspaceID,
+          workspace_id: workspaceRaw,
           context_id: Number.isFinite(contextID) && contextID > 0 ? contextID : 0,
+          section,
         };
       } catch (_) {
-        return { source: '', workspace_id: '', workspace_id: '', context_id: 0 };
+        return { source: '', workspace_id: '', context_id: 0, section: '' };
       }
     }
     function descendantContextIDs(contextID) {
@@ -609,6 +607,10 @@
       if (sphere && itemSphere !== sphere) return false;
       const itemSource = String(item?.source || '').trim().toLowerCase();
       if (filters?.source && itemSource !== filters.source) return false;
+      if (filters?.section === 'project_items') {
+        if (String(item?.kind || '').trim().toLowerCase() !== 'project') return false;
+        if (String(item?.state || '').trim().toLowerCase() === 'done') return false;
+      }
       if (filters?.workspace_id === 'null') {
         return item?.workspace_id == null;
       }
@@ -633,4 +635,3 @@
       }
       return `${cleanKind}-${suffix}`;
     };
-

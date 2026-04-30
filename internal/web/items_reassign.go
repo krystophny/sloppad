@@ -14,6 +14,11 @@ type itemWorkspaceUpdateRequest struct {
 	WorkspaceID *int64 `json:"workspace_id"`
 }
 
+type itemProjectItemLinkRequest struct {
+	ProjectItemID int64  `json:"project_item_id"`
+	Role          string `json:"role"`
+}
+
 var (
 	errItemWorkspaceNotFound = errors.New("workspace not found")
 	errItemProjectNotFound   = errors.New("project not found")
@@ -91,6 +96,51 @@ func (a *App) handleItemWorkspaceUpdate(w http.ResponseWriter, r *http.Request) 
 	writeAPIData(w, http.StatusOK, map[string]any{
 		"item":    item,
 		"warning": warning,
+	})
+}
+
+func (a *App) handleItemProjectItemLink(w http.ResponseWriter, r *http.Request) {
+	if !a.requireAuth(w, r) {
+		return
+	}
+	itemID, err := parseItemIDParam(r)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req itemProjectItemLinkRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.ProjectItemID <= 0 {
+		writeAPIError(w, http.StatusBadRequest, "project_item_id must be a positive integer")
+		return
+	}
+	if err := a.store.LinkItemChild(req.ProjectItemID, itemID, req.Role); err != nil {
+		writeItemStoreError(w, err)
+		return
+	}
+	item, err := a.store.GetItem(itemID)
+	if err != nil {
+		writeItemStoreError(w, err)
+		return
+	}
+	links, err := a.store.ListItemChildLinks(req.ProjectItemID)
+	if err != nil {
+		writeItemStoreError(w, err)
+		return
+	}
+	health, err := a.store.GetProjectItemHealth(req.ProjectItemID)
+	if err != nil {
+		writeItemStoreError(w, err)
+		return
+	}
+	writeAPIData(w, http.StatusOK, map[string]any{
+		"item":           item,
+		"project_item_id": req.ProjectItemID,
+		"links":          links,
+		"health":         health,
 	})
 }
 

@@ -158,6 +158,7 @@ func (a *App) Router() http.Handler {
 	r.Put("/api/items/{item_id}/unassign", a.handleItemUnassign)
 	r.Put("/api/items/{item_id}/complete", a.handleItemComplete)
 	r.Put("/api/items/{item_id}/workspace", a.handleItemWorkspaceUpdate)
+	r.Post("/api/items/{item_id}/project-item-link", a.handleItemProjectItemLink)
 	r.Put("/api/items/{item_id}/state", a.handleItemStateUpdate)
 	r.Post("/api/items/{item_id}/triage", a.handleItemTriage)
 	r.Post("/api/items/{item_id}/dispatch-review", a.handleItemReviewDispatch)

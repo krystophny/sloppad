@@ -183,6 +183,7 @@ Domain model API:
 - `PUT /api/items/{item_id}/unassign`
 - `PUT /api/items/{item_id}/complete`
 - `PUT /api/items/{item_id}/workspace`
+- `POST /api/items/{item_id}/project-item-link`
 - `POST /api/items/{item_id}/dispatch-review`
 - `POST /api/items/{item_id}/triage`
 - `GET /api/items/{item_id}/print`

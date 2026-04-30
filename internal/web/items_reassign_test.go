@@ -102,3 +102,63 @@ func TestItemWorkspaceReassignmentAPIRejectsUnknownWorkspace(t *testing.T) {
 		t.Fatalf("unknown workspace status = %d, want 400: %s", rrWorkspace.Code, rrWorkspace.Body.String())
 	}
 }
+
+func TestItemProjectItemLinkAPI(t *testing.T) {
+	app := newAuthedTestApp(t)
+
+	project, err := app.store.CreateItem("Ship unified inbox", store.ItemOptions{
+		Kind:  store.ItemKindProject,
+		State: store.ItemStateNext,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(project) error: %v", err)
+	}
+	item, err := app.store.CreateItem("Clarify imported capture", store.ItemOptions{})
+	if err != nil {
+		t.Fatalf("CreateItem(child) error: %v", err)
+	}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/project-item-link", map[string]any{
+		"project_item_id": project.ID,
+		"role":            store.ItemLinkRoleNextAction,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("project item link status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	assertProjectItemLinkResponse(t, decodeJSONResponse(t, rr), project.ID, item.ID)
+
+	rrSelf := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/project-item-link", map[string]any{
+		"project_item_id": item.ID,
+	})
+	if rrSelf.Code != http.StatusBadRequest {
+		t.Fatalf("self link status = %d, want 400: %s", rrSelf.Code, rrSelf.Body.String())
+	}
+}
+
+func assertProjectItemLinkResponse(t *testing.T, payload map[string]any, projectID, itemID int64) {
+	t.Helper()
+	if got := int64(payload["project_item_id"].(float64)); got != projectID {
+		t.Fatalf("project_item_id = %d, want %d", got, projectID)
+	}
+	links, ok := payload["links"].([]any)
+	if !ok || len(links) != 1 {
+		t.Fatalf("links payload = %#v, want one link", payload["links"])
+	}
+	first, ok := links[0].(map[string]any)
+	if !ok {
+		t.Fatalf("link payload = %#v", links[0])
+	}
+	if got := int64(first["child_item_id"].(float64)); got != itemID {
+		t.Fatalf("child_item_id = %d, want %d", got, itemID)
+	}
+	if got := strFromAny(first["role"]); got != store.ItemLinkRoleNextAction {
+		t.Fatalf("role = %q, want %q", got, store.ItemLinkRoleNextAction)
+	}
+	health, ok := payload["health"].(map[string]any)
+	if !ok {
+		t.Fatalf("health payload = %#v", payload["health"])
+	}
+	if stalled, _ := health["stalled"].(bool); !stalled {
+		t.Fatalf("health = %#v, want stalled true for inbox-only linked item", health)
+	}
+}
