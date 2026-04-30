@@ -17,6 +17,45 @@ import (
 func TestItemCountsExposesSidebarSectionCountsAlongsidePerStateCounts(t *testing.T) {
 	app := newAuthedTestApp(t)
 
+	seedSidebarCountsFixture(t, app)
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/counts", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("counts status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	payload := decodeJSONResponse(t, rr)
+	counts, ok := payload["counts"].(map[string]any)
+	if !ok {
+		t.Fatalf("counts payload = %#v", payload)
+	}
+	if got := int(counts[store.ItemStateDone].(float64)); got != 1 {
+		t.Fatalf("counts[done] = %d, want 1", got)
+	}
+
+	sections, ok := payload["sections"].(map[string]any)
+	if !ok {
+		t.Fatalf("sections payload missing in %#v", payload)
+	}
+	if got := int(sections["project_items_open"].(float64)); got != 1 {
+		t.Fatalf("sections[project_items_open] = %d, want 1 (only the open project item; done excluded)", got)
+	}
+	if got := int(sections["people_open"].(float64)); got != 2 {
+		t.Fatalf("sections[people_open] = %d, want 2 (Alice + Bob)", got)
+	}
+	if got := int(sections["drift_review"].(float64)); got != 1 {
+		t.Fatalf("sections[drift_review] = %d, want 1 (review item with review_target set)", got)
+	}
+	if got := int(sections["dedup_review"].(float64)); got != 2 {
+		t.Fatalf("sections[dedup_review] = %d, want 2 (the colliding source/source_ref pair)", got)
+	}
+	if got := int(sections["recent_meetings"].(float64)); got != 1 {
+		t.Fatalf("sections[recent_meetings] = %d, want 1", got)
+	}
+}
+
+func seedSidebarCountsFixture(t *testing.T, app *App) {
+	t.Helper()
+
 	if _, err := app.store.CreateItem("Plan GTD outcome", store.ItemOptions{
 		Kind:  store.ItemKindProject,
 		State: store.ItemStateNext,
@@ -87,39 +126,6 @@ func TestItemCountsExposesSidebarSectionCountsAlongsidePerStateCounts(t *testing
 	transcriptTitle := "Recent transcript"
 	if _, err := app.store.CreateArtifact(store.ArtifactKindTranscript, &transcriptPath, nil, &transcriptTitle, nil); err != nil {
 		t.Fatalf("CreateArtifact(transcript) error: %v", err)
-	}
-
-	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, "/api/items/counts", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("counts status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	payload := decodeJSONResponse(t, rr)
-	counts, ok := payload["counts"].(map[string]any)
-	if !ok {
-		t.Fatalf("counts payload = %#v", payload)
-	}
-	if got := int(counts[store.ItemStateDone].(float64)); got != 1 {
-		t.Fatalf("counts[done] = %d, want 1", got)
-	}
-
-	sections, ok := payload["sections"].(map[string]any)
-	if !ok {
-		t.Fatalf("sections payload missing in %#v", payload)
-	}
-	if got := int(sections["project_items_open"].(float64)); got != 1 {
-		t.Fatalf("sections[project_items_open] = %d, want 1 (only the open project item; done excluded)", got)
-	}
-	if got := int(sections["people_open"].(float64)); got != 2 {
-		t.Fatalf("sections[people_open] = %d, want 2 (Alice + Bob)", got)
-	}
-	if got := int(sections["drift_review"].(float64)); got != 1 {
-		t.Fatalf("sections[drift_review] = %d, want 1 (review item with review_target set)", got)
-	}
-	if got := int(sections["dedup_review"].(float64)); got != 2 {
-		t.Fatalf("sections[dedup_review] = %d, want 2 (the colliding source/source_ref pair)", got)
-	}
-	if got := int(sections["recent_meetings"].(float64)); got != 1 {
-		t.Fatalf("sections[recent_meetings] = %d, want 1", got)
 	}
 }
 
