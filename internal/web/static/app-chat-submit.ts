@@ -245,7 +245,13 @@ export async function submitMessage(text, options: Record<string, any> = {}) {
     capture_mode: submitKind === 'voice_transcript' ? 'voice' : 'text',
     fast_mode: Boolean(state.fastMode),
   };
-  const cursorPayload = mergeCursorPayload(buildCursorPayload(anchor), buildSidebarSelectionCursorPayload());
+  const optionCursor = options?.cursor && typeof options.cursor === 'object'
+    ? buildCursorPayload(options.cursor)
+    : null;
+  const cursorPayload = mergeCursorPayload(
+    mergeCursorPayload(buildCursorPayload(anchor), optionCursor),
+    buildSidebarSelectionCursorPayload(),
+  );
   if (cursorPayload) {
     body.cursor = cursorPayload;
   }

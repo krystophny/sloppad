@@ -575,6 +575,25 @@ function activeWorkspaceRootMatches(path) {
   return normalizedWorkspaceRootPath(project) === target;
 }
 
+function activeWorkspaceProject() {
+  const activeID = String(state.activeWorkspaceId || '').trim();
+  if (!activeID || !Array.isArray(state.projects)) return null;
+  return state.projects.find((project) => String(project?.id || '').trim() === activeID) || null;
+}
+
+function sourceContextCursor(sourcePath, sourceWorkspaceID = '') {
+  const path = String(sourcePath || '').trim();
+  if (!path) return null;
+  return {
+    view: 'source_context',
+    element: 'agent_handoff',
+    title: path,
+    path,
+    is_dir: false,
+    workspace_name: String(sourceWorkspaceID || '').trim(),
+  };
+}
+
 export async function handleWelcomeAction(action) {
   const type = String(action?.type || '').trim();
   if (!type) return;
@@ -617,10 +636,21 @@ export async function handleWelcomeAction(action) {
     const path = String(action?.path || '').trim();
     if (!path) return;
     if (activeWorkspaceRootMatches(path)) {
-      await submitMessage('Start agent here.', { kind: 'start_agent_here' });
+      const project = activeWorkspaceProject();
+      const sourcePath = String(action?.source_path || project?.source_path || '').trim();
+      const sourceWorkspaceID = String(action?.source_workspace_id || project?.source_workspace_id || '').trim();
+      const cursor = sourceContextCursor(sourcePath, sourceWorkspaceID);
+      await submitMessage('Start agent here.', {
+        kind: 'start_agent_here',
+        ...(cursor ? { cursor } : {}),
+      });
       return;
     }
-    await startAgentHereAtPath(path, String(state.activeWorkspaceId || '').trim());
+    await startAgentHereAtPath(
+      path,
+      String(action?.source_workspace_id || state.activeWorkspaceId || '').trim(),
+      String(action?.source_path || '').trim(),
+    );
   }
 }
 

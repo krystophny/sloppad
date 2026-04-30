@@ -194,8 +194,10 @@ func (a *App) buildProjectWelcomeSections(project store.Workspace) []workspaceWe
 					Subtitle:    filepath.Base(strings.TrimSpace(project.RootPath)),
 					Description: "Use the nearest AGENTS.md or CLAUDE.md from this source folder.",
 					Action: workspaceWelcomeAction{
-						Type: "start_agent_here",
-						Path: project.RootPath,
+						Type:              "start_agent_here",
+						Path:              project.RootPath,
+						SourceWorkspaceID: project.SourceWorkspaceID,
+						SourcePath:        project.SourcePath,
 					},
 				},
 			},

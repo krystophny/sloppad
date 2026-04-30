@@ -74,6 +74,12 @@ func TestProjectWelcomeIncludesStartAgentCardForLinkedWorkspaces(t *testing.T) {
 	if !strings.Contains(agentCard.Description, "Use the nearest AGENTS.md or CLAUDE.md from this source folder.") {
 		t.Fatalf("welcome missing nearest-instructions guidance: %s", agentCard.Description)
 	}
+	if agentCard.Action.SourceWorkspaceID != workspaceIDStr(brain.ID) {
+		t.Fatalf("agent source workspace id = %q, want %q", agentCard.Action.SourceWorkspaceID, workspaceIDStr(brain.ID))
+	}
+	if agentCard.Action.SourcePath != "topics/active.md" {
+		t.Fatalf("agent source path = %q, want topics/active.md", agentCard.Action.SourcePath)
+	}
 	if originCard == nil {
 		t.Fatalf("welcome missing origin card: %#v", welcome.Sections)
 	}

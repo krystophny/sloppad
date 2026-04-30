@@ -58,11 +58,13 @@ type workspaceFileEntry struct {
 }
 
 type workspaceWelcomeAction struct {
-	Type          string `json:"type"`
-	WorkspaceID   string `json:"workspace_id,omitempty"`
-	Path          string `json:"path,omitempty"`
-	SilentMode    *bool  `json:"silent_mode,omitempty"`
-	StartupTarget string `json:"startup_behavior,omitempty"`
+	Type              string `json:"type"`
+	WorkspaceID       string `json:"workspace_id,omitempty"`
+	Path              string `json:"path,omitempty"`
+	SourceWorkspaceID string `json:"source_workspace_id,omitempty"`
+	SourcePath        string `json:"source_path,omitempty"`
+	SilentMode        *bool  `json:"silent_mode,omitempty"`
+	StartupTarget     string `json:"startup_behavior,omitempty"`
 }
 
 type workspaceWelcomeCard struct {

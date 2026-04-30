@@ -113,6 +113,63 @@ func TestResolveAgentHereSpecSourceLinkPreservesCursor(t *testing.T) {
 	}
 }
 
+func TestResolveAgentHereSpecSourceLinkDoesNotCrossBrainSpheres(t *testing.T) {
+	root := t.TempDir()
+	workVault := filepath.Join(root, "work")
+	privateVault := filepath.Join(root, "private")
+	workBrain := filepath.Join(workVault, "brain")
+	privateBrain := filepath.Join(privateVault, "brain")
+	if err := os.MkdirAll(filepath.Join(workBrain, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir work brain: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(privateBrain, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir private brain: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workBrain, "topics", "source.md"), []byte("source"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(privateBrain, "topics", "private-target.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write private target: %v", err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", workVault)
+	t.Setenv("SLOPSHELL_BRAIN_PRIVATE_ROOT", privateVault)
+
+	_, err := resolveAgentHereSpec("topics/source.md::private-target", workBrain)
+	if err == nil {
+		t.Fatal("resolveAgentHereSpec() error = nil, want cross-sphere target rejection")
+	}
+	if strings.Contains(err.Error(), privateVault) {
+		t.Fatalf("resolveAgentHereSpec() leaked private path: %v", err)
+	}
+}
+
+func TestResolveAgentHereSpecSourceLinkRejectsAbsoluteTargetOutsideSourceVault(t *testing.T) {
+	root := t.TempDir()
+	workVault := filepath.Join(root, "work")
+	privateVault := filepath.Join(root, "private")
+	workBrain := filepath.Join(workVault, "brain")
+	privateProject := filepath.Join(privateVault, "project")
+	if err := os.MkdirAll(filepath.Join(workBrain, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir work brain: %v", err)
+	}
+	if err := os.MkdirAll(privateProject, 0o755); err != nil {
+		t.Fatalf("mkdir private project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workBrain, "topics", "source.md"), []byte("source"), 0o644); err != nil {
+		t.Fatalf("write source note: %v", err)
+	}
+	t.Setenv("SLOPSHELL_BRAIN_WORK_ROOT", workVault)
+	t.Setenv("SLOPSHELL_BRAIN_PRIVATE_ROOT", privateVault)
+
+	_, err := resolveAgentHereSpec("topics/source.md::"+privateProject, workBrain)
+	if err == nil {
+		t.Fatal("resolveAgentHereSpec() error = nil, want outside-vault target rejection")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "source vault") {
+		t.Fatalf("resolveAgentHereSpec() error = %v, want source vault guard", err)
+	}
+}
+
 func TestResolveAgentHereSpecMissingTarget(t *testing.T) {
 	cwd := t.TempDir()
 	if _, err := resolveAgentHereSpec("missing.md", cwd); err == nil {

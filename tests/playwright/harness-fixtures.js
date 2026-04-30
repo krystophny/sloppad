@@ -117,6 +117,8 @@
           sphere: String(project?.sphere || '').trim().toLowerCase(),
           workspace_path: String(project?.workspace_path || `/tmp/${String(project?.id || '').trim() || 'project'}`).trim(),
           root_path: String(project?.root_path || `/tmp/${String(project?.id || '').trim() || 'project'}`).trim(),
+          source_workspace_id: String(project?.source_workspace_id || '').trim(),
+          source_path: String(project?.source_path || '').trim(),
           chat_session_id: String(project?.chat_session_id || `chat-${String(project?.id || '').trim() || 'project'}`).trim(),
           canvas_session_id: String(project?.canvas_session_id || 'local').trim(),
           chat_mode: String(project?.chat_mode || 'chat').trim().toLowerCase() || 'chat',

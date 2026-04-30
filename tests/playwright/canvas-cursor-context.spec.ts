@@ -708,6 +708,12 @@ test('start agent here welcome action preserves the active linked workspace orig
 
   const log = await getLog(page);
   expect(log.some((entry) => entry.type === 'api_fetch' && entry.action === 'project_create')).toBe(false);
+  const startEntry = log.find(
+    (entry) => entry.type === 'message_sent'
+      && String(entry.text || '') === 'Start agent here.',
+  ) as HarnessLogEntry | undefined;
+  expect((startEntry?.cursor as any)?.path).toBe('topics/active.md');
+  expect((startEntry?.cursor as any)?.view).toBe('source_context');
   await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).toBe('linked-1');
 });
 
@@ -782,6 +788,13 @@ test('file markdown links open the parent folder as source context', async ({ pa
       && String(entry.text || '') === 'Start agent here.',
     );
   }, { timeout: 5_000 }).toBe(true);
+
+  const startEntry = (await getLog(page)).find(
+    (entry) => entry.type === 'message_sent'
+      && String(entry.text || '') === 'Start agent here.',
+  ) as HarnessLogEntry | undefined;
+  expect((startEntry?.cursor as any)?.path).toBe('topics/active.md');
+  expect((startEntry?.cursor as any)?.view).toBe('source_context');
 
   await expect.poll(async () => page.evaluate(() => String((window as any)._slopshellApp?.getState?.().activeWorkspaceId || '')), { timeout: 5_000 }).not.toBe('brain');
 

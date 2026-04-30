@@ -18,6 +18,19 @@ type WorkspaceActionDeps = {
   submitMessage?: (text: string, options?: Record<string, any>) => Promise<void>;
 };
 
+function startAgentHereCursor(sourceWorkspaceID: string, sourceNotePath: string): Record<string, any> | null {
+  const sourcePath = String(sourceNotePath || '').trim();
+  if (!sourcePath) return null;
+  return {
+    view: 'source_context',
+    element: 'agent_handoff',
+    title: sourcePath,
+    path: sourcePath,
+    is_dir: false,
+    workspace_name: String(sourceWorkspaceID || '').trim(),
+  };
+}
+
 async function postWorkspaceAction(
   deps: WorkspaceActionDeps,
   path: string,
@@ -107,7 +120,11 @@ export async function startAgentHereAtPath(
     sourceNotePath,
   );
   if (!workspaceID || typeof deps.submitMessage !== 'function') return;
-  await deps.submitMessage('Start agent here.', { kind: 'start_agent_here' });
+  const cursor = startAgentHereCursor(sourceWorkspaceID, sourceNotePath);
+  await deps.submitMessage('Start agent here.', {
+    kind: 'start_agent_here',
+    ...(cursor ? { cursor } : {}),
+  });
 }
 
 export async function persistTemporaryProject(

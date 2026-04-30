@@ -151,20 +151,22 @@ func resolveAgentHereTarget(raw, cwd, sourcePath string) (string, bool, error) {
 	if clean == "" {
 		return "", false, errors.New("target path is required")
 	}
-	if path, isDir, ok := resolveAgentHereDirectPath(clean, cwd, sourcePath); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+	sourceVaultRoot := agentHereSourceVaultRoot(sourcePath)
+	brainRoots := agentHereTargetBrainRoots(sourceVaultRoot)
+	if path, isDir, ok := resolveAgentHereDirectPath(clean, cwd, sourcePath, brainRoots); ok {
+		if err := rejectAgentHereTargetPath(path, sourceVaultRoot); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainPath(clean); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+	if path, isDir, ok := resolveAgentHereBrainPath(clean, brainRoots); ok {
+		if err := rejectAgentHereTargetPath(path, sourceVaultRoot); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainBasename(clean); ok {
-		if err := rejectAgentHerePersonalPath(path); err != nil {
+	if path, isDir, ok := resolveAgentHereBrainBasename(clean, brainRoots); ok {
+		if err := rejectAgentHereTargetPath(path, sourceVaultRoot); err != nil {
 			return "", false, err
 		}
 		return path, isDir, nil
@@ -173,20 +175,21 @@ func resolveAgentHereTarget(raw, cwd, sourcePath string) (string, bool, error) {
 }
 
 func resolveAgentHereExistingPath(raw, cwd string) (string, bool, error) {
-	if path, isDir, ok := resolveAgentHereDirectPath(raw, cwd, ""); ok {
+	brainRoots := agentHereTargetBrainRoots("")
+	if path, isDir, ok := resolveAgentHereDirectPath(raw, cwd, "", brainRoots); ok {
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainPath(raw); ok {
+	if path, isDir, ok := resolveAgentHereBrainPath(raw, brainRoots); ok {
 		return path, isDir, nil
 	}
-	if path, isDir, ok := resolveAgentHereBrainBasename(raw); ok {
+	if path, isDir, ok := resolveAgentHereBrainBasename(raw, brainRoots); ok {
 		return path, isDir, nil
 	}
 	return "", false, fmt.Errorf("target %q not found", raw)
 }
 
-func resolveAgentHereDirectPath(raw, cwd, sourcePath string) (string, bool, bool) {
-	for _, candidate := range agentHerePathCandidates(raw, cwd, sourcePath) {
+func resolveAgentHereDirectPath(raw, cwd, sourcePath string, brainRoots []string) (string, bool, bool) {
+	for _, candidate := range agentHerePathCandidates(raw, cwd, sourcePath, brainRoots) {
 		info, err := os.Stat(candidate)
 		if err == nil {
 			return candidate, info.IsDir(), true
@@ -195,8 +198,7 @@ func resolveAgentHereDirectPath(raw, cwd, sourcePath string) (string, bool, bool
 	return "", false, false
 }
 
-func resolveAgentHereBrainPath(raw string) (string, bool, bool) {
-	roots := sortedBrainRoots(findBrainRoots())
+func resolveAgentHereBrainPath(raw string, roots []string) (string, bool, bool) {
 	if len(roots) == 0 {
 		return "", false, false
 	}
@@ -212,7 +214,7 @@ func resolveAgentHereBrainPath(raw string) (string, bool, bool) {
 	return "", false, false
 }
 
-func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
+func resolveAgentHereBrainBasename(raw string, roots []string) (string, bool, bool) {
 	if raw == "" || strings.ContainsAny(raw, `/\`) {
 		return "", false, false
 	}
@@ -221,7 +223,6 @@ func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
 	if filepath.Ext(needle) == "" {
 		alts = append(alts, needle+".md")
 	}
-	roots := sortedBrainRoots(findBrainRoots())
 	for _, root := range roots {
 		brainDir := filepath.Join(root, "brain")
 		var matches []string
@@ -259,7 +260,7 @@ func resolveAgentHereBrainBasename(raw string) (string, bool, bool) {
 	return "", false, false
 }
 
-func agentHerePathCandidates(raw, cwd, sourcePath string) []string {
+func agentHerePathCandidates(raw, cwd, sourcePath string, brainRoots []string) []string {
 	clean := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
 	if clean == "" {
 		return nil
@@ -291,7 +292,7 @@ func agentHerePathCandidates(raw, cwd, sourcePath string) []string {
 		addVariants(filepath.Join(filepath.Dir(sourcePath), filepath.FromSlash(clean)))
 	}
 	addVariants(filepath.Join(cwd, filepath.FromSlash(clean)))
-	for _, root := range sortedBrainRoots(findBrainRoots()) {
+	for _, root := range brainRoots {
 		brainDir := filepath.Join(root, "brain")
 		addVariants(filepath.Join(brainDir, filepath.FromSlash(clean)))
 	}
@@ -356,6 +357,36 @@ func rejectAgentHerePersonalPath(path string) error {
 		return errors.New("work personal subtree is blocked")
 	}
 	return nil
+}
+
+func rejectAgentHereTargetPath(path, sourceVaultRoot string) error {
+	if err := rejectAgentHerePersonalPath(path); err != nil {
+		return err
+	}
+	if sourceVaultRoot != "" && !pathInsideOrEqual(path, sourceVaultRoot) {
+		return errors.New("target leaves source vault")
+	}
+	return nil
+}
+
+func agentHereSourceVaultRoot(sourcePath string) string {
+	source := strings.TrimSpace(sourcePath)
+	if source == "" {
+		return ""
+	}
+	for _, root := range sortedBrainRoots(findBrainRoots()) {
+		if pathInsideOrEqual(source, root) {
+			return absoluteCleanPath(root)
+		}
+	}
+	return ""
+}
+
+func agentHereTargetBrainRoots(sourceVaultRoot string) []string {
+	if root := strings.TrimSpace(sourceVaultRoot); root != "" {
+		return []string{absoluteCleanPath(root)}
+	}
+	return sortedBrainRoots(findBrainRoots())
 }
 
 func pathInWorkPersonalGuardrail(path string) bool {
