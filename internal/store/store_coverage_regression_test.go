@@ -334,7 +334,7 @@ func TestWorkspaceCompatUpdateOperations(t *testing.T) {
 	if err := s.TouchWorkspace(workspaceID); err != nil {
 		t.Fatalf("TouchWorkspace() error: %v", err)
 	}
-	if _, err := s.UpdateWorkspaceMCPURL(workspace.ID, " ws://127.0.0.1:9420/mcp "); err != nil {
+	if _, err := s.UpdateWorkspaceMCPURL(workspace.ID, " unix:/tmp/sloppy-test.sock "); err != nil {
 		t.Fatalf("UpdateWorkspaceMCPURL() error: %v", err)
 	}
 	if _, err := s.UpdateWorkspaceCanvasSession(workspace.ID, " local "); err != nil {

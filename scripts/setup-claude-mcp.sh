@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MCP_URL="${1:-http://127.0.0.1:9420/mcp}"
 SETTINGS_PATH="${CLAUDE_SETTINGS_PATH:-$HOME/.claude/settings.json}"
+SLOPTOOLS_BIN="${SLOPSHELL_SLOPTOOLS_BIN:-$HOME/.local/bin/sloptools}"
+HELPY_BIN="${SLOPSHELL_HELPY_BIN:-$HOME/.local/bin/helpy}"
+SLOPPY_PROJECT_DIR="${SLOPSHELL_SLOPPY_PROJECT_DIR:-$HOME}"
+SLOPPY_DATA_DIR="${SLOPSHELL_SLOPPY_DATA_DIR:-$HOME/.local/share/sloppy}"
 
 mkdir -p "$(dirname "$SETTINGS_PATH")"
 if [[ -f "$SETTINGS_PATH" ]]; then
@@ -25,7 +28,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf '%s\n' "$BASE_JSON" | jq -S --arg mcp_url "$MCP_URL" '
+printf '%s\n' "$BASE_JSON" | jq -S \
+  --arg sloptools_bin "$SLOPTOOLS_BIN" \
+  --arg helpy_bin "$HELPY_BIN" \
+  --arg project_dir "$SLOPPY_PROJECT_DIR" \
+  --arg data_dir "$SLOPPY_DATA_DIR" '
   if type != "object" then
     error("settings root must be a JSON object")
   else
@@ -33,10 +40,20 @@ printf '%s\n' "$BASE_JSON" | jq -S --arg mcp_url "$MCP_URL" '
   end
   | .mcpServers = (.mcpServers // {})
   | .mcpServers |= (if type == "object" then . else {} end)
-  | .mcpServers.sloptools = {"url": $mcp_url}
+  | .mcpServers.sloppy = {
+      "type": "stdio",
+      "command": $sloptools_bin,
+      "args": ["mcp-server", "--project-dir", $project_dir, "--data-dir", $data_dir]
+    }
+  | .mcpServers.helpy = {
+      "type": "stdio",
+      "command": $helpy_bin,
+      "args": ["mcp-stdio"]
+    }
+  | del(.mcpServers.sloptools)
   | del(.mcpServers.slopshell)
 ' >"$TMP_OUT"
 
 mv "$TMP_OUT" "$SETTINGS_PATH"
 echo "updated $SETTINGS_PATH"
-echo "server key: mcpServers.sloptools"
+echo "server keys: mcpServers.sloppy, mcpServers.helpy"

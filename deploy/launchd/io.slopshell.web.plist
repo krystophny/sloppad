@@ -12,8 +12,6 @@
     <string>@@PROJECT_DIR@@</string>
     <string>--data-dir</string>
     <string>@@WEB_DATA_DIR@@</string>
-    <string>--local-mcp-url</string>
-    <string>http://127.0.0.1:9420/mcp</string>
     <string>--web-host</string>
     <string>@@SLOPSHELL_WEB_HOST@@</string>
     <string>--web-port</string>

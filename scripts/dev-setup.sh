@@ -160,9 +160,9 @@ log "Bootstrapping project at $PROJECT_DIR"
 if [ -n "${SLOPSHELL_INTENT_LLM_URL:-}" ] && [ "${SLOPSHELL_INTENT_LLM_URL}" != "off" ]; then
     SLOPSHELL_CODEX_FAST_URL="${SLOPSHELL_INTENT_LLM_URL}/v1" \
     SLOPSHELL_CODEX_LOCAL_URL="$(codex_local_url_default)" \
-    "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
+    "$REPO_ROOT/scripts/setup-codex-mcp.sh"
 else
-    "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
+    "$REPO_ROOT/scripts/setup-codex-mcp.sh"
 fi
 
 # --- Step 10: Summary ---
@@ -178,7 +178,7 @@ cat <<SUMMARY
 
 Endpoints:
   Web UI:  http://127.0.0.1:8420
-  MCP:     http://127.0.0.1:9420/mcp
+  MCP:     unix:${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock
   TTS:     http://127.0.0.1:8424/v1/audio/speech
   LLM:     $EFFECTIVE_LLM_URL
   Codex:   $(codex_local_url_default)

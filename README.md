@@ -83,9 +83,9 @@ Requirements:
 ```bash
 slopshell bootstrap --project-dir .
 slopshell mcp-server --project-dir .
-sloptools server --project-dir . --data-dir ~/.local/share/sloptools --mcp-host 127.0.0.1 --mcp-port 9420
-slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
-slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+sloptools mcp-server --project-dir . --data-dir ~/.local/share/sloppy
+slopshell server --project-dir . --data-dir ~/.slopshell-web --mcp-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock" --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+slopshell server --project-dir . --data-dir ~/.slopshell-web --mcp-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock" --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```
 
 ## Terminal client: `slsh`
@@ -137,10 +137,10 @@ go test -tags=e2e ./cmd/slsh/...
 
 ## Runtime Stack (Canonical)
 
-Slopshell runs with one web runtime plus a dedicated local MCP daemon:
+Slopshell runs with one web runtime that embeds the local MCP on a private Unix
+socket:
 
-1. `sloptools.service` (`sloptools server`, loopback MCP and canvas relay)
-2. `slopshell-web.service` (`slopshell server`, consuming `--local-mcp-url`)
+1. `slopshell-web.service` (`slopshell server`, serving MCP over `--mcp-socket`)
 3. `slopshell-codex-app-server.service`
 4. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
    - default: Piper
@@ -160,8 +160,8 @@ Why TTS remains an HTTP sidecar:
 
 - Web UI/API listener: `http://localhost:8420` (public-facing)
 - Optional HTTPS listener: add `--web-cert-file <cert.pem> --web-key-file <key.pem>` (for example on `8443`)
-- Local MCP listener: `http://127.0.0.1:9420/mcp` (served by `sloptools`, loopback-only)
-- Canvas websocket relay source: `ws://127.0.0.1:9420/ws/canvas`
+- Local MCP listener: `unix:$XDG_RUNTIME_DIR/sloppy/mcp.sock` (mode 0600)
+- Canvas websocket relay source: `unix:$XDG_RUNTIME_DIR/sloppy/mcp.sock` (`/ws/canvas`)
 - Codex app-server websocket: `ws://127.0.0.1:8787`
 - TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`
 - Voxtype STT endpoint: `http://127.0.0.1:8427/v1/audio/transcriptions`
@@ -180,8 +180,10 @@ Why TTS remains an HTTP sidecar:
 
 Security model:
 - MCP routes are intentionally not exposed on the web listener.
-- `slopshell server` can reuse an existing loopback MCP with `--local-mcp-url`.
-- `sloptools server` rejects non-loopback MCP bind unless `--unsafe-public-mcp` is explicitly set.
+- `slopshell server` embeds the sloptools MCP on a Unix socket; no TCP MCP
+  listener is started.
+- External agents use stdio MCP (`sloptools mcp-server`, `helpy mcp-stdio`)
+  instead of TCP.
 
 ## Temporary Voxtype Branch Pin
 
@@ -213,7 +215,7 @@ Example with `mkcert`:
 mkdir -p ~/.config/slopshell/certs
 mkcert -install
 mkcert -cert-file ~/.config/slopshell/certs/slopshell.pem -key-file ~/.config/slopshell/certs/slopshell-key.pem localhost 127.0.0.1 ::1 192.168.1.50
-slopshell server --project-dir . --data-dir ~/.slopshell-web --local-mcp-url http://127.0.0.1:9420/mcp --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
+slopshell server --project-dir . --data-dir ~/.slopshell-web --mcp-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock" --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```
 
 If a second device (for example a Mac) connects to this server, trust the same local CA on that device too.
@@ -255,20 +257,20 @@ See:
 ## Integration Example (Optional)
 
 ```bash
-PRODUCER=http://127.0.0.1:8090/mcp
-CONSUMER=http://127.0.0.1:9420/mcp
+PRODUCER_SOCKET=/path/to/producer.sock
+CONSUMER_SOCKET=${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock
 
 handoff_id=$(
-  curl -sS -X POST "$PRODUCER" -H 'content-type: application/json' \
+  curl -sS --unix-socket "$PRODUCER_SOCKET" -X POST http://unix/mcp -H 'content-type: application/json' \
     -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"handoff.create","arguments":{"kind":"file","selector":{"path":"README.md"}}}}' \
   | jq -r '.result.structuredContent.handoff_id'
 )
 
-curl -sS -X POST "$CONSUMER" -H 'content-type: application/json' \
+curl -sS --unix-socket "$CONSUMER_SOCKET" -X POST http://unix/mcp -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"canvas_session_open","arguments":{"session_id":"local"}}}'
 
-curl -sS -X POST "$CONSUMER" -H 'content-type: application/json' \
-  -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"canvas_import_handoff\",\"arguments\":{\"session_id\":\"local\",\"handoff_id\":\"$handoff_id\",\"producer_mcp_url\":\"$PRODUCER\",\"title\":\"Imported File\"}}}"
+curl -sS --unix-socket "$CONSUMER_SOCKET" -X POST http://unix/mcp -H 'content-type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"canvas_import_handoff\",\"arguments\":{\"session_id\":\"local\",\"handoff_id\":\"$handoff_id\",\"producer_mcp_url\":\"unix:$PRODUCER_SOCKET\",\"title\":\"Imported File\"}}}"
 ```
 
 ## Tests

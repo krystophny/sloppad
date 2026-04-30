@@ -13,7 +13,6 @@ else
   LOCAL_URL="${SLOPSHELL_CODEX_LOCAL_URL:-http://127.0.0.1:8080/v1}"
   LOCAL_MODEL="${SLOPSHELL_CODEX_LOCAL_MODEL:-gpt-oss-120b}"
 fi
-MCP_URL="${SLOPSHELL_CODEX_MCP_URL:-http://127.0.0.1:9420/mcp}"
 
 fail() {
   printf '[codex-local-test] ERROR: %s\n' "$*" >&2
@@ -75,7 +74,7 @@ SLOPSHELL_CODEX_FAST_MODEL="$FAST_MODEL" \
 SLOPSHELL_CODEX_LOCAL_URL="$LOCAL_URL" \
 SLOPSHELL_CODEX_LOCAL_MODEL="$LOCAL_MODEL" \
 CODEX_CONFIG_PATH="$CONFIG_PATH" \
-"$ROOT_DIR/scripts/setup-codex-mcp.sh" "$MCP_URL" >/dev/null
+"$ROOT_DIR/scripts/setup-codex-mcp.sh" >/dev/null
 
 if ! endpoint_live "$FAST_URL"; then
   fail "fast local provider is not reachable at ${FAST_URL%/v1}"

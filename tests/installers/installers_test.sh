@@ -181,10 +181,14 @@ run_setup_codex_mcp_checks() {
     printf 'model = "gpt-5.4"\n' >"$config_path"
 
     CODEX_CONFIG_PATH="$config_path" \
-    "${ROOT_DIR}/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp" >/dev/null
+    "${ROOT_DIR}/scripts/setup-codex-mcp.sh" >/dev/null
 
-    assert_contains "$config_path" "[mcp_servers.slopshell]"
-    assert_contains "$config_path" "url = \"http://127.0.0.1:9420/mcp\""
+    assert_contains "$config_path" "[mcp_servers.sloppy]"
+    assert_contains "$config_path" "command = \"${HOME}/.local/bin/sloptools\""
+    assert_contains "$config_path" "args = [\"mcp-server\", \"--project-dir\", \"${HOME}\", \"--data-dir\", \"${HOME}/.local/share/sloppy\"]"
+    assert_contains "$config_path" "[mcp_servers.helpy]"
+    assert_contains "$config_path" "command = \"${HOME}/.local/bin/helpy\""
+    assert_contains "$config_path" "args = [\"mcp-stdio\"]"
     assert_contains "$config_path" "[model_providers.local]"
     if [ "$(uname -s)" = "Darwin" ]; then
         assert_contains "$config_path" "name = \"Local vLLM-MLX\""

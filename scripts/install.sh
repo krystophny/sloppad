@@ -594,7 +594,7 @@ configure_codex_cli() {
     SLOPSHELL_CODEX_FAST_URL="$fast_url" \
     SLOPSHELL_CODEX_AGENTIC_URL="$agentic_url" \
     SLOPSHELL_CODEX_LOCAL_URL="$agentic_url" \
-    bash "$script_path" "http://127.0.0.1:9420/mcp" >/dev/null
+    bash "$script_path" >/dev/null
 }
 
 install_hotword_assets() {
@@ -953,7 +953,7 @@ UNIT
     local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
     local helpy_bin
     local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
-    local web_mcp_args="--local-mcp-url http://127.0.0.1:9420/mcp"
+    local web_mcp_args="--mcp-socket %t/sloppy/mcp.sock"
     helpy_bin="$(resolve_helpy_bin)"
 
     cat >"${systemd_dir}/slopshell-web.service" <<UNIT

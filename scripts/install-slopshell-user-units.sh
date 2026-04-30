@@ -40,9 +40,6 @@ LLM_VENV_DIR=""
 CODEX_PATH=""
 VOXTYPE_PATH=""
 BIN_PATH=""
-SLOPTOOLS_BIN_PATH=""
-SLOPTOOLS_REPO_ROOT="${SLOPTOOLS_REPO_ROOT:-}"
-SLOPTOOLS_DATA_DIR=""
 WEB_DATA_DIR=""
 
 resolve_helpy_bin() {
@@ -59,27 +56,6 @@ resolve_helpy_bin() {
     return 0
   fi
   printf 'helpy'
-}
-
-resolve_sloptools_repo() {
-  if [ -n "$SLOPTOOLS_REPO_ROOT" ] && [ -d "$SLOPTOOLS_REPO_ROOT" ]; then
-    SLOPTOOLS_REPO_ROOT="$(cd "$SLOPTOOLS_REPO_ROOT" && pwd)"
-    return 0
-  fi
-  if [ -d "${REPO_ROOT}/../sloptools" ]; then
-    SLOPTOOLS_REPO_ROOT="$(cd "${REPO_ROOT}/../sloptools" && pwd)"
-    return 0
-  fi
-  fail "sloptools repo not found. Set SLOPTOOLS_REPO_ROOT or place it next to slopshell."
-}
-
-build_sloptools_binary() {
-  resolve_sloptools_repo
-  log "Building sloptools binary"
-  if ! (cd "$SLOPTOOLS_REPO_ROOT" && go build -o "$SLOPTOOLS_REPO_ROOT/sloptools" ./cmd/sloptools); then
-    fail "go build failed for sloptools"
-  fi
-  SLOPTOOLS_BIN_PATH="$SLOPTOOLS_REPO_ROOT/sloptools"
 }
 
 install_slsh_binary() {
@@ -112,7 +88,7 @@ configure_codex_cli() {
   SLOPSHELL_CODEX_FAST_URL="$fast_url" \
   SLOPSHELL_CODEX_LOCAL_URL="$agentic_url" \
   SLOPSHELL_CODEX_AGENTIC_URL="$agentic_url" \
-  "$REPO_ROOT/scripts/setup-codex-mcp.sh" "http://127.0.0.1:9420/mcp"
+  "$REPO_ROOT/scripts/setup-codex-mcp.sh"
 }
 
 install_hotword_assets() {
@@ -162,11 +138,9 @@ esac
 if [ "$PLATFORM" = "Darwin" ]; then
   LLM_MODEL_DIR="${HOME}/Library/Application Support/slopshell/llm/models"
   LLM_VENV_DIR="${HOME}/Library/Application Support/slopshell/llm/venv"
-  SLOPTOOLS_DATA_DIR="${HOME}/Library/Application Support/sloptools"
 else
   LLM_MODEL_DIR="${HOME}/.local/share/slopshell-llm/models"
   LLM_VENV_DIR="${HOME}/.local/share/slopshell-llm/venv"
-  SLOPTOOLS_DATA_DIR="${HOME}/.local/share/sloptools"
 fi
 
 # --- Detect existing local LLM ---
@@ -229,13 +203,11 @@ fi
 
 install_linux() {
   local unit_src="$REPO_ROOT/deploy/systemd/user"
-  local sloptools_unit_src
   local unit_dst="$HOME/.config/systemd/user"
   local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
   local helpy_bin
   local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
   local -a core_units=(
-    sloptools.service
     slopshell-codex-app-server.service
     slopshell-piper-tts.service
     slopshell-stt.service
@@ -244,14 +216,8 @@ install_linux() {
   local -a optional_units=()
 
   install_slsh_binary
-  build_sloptools_binary
   helpy_bin="$(resolve_helpy_bin)"
-  sloptools_unit_src="$SLOPTOOLS_REPO_ROOT/deploy/systemd/user/sloptools.service"
   mkdir -p "$unit_dst"
-  sed -e "s|@@SLOPTOOLS_BIN@@|${SLOPTOOLS_BIN_PATH}|g" \
-      -e "s|@@PROJECT_DIR@@|${REPO_ROOT}|g" \
-      -e "s|@@DATA_DIR@@|${SLOPTOOLS_DATA_DIR}|g" \
-      "$sloptools_unit_src" > "$unit_dst/sloptools.service"
   for f in "$unit_src"/*.service; do
     local base
     base="$(basename "$f")"
@@ -284,6 +250,7 @@ install_linux() {
     tabura-piper-tts.service \
     tabura-codex-app-server.service \
     helpy-mcp.service \
+    sloptools.service \
     voxtype.service \
     >/dev/null 2>&1 || true
   if [ -n "$REUSE_LLM_URL" ]; then
@@ -366,7 +333,6 @@ PLIST
 
 install_macos() {
   local plist_src="$REPO_ROOT/deploy/launchd"
-  local sloptools_plist_src
   local plist_dst="$HOME/Library/LaunchAgents"
   local data_root="$HOME/Library/Application Support/slopshell"
   local piper_model_dir piper_venv_dir llm_source_dir
@@ -381,13 +347,11 @@ install_macos() {
     fail "go build failed"
   fi
   install_slsh_binary
-  build_sloptools_binary
 
   BIN_PATH="$REPO_ROOT/slopshell"
   CODEX_PATH="$(command -v codex 2>/dev/null || true)"
   VOXTYPE_PATH="$(command -v voxtype 2>/dev/null || echo voxtype)"
   WEB_DATA_DIR="${data_root}/web-data"
-  sloptools_plist_src="${SLOPTOOLS_REPO_ROOT}/deploy/launchd/io.sloptools.mcp.plist"
   piper_model_dir="${HOME}/.local/share/slopshell-piper-tts/models"
   piper_venv_dir="${HOME}/.local/share/slopshell-piper-tts/venv"
   llm_source_dir="${data_root}/llm/vllm-mlx"
@@ -415,7 +379,7 @@ install_macos() {
   rm -f "$plist_dst/io.sloptools.mcp.plist" "$plist_dst/io.slopshell.piper-tts.plist" "$plist_dst/io.slopshell.macos-tts.plist" "$plist_dst/io.slopshell.codex-app-server.plist" "$plist_dst"/io.tabura.*.plist
 
   # Determine which agents to install
-  local agents=(sloptools-mcp codex-app-server piper-tts web)
+  local agents=(codex-app-server piper-tts web)
   if [ "$HAVE_LLAMA" = "1" ] && [ -z "$REUSE_LLM_URL" ]; then
     agents+=(llm)
   fi
@@ -426,20 +390,6 @@ install_macos() {
   # Install plist files (always, even if launchctl is unavailable)
   local src dst
   for name in "${agents[@]}"; do
-    if [ "$name" = "sloptools-mcp" ]; then
-      src="$sloptools_plist_src"
-      dst="$plist_dst/io.sloptools.mcp.plist"
-      if [ ! -f "$src" ]; then
-        fail "sloptools launchd template missing: $src"
-      fi
-      sed \
-        -e "s|@@SLOPTOOLS_BIN@@|${SLOPTOOLS_BIN_PATH}|g" \
-        -e "s|@@PROJECT_DIR@@|${REPO_ROOT}|g" \
-        -e "s|@@DATA_DIR@@|${SLOPTOOLS_DATA_DIR}|g" \
-        "$src" > "$dst"
-      log "Installed plist: $dst"
-      continue
-    fi
     src="$plist_src/io.slopshell.${name}.plist"
     dst="$plist_dst/io.slopshell.${name}.plist"
     if [ ! -f "$src" ]; then
@@ -480,13 +430,6 @@ activate_launchd() {
   local plist_dst="$HOME/Library/LaunchAgents"
   local dst
   for name in "$@"; do
-    if [ "$name" = "sloptools-mcp" ]; then
-      dst="$plist_dst/io.sloptools.mcp.plist"
-      launchctl unload "$dst" >/dev/null 2>&1 || true
-      launchctl load -w "$dst"
-      log "Loaded: io.sloptools.mcp"
-      continue
-    fi
     dst="$plist_dst/io.slopshell.${name}.plist"
     launchctl unload "$dst" >/dev/null 2>&1 || true
     launchctl load -w "$dst"
@@ -496,12 +439,6 @@ activate_launchd() {
   sleep 3
   local failed=()
   for name in "$@"; do
-    if [ "$name" = "sloptools-mcp" ]; then
-      if ! launchctl list "io.sloptools.mcp" >/dev/null 2>&1; then
-        failed+=("io.sloptools.mcp")
-      fi
-      continue
-    fi
     if ! launchctl list "io.slopshell.${name}" >/dev/null 2>&1; then
       failed+=("io.slopshell.${name}")
     fi
@@ -524,13 +461,6 @@ activate_direct() {
   for name in "$@"; do
     local logfile="/tmp/slopshell-${name}.log"
     case "$name" in
-      sloptools-mcp)
-        logfile="/tmp/sloptools-mcp.log"
-        nohup "$SLOPTOOLS_BIN_PATH" server \
-          --project-dir "$REPO_ROOT" --data-dir "$SLOPTOOLS_DATA_DIR" \
-          --mcp-host 127.0.0.1 --mcp-port 9420 \
-          >"$logfile" 2>&1 &
-        ;;
       codex-app-server)
         nohup "$CODEX_PATH" app-server --listen ws://127.0.0.1:8787 \
           >"$logfile" 2>&1 &
@@ -550,7 +480,7 @@ activate_direct() {
         SLOPSHELL_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b \
         nohup "$BIN_PATH" server \
           --project-dir "$REPO_ROOT" --data-dir "$WEB_DATA_DIR" \
-          --local-mcp-url http://127.0.0.1:9420/mcp \
+          --mcp-socket "$HOME/Library/Caches/sloppy/mcp.sock" \
           --web-host "$web_host" --web-port 8420 \
           --tts-url http://127.0.0.1:8424 \
           >"$logfile" 2>&1 &
@@ -567,13 +497,8 @@ activate_direct() {
           >"$logfile" 2>&1 &
         ;;
     esac
-    if [ "$name" = "sloptools-mcp" ]; then
-      echo "$! io.sloptools.mcp" >> "$pidfile"
-      log "Started: io.sloptools.mcp (pid $!)"
-    else
-      echo "$! io.slopshell.${name}" >> "$pidfile"
-      log "Started: io.slopshell.${name} (pid $!)"
-    fi
+    echo "$! io.slopshell.${name}" >> "$pidfile"
+    log "Started: io.slopshell.${name} (pid $!)"
   done
 
   sleep 3
@@ -582,11 +507,7 @@ activate_direct() {
   while read -r pid label; do
     if ! kill -0 "$pid" 2>/dev/null; then
       failed+=("$label")
-      if [ "$label" = "io.sloptools.mcp" ]; then
-        log "FAILED: $label (pid $pid) — see /tmp/sloptools-mcp.log"
-      else
-        log "FAILED: $label (pid $pid) — see /tmp/slopshell-${label#io.slopshell.}.log"
-      fi
+      log "FAILED: $label (pid $pid) — see /tmp/slopshell-${label#io.slopshell.}.log"
     fi
   done < "$pidfile"
 

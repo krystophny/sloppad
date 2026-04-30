@@ -4,7 +4,7 @@
 #
 # Requires:
 #   - slopshell-web.service   (port 8420)
-#   - sloptools.service        (port 9420; MCP email/calendar/etc)
+#   - embedded sloptools MCP  (unix socket under $XDG_RUNTIME_DIR/sloppy)
 #   - optional: codex-app-server.service (port 8787) for --gpt smoke
 #
 # Usage: scripts/slsh-smoke.sh

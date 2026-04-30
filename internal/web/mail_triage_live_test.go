@@ -134,7 +134,7 @@ func TestMailTriageLiveExchangeArmDeterministicFilters(t *testing.T) {
 func liveTriageAppAndAccount(t *testing.T) (*App, store.ExternalAccount) {
 	t.Helper()
 	dataDir := filepath.Join(os.Getenv("HOME"), ".local", "share", "slopshell-web")
-	app, err := New(dataDir, "/home/ert/code/assi/slopshell", "http://127.0.0.1:9420/mcp", DefaultAppServerURL, "", DefaultTTSURL, "", true)
+	app, err := New(dataDir, "/home/ert/code/assi/slopshell", "", DefaultAppServerURL, "", DefaultTTSURL, "", true)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}

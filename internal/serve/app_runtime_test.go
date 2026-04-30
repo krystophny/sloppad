@@ -97,12 +97,12 @@ func TestHandleHealthIncludesStatusAndProjectDir(t *testing.T) {
 }
 
 func TestListenURLsWithScheme(t *testing.T) {
-	urls := ListenURLsWithScheme("127.0.0.1", 9420, "HTTPS")
+	urls := ListenURLsWithScheme("127.0.0.1", 8443, "HTTPS")
 	if len(urls) != 1 {
 		t.Fatalf("len(urls) = %d, want 1", len(urls))
 	}
-	if urls[0] != "https://127.0.0.1:9420" {
-		t.Fatalf("ListenURLsWithScheme() = %q, want https://127.0.0.1:9420", urls[0])
+	if urls[0] != "https://127.0.0.1:8443" {
+		t.Fatalf("ListenURLsWithScheme() = %q, want https://127.0.0.1:8443", urls[0])
 	}
 }
 

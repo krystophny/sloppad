@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MCP_URL="${1:-http://127.0.0.1:9420/mcp}"
 CONFIG_PATH="${CODEX_CONFIG_PATH:-$HOME/.codex/config.toml}"
 PLATFORM="$(uname -s)"
 FAST_URL="${SLOPSHELL_CODEX_FAST_URL:-http://127.0.0.1:8081/v1}"
 FAST_MODEL="${SLOPSHELL_CODEX_FAST_MODEL:-qwen3.5-9b}"
+SLOPTOOLS_BIN="${SLOPSHELL_SLOPTOOLS_BIN:-$HOME/.local/bin/sloptools}"
+HELPY_BIN="${SLOPSHELL_HELPY_BIN:-$HOME/.local/bin/helpy}"
+SLOPPY_PROJECT_DIR="${SLOPSHELL_SLOPPY_PROJECT_DIR:-$HOME}"
+SLOPPY_DATA_DIR="${SLOPSHELL_SLOPPY_DATA_DIR:-$HOME/.local/share/sloppy}"
 if [[ "$PLATFORM" == "Darwin" ]]; then
   LOCAL_URL="${SLOPSHELL_CODEX_LOCAL_URL:-http://127.0.0.1:8081/v1}"
   LOCAL_MODEL="${SLOPSHELL_CODEX_LOCAL_MODEL:-qwen3.5-9b}"
@@ -60,8 +63,13 @@ fi
     echo
   fi
   echo "$MCP_MARKER_BEGIN"
-  echo "[mcp_servers.sloptools]"
-  printf 'url = "%s"\n' "$MCP_URL"
+  echo "[mcp_servers.sloppy]"
+  printf 'command = "%s"\n' "$SLOPTOOLS_BIN"
+  printf 'args = ["mcp-server", "--project-dir", "%s", "--data-dir", "%s"]\n' "$SLOPPY_PROJECT_DIR" "$SLOPPY_DATA_DIR"
+  echo
+  echo "[mcp_servers.helpy]"
+  printf 'command = "%s"\n' "$HELPY_BIN"
+  echo 'args = ["mcp-stdio"]'
   echo "$MCP_MARKER_END"
   echo
   echo "$MODELS_MARKER_BEGIN"
@@ -90,5 +98,5 @@ fi
 
 mv "$TMP_OUT" "$CONFIG_PATH"
 echo "updated $CONFIG_PATH"
-echo "server key: mcp_servers.sloptools"
+echo "server keys: mcp_servers.sloppy, mcp_servers.helpy"
 echo "profile keys: local, fast"
