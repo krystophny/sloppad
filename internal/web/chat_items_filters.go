@@ -29,7 +29,7 @@ var itemFilterSourceCommands = map[string]string{
 	"show manual items":       "manual",
 }
 
-var projectItemFilterPattern = regexp.MustCompile(`(?i)^(?:show|open|zeige)\s+(.+?)\s+items$`)
+var workspaceItemFilterPattern = regexp.MustCompile(`(?i)^(?:show|open|zeige)\s+(.+?)\s+items$`)
 
 func parseInlineItemFilterIntent(text string) *SystemAction {
 	normalized := normalizeItemCommandText(text)
@@ -91,7 +91,7 @@ func parseInlineItemFilterIntent(text string) *SystemAction {
 			},
 		}
 	}
-	if match := projectItemFilterPattern.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
+	if match := workspaceItemFilterPattern.FindStringSubmatch(strings.TrimSpace(text)); len(match) == 2 {
 		workspaceRef := cleanWorkspaceReference(match[1])
 		if allSpheres && strings.HasPrefix(strings.ToLower(workspaceRef), "all ") {
 			workspaceRef = cleanWorkspaceReference(strings.TrimSpace(workspaceRef[4:]))

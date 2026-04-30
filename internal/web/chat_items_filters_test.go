@@ -68,9 +68,9 @@ func TestClassifyAndExecuteSystemActionOpensReviewEntryPoint(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.intentLLMURL = ""
 
-	project, err := app.ensureDefaultWorkspace()
+	workspace, err := app.ensureDefaultWorkspace()
 	if err != nil {
-		t.Fatalf("ensure default project: %v", err)
+		t.Fatalf("ensure default workspace: %v", err)
 	}
 	if _, err := app.store.CreateItem("Review stalled outcome", store.ItemOptions{
 		Kind:  store.ItemKindProject,
@@ -78,7 +78,7 @@ func TestClassifyAndExecuteSystemActionOpensReviewEntryPoint(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateItem(stalled project) error: %v", err)
 	}
-	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	session, err := app.store.GetOrCreateChatSession(workspace.WorkspacePath)
 	if err != nil {
 		t.Fatalf("chat session: %v", err)
 	}
@@ -105,9 +105,9 @@ func TestClassifyAndExecuteSystemActionShowFilteredItems(t *testing.T) {
 	app := newAuthedTestApp(t)
 	app.intentLLMURL = ""
 
-	project, err := app.ensureDefaultWorkspace()
+	workspace, err := app.ensureDefaultWorkspace()
 	if err != nil {
-		t.Fatalf("ensure default project: %v", err)
+		t.Fatalf("ensure default workspace: %v", err)
 	}
 	privateWorkspace, err := app.store.CreateWorkspace("Private", filepath.Join(t.TempDir(), "private"), store.SpherePrivate)
 	if err != nil {
@@ -139,7 +139,7 @@ func TestClassifyAndExecuteSystemActionShowFilteredItems(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateItem(exchange) error: %v", err)
 	}
-	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	session, err := app.store.GetOrCreateChatSession(workspace.WorkspacePath)
 	if err != nil {
 		t.Fatalf("chat session: %v", err)
 	}
