@@ -835,6 +835,15 @@ test.describe('inbox triage interactions', () => {
     await expect(page.locator('#item-sidebar-menu')).toContainText('Delete');
     await page.mouse.click(10, 10);
 
+    await page.locator('#pr-file-list .pr-file-item[data-item-id="101"]').click();
+    await page.keyboard.press('KeyX');
+    await expect(page.locator('#pr-file-list')).not.toContainText('Review parser cleanup');
+    await expect(page.locator('#item-sidebar-undo-banner')).toHaveClass(/is-open/);
+    await expect.poll(async () => page.evaluate(() => {
+      const log = (window as any).__harnessLog || [];
+      return log.some((entry: any) => entry?.action === 'item_gesture' && entry?.payload?.action === 'complete');
+    })).toBe(true);
+
     await page.keyboard.press('KeyD');
     await expect(page.locator('#pr-file-list')).not.toContainText('Answer triage email');
 
