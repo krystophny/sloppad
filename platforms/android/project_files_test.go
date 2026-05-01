@@ -23,6 +23,7 @@ func TestSlopshellAndroidProjectIncludesExpectedFiles(t *testing.T) {
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellAudioCaptureService.kt"),
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellBooxDevice.kt"),
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellBooxInkSurfaceView.kt"),
+		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellBooxRuntimeStatus.kt"),
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellCanvasTransport.kt"),
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellCanvasWebView.kt"),
 		filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellChatTransport.kt"),
@@ -37,6 +38,7 @@ func TestSlopshellAndroidProjectIncludesExpectedFiles(t *testing.T) {
 		filepath.Join("flow-contracts", "src", "test", "kotlin", "com", "slopshell", "android", "flow", "FlowContractTest.kt"),
 		filepath.Join("flow-contracts", "src", "test", "resources", "flow-fixtures.json"),
 		filepath.Join("app", "src", "test", "kotlin", "com", "slopshell", "android", "SlopshellDialogueModeTest.kt"),
+		filepath.Join("app", "src", "test", "kotlin", "com", "slopshell", "android", "SlopshellBooxRuntimeStatusTest.kt"),
 		filepath.Join("app", "src", "main", "res", "values", "strings.xml"),
 		filepath.Join("app", "src", "main", "res", "values", "themes.xml"),
 	}
@@ -129,7 +131,14 @@ func TestSlopshellAndroidSourcesCoverThinClientResponsibilities(t *testing.T) {
 	}{
 		{
 			relative: filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "MainActivity.kt"),
-			snippets: []string{"BlackScreenDialogueSurface", "FLAG_KEEP_SCREEN_ON", "Start Dialogue", "Exit Dialogue"},
+			snippets: []string{
+				"BlackScreenDialogueSurface",
+				"FLAG_KEEP_SCREEN_ON",
+				"Start Dialogue",
+				"Exit Dialogue",
+				"BooxRuntimeStatusPanel",
+				"SlopshellBooxRuntimeProbe.metrics.collectAsState()",
+			},
 		},
 		{
 			relative: filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellServerDiscovery.kt"),
@@ -166,6 +175,8 @@ func TestSlopshellAndroidSourcesCoverThinClientResponsibilities(t *testing.T) {
 				"setViewDefaultUpdateMode",
 				"applyGCOnce",
 				"setWebViewContrastOptimize",
+				"detectSlopshellBooxDetectionSignals",
+				"SlopshellBooxRuntimeProbe.recordEinkRefresh",
 			},
 		},
 		{
@@ -174,10 +185,25 @@ func TestSlopshellAndroidSourcesCoverThinClientResponsibilities(t *testing.T) {
 				"TouchHelper.create",
 				"setRawInputReaderEnable(true)",
 				"openRawDrawing",
-				"setRawDrawingEnabled(true)",
+				"setRawDrawingEnabled(visible)",
 				"closeRawDrawing",
 				"onRawDrawingTouchPointListReceived",
 				"SlopshellInkStroke",
+				"SlopshellBooxRuntimeProbe.setRawDrawingActive",
+				"SlopshellBooxRuntimeProbe.recordInkStroke()",
+			},
+		},
+		{
+			relative: filepath.Join("app", "src", "main", "kotlin", "com", "slopshell", "android", "SlopshellBooxRuntimeStatus.kt"),
+			snippets: []string{
+				"data class SlopshellBooxDetectionSignals",
+				"data class SlopshellBooxRuntimeMetrics",
+				"object SlopshellBooxRuntimeProbe",
+				"epdControllerClassPresent",
+				"einkRefreshAttemptCount",
+				"einkRefreshSuccessCount",
+				"recordInkStroke",
+				"recordEinkRefresh",
 			},
 		},
 	}

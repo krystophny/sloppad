@@ -7,19 +7,23 @@ import android.view.View
 import android.webkit.WebView
 
 data class SlopshellDisplayProfile(
-    val isBoox: Boolean,
-)
-
-fun detectSlopshellDisplayProfile(context: Context): SlopshellDisplayProfile {
-    return SlopshellDisplayProfile(isBoox = isBooxDevice(context))
+    val signals: SlopshellBooxDetectionSignals,
+) {
+    val isBoox: Boolean
+        get() = signals.detectedAsBoox
 }
 
-private fun isBooxDevice(context: Context): Boolean {
+fun detectSlopshellDisplayProfile(context: Context): SlopshellDisplayProfile {
+    return SlopshellDisplayProfile(signals = detectSlopshellBooxDetectionSignals(context))
+}
+
+fun detectSlopshellBooxDetectionSignals(context: Context): SlopshellBooxDetectionSignals {
     val isOnyxManufacturer = Build.MANUFACTURER.lowercase() == "onyx"
-    return shouldTreatAsBooxDevice(
+    return SlopshellBooxDetectionSignals(
         manufacturer = Build.MANUFACTURER,
-        hasOnyxSdkPackage = hasOnyxSdkPackage(context) || isOnyxManufacturer,
-        hasTouchHelperClass = hasClass("com.onyx.android.sdk.pen.TouchHelper"),
+        onyxSdkPackagePresent = hasOnyxSdkPackage(context) || isOnyxManufacturer,
+        touchHelperClassPresent = hasClass("com.onyx.android.sdk.pen.TouchHelper"),
+        epdControllerClassPresent = hasClass("com.onyx.android.sdk.api.device.epd.EpdController"),
     )
 }
 
@@ -70,13 +74,10 @@ object SlopshellBooxEinkController {
     }
 
     fun refreshContentView(view: View) {
-        if (invokeController("applyGCOnce", arrayOf(View::class.java), arrayOf(view))) {
-            return
-        }
-        if (invokeController("applyGCOnce", emptyArray<Class<*>>(), emptyArray<Any>())) {
-            return
-        }
-        invalidate(view, "GC16", "GC")
+        val applied = invokeController("applyGCOnce", arrayOf(View::class.java), arrayOf(view)) ||
+            invokeController("applyGCOnce", emptyArray<Class<*>>(), emptyArray<Any>()) ||
+            invalidateView(view, "GC16", "GC")
+        SlopshellBooxRuntimeProbe.recordEinkRefresh(success = applied)
     }
 
     fun setWebViewContrastOptimize(view: WebView, enabled: Boolean) {
@@ -96,9 +97,9 @@ object SlopshellBooxEinkController {
         )
     }
 
-    private fun invalidate(view: View, vararg modeNames: String) {
-        val mode = resolveUpdateMode(*modeNames) ?: return
-        invokeController(
+    private fun invalidateView(view: View, vararg modeNames: String): Boolean {
+        val mode = resolveUpdateMode(*modeNames) ?: return false
+        return invokeController(
             "invalidate",
             arrayOf(View::class.java, mode.javaClass),
             arrayOf(view, mode),

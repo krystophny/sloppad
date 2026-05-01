@@ -15,6 +15,7 @@
     "test:flows:android:contract:jvm": "node ./scripts/sync-native-flow-fixtures.mjs --check && gradle -p platforms/android/flow-contracts test --console=plain --no-daemon",
     "test:flows:native:contract": "npm run test:flows:ios:contract && npm run test:flows:android:contract",
     "test:flows:native": "./scripts/test-native-flows.sh",
+    "test:flows:boox:hardware": "./scripts/test-boox-hardware.sh",
     "test:native-docs": "node ./scripts/check-native-validation-docs.mjs",
     "test:playtest": "./scripts/playtest.sh",
     "test:reports": "./scripts/test-reports.sh",

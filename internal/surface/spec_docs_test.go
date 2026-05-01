@@ -161,6 +161,7 @@ func TestNativeClientsGuideIsIndexedAndHonest(t *testing.T) {
 		"The structural tests in `platforms/ios/project_files_test.go` and `platforms/android/project_files_test.go` are regression guards",
 		"Boox raw drawing and e-ink refresh",
 		"Do not describe the native clients as a broader completed product unless the automated checks above pass",
+		"[`boox-validation.md`](boox-validation.md)",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(content, snippet) {
@@ -184,5 +185,77 @@ func TestNativeClientsGuideIsIndexedAndHonest(t *testing.T) {
 	}
 	if !strings.Contains(string(planDoc), "[`native-clients.md`](native-clients.md)") {
 		t.Fatalf("%s does not reference native-clients.md", planPath)
+	}
+}
+
+func TestBooxValidationDocIsIndexedAndAnchored(t *testing.T) {
+	root := repoRootFromCaller(t)
+
+	booxPath := filepath.Join(root, "docs", "boox-validation.md")
+	booxDoc, err := os.ReadFile(booxPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", booxPath, err)
+	}
+	content := string(booxDoc)
+
+	requiredSnippets := []string{
+		"## Boox SDK and Tooling Reality",
+		"There is no official Boox emulator",
+		"com.onyx.android.sdk:onyxsdk-device:1.1.11",
+		"com.onyx.android.sdk:onyxsdk-pen:1.2.1",
+		"https://repo.boox.com/repository/maven-public/",
+		"## Runtime Observability",
+		"SlopshellBooxRuntimeProbe",
+		"SlopshellBooxInkSurfaceView.ensureTouchHelper",
+		"SlopshellBooxInkSurfaceView.emitStroke",
+		"SlopshellBooxEinkController.refreshContentView",
+		"## Off-Device Automated Checks",
+		"gradle -p platforms/android app:testDebugUnitTest",
+		"## Hardware Validation Script",
+		"./scripts/test-boox-hardware.sh",
+		"## Manual Hardware Checklist",
+		"## Closure Evidence",
+		"## Documentation Honesty",
+	}
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("%s missing snippet %q", booxPath, snippet)
+		}
+	}
+
+	specIndexPath := filepath.Join(root, "docs", "spec-index.md")
+	specIndex, err := os.ReadFile(specIndexPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", specIndexPath, err)
+	}
+	if !strings.Contains(string(specIndex), "`boox-validation.md`") {
+		t.Fatalf("%s does not reference boox-validation.md", specIndexPath)
+	}
+
+	guidePath := filepath.Join(root, "docs", "native-clients.md")
+	guideDoc, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", guidePath, err)
+	}
+	if !strings.Contains(string(guideDoc), "[`boox-validation.md`](boox-validation.md)") {
+		t.Fatalf("%s does not reference boox-validation.md", guidePath)
+	}
+
+	planPath := filepath.Join(root, "docs", "native-clients-plan.md")
+	planDoc, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error: %v", planPath, err)
+	}
+	if !strings.Contains(string(planDoc), "[`boox-validation.md`](boox-validation.md)") {
+		t.Fatalf("%s does not reference boox-validation.md", planPath)
+	}
+
+	scriptPath := filepath.Join(root, "scripts", "test-boox-hardware.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("Stat(%q) error: %v", scriptPath, err)
+	}
+	if info.Mode()&0o111 == 0 {
+		t.Fatalf("%s is not executable", scriptPath)
 	}
 }

@@ -110,9 +110,10 @@ clients:
 - `#638` mDNS advertisement and push relay
 
 Boox-specific code paths are implemented in the Android client. Boox release
-readiness still requires the hardware evidence listed in
-[`native-clients.md`](native-clients.md); do not claim Boox readiness from
-generic Android validation alone.
+readiness has its own closure standard in
+[`boox-validation.md`](boox-validation.md), which owns the Boox SDK reality,
+runtime observability, off-device unit coverage, hardware script, and manual
+checklist. Do not claim Boox readiness from generic Android validation alone.
 
 ## Verification and Runbook
 

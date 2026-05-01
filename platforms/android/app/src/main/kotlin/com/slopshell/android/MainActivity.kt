@@ -246,7 +246,7 @@ private fun SlopshellAndroidApp(
                 Text(state.statusText, style = MaterialTheme.typography.bodySmall)
             }
             if (displayProfile.isBoox) {
-                Text("Boox E-Ink mode active", style = MaterialTheme.typography.bodySmall)
+                BooxRuntimeStatusPanel(signals = displayProfile.signals)
             }
             if (state.lastError.isNotBlank()) {
                 Text(state.lastError, color = MaterialTheme.colorScheme.error)
@@ -385,6 +385,32 @@ private fun SlopshellAndroidApp(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun BooxRuntimeStatusPanel(signals: SlopshellBooxDetectionSignals) {
+    val metrics by SlopshellBooxRuntimeProbe.metrics.collectAsState()
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("Boox E-Ink mode active", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Detection: manufacturer=${signals.manufacturer}, " +
+                "sdk=${signals.onyxSdkPackagePresent}, " +
+                "TouchHelper=${signals.touchHelperClassPresent}, " +
+                "EpdController=${signals.epdControllerClassPresent}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "Raw drawing: ${if (metrics.rawDrawingActive) "active" else "idle"} | strokes=${metrics.inkStrokeCount}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            "E-ink refresh: ${metrics.einkRefreshSuccessCount}/${metrics.einkRefreshAttemptCount} applied",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

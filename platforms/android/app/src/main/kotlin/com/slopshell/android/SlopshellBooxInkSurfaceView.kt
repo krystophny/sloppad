@@ -78,7 +78,10 @@ class SlopshellBooxInkSurfaceView @JvmOverloads constructor(
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
-        touchHelper?.setRawDrawingEnabled(visibility == VISIBLE)
+        val helper = touchHelper ?: return
+        val active = visibility == VISIBLE
+        helper.setRawDrawingEnabled(active)
+        SlopshellBooxRuntimeProbe.setRawDrawingActive(active)
     }
 
     private fun restartRawDrawing() {
@@ -100,11 +103,10 @@ class SlopshellBooxInkSurfaceView @JvmOverloads constructor(
         helper.setRawInputReaderEnable(true)
         helper.setLimitRect(limit, emptyList<Rect>())
         helper.openRawDrawing()
-        helper.setRawDrawingEnabled(true)
-        if (windowVisibility != VISIBLE) {
-            helper.setRawDrawingEnabled(false)
-        }
+        val visible = windowVisibility == VISIBLE
+        helper.setRawDrawingEnabled(visible)
         touchHelper = helper
+        SlopshellBooxRuntimeProbe.setRawDrawingActive(visible)
         SlopshellBooxEinkController.configureInkView(this)
     }
 
@@ -113,6 +115,7 @@ class SlopshellBooxInkSurfaceView @JvmOverloads constructor(
         runCatching { helper.setRawDrawingEnabled(false) }
         runCatching { helper.closeRawDrawing() }
         touchHelper = null
+        SlopshellBooxRuntimeProbe.setRawDrawingActive(false)
     }
 
     private fun emitStroke() {
@@ -120,6 +123,7 @@ class SlopshellBooxInkSurfaceView @JvmOverloads constructor(
         rawPoints.clear()
         val stroke = slopshellInkStrokeFromPoints(pointerType = "stylus", points = points) ?: return
         onCommit(listOf(stroke))
+        SlopshellBooxRuntimeProbe.recordInkStroke()
     }
 
     private fun TouchPointList.toInkPoints(): List<SlopshellInkPoint> {

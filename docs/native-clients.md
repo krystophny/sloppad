@@ -170,4 +170,4 @@ Use this matrix when reviewing native-client completion claims:
 
 Do not describe the native clients as a broader completed product unless the automated checks above pass and the manual checklist above has current hardware results attached.
 
-The current repo claim is limited to the automated and manual evidence above. Boox code paths are present, but Boox readiness requires the hardware evidence in the matrix.
+The current repo claim is limited to the automated and manual evidence above. Boox code paths are present, but Boox readiness has its own closure standard in [`boox-validation.md`](boox-validation.md). Generic Android validation does not prove Boox readiness; do not reuse Android emulator or contract evidence as Boox evidence.

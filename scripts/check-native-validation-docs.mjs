@@ -4,6 +4,7 @@ import path from 'node:path';
 const repoRoot = process.cwd();
 const packageJSON = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 const nativeDocs = fs.readFileSync(path.join(repoRoot, 'docs', 'native-clients.md'), 'utf8');
+const booxDocs = fs.readFileSync(path.join(repoRoot, 'docs', 'boox-validation.md'), 'utf8');
 const flowDocs = fs.readFileSync(path.join(repoRoot, 'tests', 'flows', 'README.md'), 'utf8');
 const workflow = fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'test-reports.yml'), 'utf8');
 
@@ -14,6 +15,7 @@ const requiredScripts = [
   'test:flows:android:contract',
   'test:flows:android:contract:jvm',
   'test:flows:native',
+  'test:flows:boox:hardware',
   'test:native-docs',
 ];
 
@@ -36,11 +38,35 @@ const nativeDocNeedles = [
   'Boox e-ink refresh',
   'Product-doc honesty',
   'faepmac1',
+  'boox-validation.md',
 ];
 
 for (const needle of nativeDocNeedles) {
   if (!nativeDocs.includes(needle)) {
     errors.push(`docs/native-clients.md must mention ${needle}`);
+  }
+}
+
+const booxDocNeedles = [
+  '## Boox SDK and Tooling Reality',
+  'There is no official Boox emulator',
+  'com.onyx.android.sdk:onyxsdk-device:1.1.11',
+  'com.onyx.android.sdk:onyxsdk-pen:1.2.1',
+  'https://repo.boox.com/repository/maven-public/',
+  '## Runtime Observability',
+  'SlopshellBooxRuntimeProbe',
+  '## Off-Device Automated Checks',
+  'gradle -p platforms/android app:testDebugUnitTest',
+  '## Hardware Validation Script',
+  './scripts/test-boox-hardware.sh',
+  '## Manual Hardware Checklist',
+  '## Closure Evidence',
+  '## Documentation Honesty',
+];
+
+for (const needle of booxDocNeedles) {
+  if (!booxDocs.includes(needle)) {
+    errors.push(`docs/boox-validation.md must mention ${needle}`);
   }
 }
 
