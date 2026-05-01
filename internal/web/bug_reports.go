@@ -163,7 +163,7 @@ func (a *App) handleBugReportCreate(w http.ResponseWriter, r *http.Request) {
 	if issueSkipReason := bugReportAutoFileSkipReason(bundle); issueSkipReason != "" {
 		bundle.GitHubIssueError = issueSkipReason
 	} else {
-		issue, itemID, issueErr := a.createGitHubIssueFromBugReport(workspace, bundlePath, bundle)
+		issue, itemID, issueErr := a.createGitHubIssueFromBugReport(workspace, bundle)
 		if issueErr != nil {
 			bundle.GitHubIssueError = strings.TrimSpace(issueErr.Error())
 		} else {
@@ -290,7 +290,7 @@ func (a *App) resolveBugReportWorkspace() (bugReportWorkspace, error) {
 	return bugReportWorkspace{}, errors.New("bug report requires an active workspace or local workspace")
 }
 
-func (a *App) createGitHubIssueFromBugReport(workspace bugReportWorkspace, bundlePath string, bundle bugReportBundle) (ghIssueListItem, int64, error) {
+func (a *App) createGitHubIssueFromBugReport(workspace bugReportWorkspace, bundle bugReportBundle) (ghIssueListItem, int64, error) {
 	workspaceID, err := a.ensureBugReportWorkspaceID(workspace)
 	if err != nil {
 		return ghIssueListItem{}, 0, err
@@ -309,7 +309,7 @@ func (a *App) createGitHubIssueFromBugReport(workspace bugReportWorkspace, bundl
 		githubCWD,
 		slopshellBugReportOwnerRepo,
 		bugReportIssueTitle(bundle),
-		bugReportIssueBody(bundle, toBugReportRelativePath(workspace.DirPath, bundlePath)),
+		bugReportIssueBody(bundle),
 		[]string{"bug", "p0"},
 		nil,
 	)
@@ -767,7 +767,7 @@ func truncateText(raw string, max int) string {
 	return cut + "..."
 }
 
-func bugReportIssueBody(bundle bugReportBundle, bundlePath string) string {
+func bugReportIssueBody(bundle bugReportBundle) string {
 	var b strings.Builder
 	summary := bugReportSummary(bundle)
 	if summary != "" {
