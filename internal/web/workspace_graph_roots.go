@@ -121,7 +121,7 @@ func resolveWorkspaceGraphEntityRoot(a *App, workspace store.Workspace, rootID s
 	case "artifact":
 		return resolveWorkspaceGraphArtifactID(a, workspace, id)
 	case "item":
-		return resolveWorkspaceGraphItemRoot(a, id)
+		return resolveWorkspaceGraphItemRoot(a, workspace, id)
 	case "actor":
 		return resolveWorkspaceGraphActorRoot(a, id)
 	case "label":
@@ -133,13 +133,23 @@ func resolveWorkspaceGraphEntityRoot(a *App, workspace store.Workspace, rootID s
 	}
 }
 
-func resolveWorkspaceGraphItemRoot(a *App, itemID int64) (workspaceGraphRoot, error) {
+func resolveWorkspaceGraphItemRoot(a *App, workspace store.Workspace, itemID int64) (workspaceGraphRoot, error) {
 	item, err := a.store.GetItem(itemID)
 	if err != nil {
 		return workspaceGraphRoot{}, err
 	}
+	if !workspaceGraphItemVisibleInWorkspace(workspace, item) {
+		return workspaceGraphRoot{}, errGraph("item is not in this workspace")
+	}
 	node := workspaceGraphItemNode(item)
 	return workspaceGraphRoot{Kind: "item", Source: node.ID, Node: node, Item: &item}, nil
+}
+
+func workspaceGraphItemVisibleInWorkspace(workspace store.Workspace, item store.Item) bool {
+	if item.WorkspaceID != nil {
+		return *item.WorkspaceID == workspace.ID && strings.EqualFold(item.Sphere, workspace.Sphere)
+	}
+	return strings.EqualFold(item.Sphere, workspace.Sphere)
 }
 
 func resolveWorkspaceGraphActorRoot(a *App, actorID int64) (workspaceGraphRoot, error) {

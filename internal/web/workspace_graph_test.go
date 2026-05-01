@@ -213,6 +213,39 @@ func TestWorkspaceLocalGraphEntityRootAddsConnectedMetadata(t *testing.T) {
 	assertGraphEdge(t, graph, "item:"+itoa(item.ID), "source:todoist:task-note", "source_binding")
 }
 
+func TestWorkspaceLocalGraphRejectsPrivateItemRootFromWorkWorkspace(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	workBrainRoot := filepath.Join(vaultRoot, "brain")
+	privateBrainRoot := filepath.Join(t.TempDir(), "private", "brain")
+
+	app := newAuthedTestApp(t)
+	workWorkspace, err := app.store.CreateWorkspace("Work brain", workBrainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(work): %v", err)
+	}
+	privateWorkspace, err := app.store.CreateWorkspace("Private brain", privateBrainRoot, store.SpherePrivate)
+	if err != nil {
+		t.Fatalf("CreateWorkspace(private): %v", err)
+	}
+	privateItem, err := app.store.CreateItem("Private reminder", store.ItemOptions{
+		WorkspaceID: &privateWorkspace.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem(private): %v", err)
+	}
+
+	graph := requestWorkspaceLocalGraph(t, app, workWorkspace.ID, "", map[string]string{
+		"root": "item:" + itoa(privateItem.ID),
+	})
+	if graph.OK {
+		t.Fatalf("graph OK = true, want rejected graph")
+	}
+	if graph.Error != "item is not in this workspace" {
+		t.Fatalf("graph error = %q, want item scope error", graph.Error)
+	}
+	assertGraphMissingNode(t, graph, "item:"+itoa(privateItem.ID))
+}
+
 func requestWorkspaceLocalGraph(t *testing.T, app *App, workspaceID int64, sourcePath string, query map[string]string) workspaceLocalGraph {
 	t.Helper()
 	values := url.Values{}
