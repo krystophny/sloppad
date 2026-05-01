@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"sort"
 )
 
 const itemChildrenTableSchema = `CREATE TABLE IF NOT EXISTS item_children (
@@ -153,6 +154,143 @@ func (s *Store) ListItemChildLinks(parentItemID int64) ([]ItemChildLink, error) 
 	return out, rows.Err()
 }
 
+// ListProjectItemReviewsFiltered returns the active GTD project-item review
+// surface: every Item(kind=project) that is not done, paired with its current
+// health and per-state child counts. The list backs the weekly outcome review
+// and surfaces stalled outcomes without inventing tasks.
+//
+// The filter respects sphere/workspace/source/source-container/label/actor
+// scoping just like the other GTD list endpoints. Source containers (Todoist
+// projects, GitHub Projects) match through the existing `source_container`
+// filter — they are never promoted into the review as project items
+// themselves. Workspace filtering scopes the project items to a single
+// workspace; project items are never converted into workspaces by this query.
+//
+// Stalled project items sort first; healthy items follow in updated_at desc
+// order, so weekly review walks the riskiest outcomes before the rest.
+func (s *Store) ListProjectItemReviewsFiltered(filter ItemListFilter) ([]ProjectItemReview, error) {
+	normalizedFilter, err := s.prepareItemListFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+	parts := []string{"i.kind = ?", "i.state <> ?"}
+	args := []any{ItemKindProject, ItemStateDone}
+	parts, args = appendItemFilterClauses(parts, args, normalizedFilter, "i.")
+	query := itemSummarySelect + ` WHERE ` + stringsJoin(parts, ` AND `) + ` ORDER BY i.updated_at DESC, i.id ASC`
+	items, err := s.listItemSummaries(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return []ProjectItemReview{}, nil
+	}
+	countsByParent, err := s.collectProjectChildCounts(items)
+	if err != nil {
+		return nil, err
+	}
+	reviews := make([]ProjectItemReview, 0, len(items))
+	for _, item := range items {
+		counts := countsByParent[item.ID]
+		reviews = append(reviews, ProjectItemReview{
+			Item:     item,
+			Children: counts,
+			Health:   projectHealthFromCounts(counts),
+		})
+	}
+	sortProjectItemReviewsForWeeklyReview(reviews)
+	return reviews, nil
+}
+
+// collectProjectChildCounts loads child-state tallies for every project item
+// in one round-trip, so the review surface stays O(1) queries regardless of
+// how many outcomes are open.
+func (s *Store) collectProjectChildCounts(parents []ItemSummary) (map[int64]ProjectChildCounts, error) {
+	out := make(map[int64]ProjectChildCounts, len(parents))
+	if len(parents) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, 0, len(parents))
+	args := make([]any, 0, len(parents))
+	for _, parent := range parents {
+		placeholders = append(placeholders, "?")
+		args = append(args, parent.ID)
+		out[parent.ID] = ProjectChildCounts{}
+	}
+	rows, err := s.db.Query(
+		`SELECT links.parent_item_id, child.state, COUNT(*) AS state_count
+		 FROM item_children links
+		 JOIN items child ON child.id = links.child_item_id
+		 WHERE links.parent_item_id IN (`+stringsJoin(placeholders, ",")+`)
+		 GROUP BY links.parent_item_id, child.state`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			parentID int64
+			state    string
+			count    int
+		)
+		if err := rows.Scan(&parentID, &state, &count); err != nil {
+			return nil, err
+		}
+		entry := out[parentID]
+		entry = applyChildStateCount(entry, state, count)
+		out[parentID] = entry
+	}
+	return out, rows.Err()
+}
+
+func applyChildStateCount(counts ProjectChildCounts, state string, count int) ProjectChildCounts {
+	if count <= 0 {
+		return counts
+	}
+	switch normalizeItemState(state) {
+	case ItemStateInbox:
+		counts.Inbox += count
+	case ItemStateNext:
+		counts.Next += count
+	case ItemStateWaiting:
+		counts.Waiting += count
+	case ItemStateDeferred:
+		counts.Deferred += count
+	case ItemStateSomeday:
+		counts.Someday += count
+	case ItemStateReview:
+		counts.Review += count
+	case ItemStateDone:
+		counts.Done += count
+	}
+	counts.Total += count
+	return counts
+}
+
+func projectHealthFromCounts(counts ProjectChildCounts) ProjectItemHealth {
+	health := ProjectItemHealth{
+		HasNextAction: counts.Next > 0,
+		HasWaiting:    counts.Waiting > 0,
+		HasDeferred:   counts.Deferred > 0,
+		HasSomeday:    counts.Someday > 0,
+	}
+	health.Stalled = !health.HasNextAction && !health.HasWaiting && !health.HasDeferred && !health.HasSomeday
+	return health
+}
+
+func sortProjectItemReviewsForWeeklyReview(reviews []ProjectItemReview) {
+	sort.SliceStable(reviews, func(i, j int) bool {
+		if reviews[i].Health.Stalled != reviews[j].Health.Stalled {
+			return reviews[i].Health.Stalled
+		}
+		if reviews[i].Item.UpdatedAt != reviews[j].Item.UpdatedAt {
+			return reviews[i].Item.UpdatedAt > reviews[j].Item.UpdatedAt
+		}
+		return reviews[i].Item.ID < reviews[j].Item.ID
+	})
+}
+
 func (s *Store) GetProjectItemHealth(itemID int64) (ProjectItemHealth, error) {
 	item, err := s.GetItem(itemID)
 	if err != nil {
@@ -161,32 +299,11 @@ func (s *Store) GetProjectItemHealth(itemID int64) (ProjectItemHealth, error) {
 	if item.Kind != ItemKindProject {
 		return ProjectItemHealth{}, errors.New("item is not a project")
 	}
-	var health ProjectItemHealth
-	var nextCount, waitingCount, deferredCount, somedayCount int
-	err = s.db.QueryRow(
-		`SELECT
-		   COALESCE(SUM(CASE WHEN child.state = ? THEN 1 ELSE 0 END), 0) AS next_count,
-		   COALESCE(SUM(CASE WHEN child.state = ? THEN 1 ELSE 0 END), 0) AS waiting_count,
-		   COALESCE(SUM(CASE WHEN child.state = ? THEN 1 ELSE 0 END), 0) AS deferred_count,
-		   COALESCE(SUM(CASE WHEN child.state = ? THEN 1 ELSE 0 END), 0) AS someday_count
-		 FROM item_children links
-		 JOIN items child ON child.id = links.child_item_id
-		 WHERE links.parent_item_id = ?`,
-		ItemStateNext,
-		ItemStateWaiting,
-		ItemStateDeferred,
-		ItemStateSomeday,
-		itemID,
-	).Scan(&nextCount, &waitingCount, &deferredCount, &somedayCount)
+	counts, err := s.collectProjectChildCounts([]ItemSummary{{Item: item}})
 	if err != nil {
 		return ProjectItemHealth{}, err
 	}
-	health.HasNextAction = nextCount > 0
-	health.HasWaiting = waitingCount > 0
-	health.HasDeferred = deferredCount > 0
-	health.HasSomeday = somedayCount > 0
-	health.Stalled = !health.HasNextAction && !health.HasWaiting && !health.HasDeferred && !health.HasSomeday
-	return health, nil
+	return projectHealthFromCounts(counts[itemID]), nil
 }
 
 func (s *Store) touchItem(id int64) error {

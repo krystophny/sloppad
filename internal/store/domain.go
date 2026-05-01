@@ -298,6 +298,31 @@ type ProjectItemHealth struct {
 	Stalled       bool `json:"stalled"`
 }
 
+// ProjectChildCounts tallies child items linked to a project-item parent by
+// state. Done/dropped children count toward Total but never contribute to
+// health: a project item is considered stalled when no child sits in next,
+// waiting, deferred, or someday.
+type ProjectChildCounts struct {
+	Inbox    int `json:"inbox"`
+	Next     int `json:"next"`
+	Waiting  int `json:"waiting"`
+	Deferred int `json:"deferred"`
+	Someday  int `json:"someday"`
+	Review   int `json:"review"`
+	Done     int `json:"done"`
+	Total    int `json:"total"`
+}
+
+// ProjectItemReview is one row in the composite outcome review: the project
+// item itself plus its current health summary and per-state child counts. The
+// review surface exposes Item(kind=project) records only — Workspaces and
+// external source containers are intentionally absent from this aggregate.
+type ProjectItemReview struct {
+	Item     ItemSummary        `json:"item"`
+	Health   ProjectItemHealth  `json:"health"`
+	Children ProjectChildCounts `json:"children"`
+}
+
 type TimeEntry struct {
 	ID          int64   `json:"id"`
 	WorkspaceID *int64  `json:"workspace_id,omitempty"`
