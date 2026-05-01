@@ -33,7 +33,11 @@ Use [`native-clients-plan.md`](native-clients-plan.md) for the architecture deci
    ```bash
    npm run test:flows:ios:contract
    npm run test:flows:android:contract
+   npm run test:flows:android:contract:jvm
    ```
+
+   `npm run test:flows:android:contract:jvm` is the JVM-only subset that hosted
+   CI uses; it does not require the Android SDK.
 
 3. Full native validation:
 
@@ -95,6 +99,26 @@ Use these checks before claiming the native slice is working:
 3. Server/web dialogue companion wiring:
 
    `npm run test:flows:native` already includes the shared Playwright flow suite, so the web/native circle contract stays in one validation path.
+
+4. Hosted CI coverage:
+
+   `.github/workflows/test-reports.yml` runs three required jobs in parallel on
+   every pull request and push to `main`:
+
+   - `reports` (ubuntu-latest) runs the shared web flow suite via
+     `npm run test:flows`.
+   - `android-flow-contract` (ubuntu-latest) runs
+     `npm run test:flows:android:contract:jvm`, executing the shared flows
+     against the JVM/Kotlin `FlowRunner` so the Android adapter must stay green
+     before merge.
+   - `ios-flow-contract` (macos-latest) runs `npm run test:flows:ios:contract`,
+     executing the shared flows against the Swift `FlowRunner` so the iOS
+     adapter must stay green before merge.
+
+   The simulator and emulator UI harnesses still run on the documented macOS
+   host (`faepmac1`) and on a local Android emulator through
+   `./scripts/test-native-flows.sh`; hosted CI cannot run those without
+   dedicated mobile infrastructure.
 
 The structural tests in `platforms/ios/project_files_test.go` and `platforms/android/project_files_test.go` are regression guards for packaging/layout. They are not completion evidence on their own.
 

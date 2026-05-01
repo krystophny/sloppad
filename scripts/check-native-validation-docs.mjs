@@ -12,6 +12,7 @@ const requiredScripts = [
   'test:flows:ios:contract',
   'test:flows:android',
   'test:flows:android:contract',
+  'test:flows:android:contract:jvm',
   'test:flows:native',
   'test:native-docs',
 ];
@@ -29,6 +30,7 @@ const nativeDocNeedles = [
   'npm run test:flows:native',
   'npm run test:flows:ios:contract',
   'npm run test:flows:android:contract',
+  'npm run test:flows:android:contract:jvm',
   'faepmac1',
 ];
 
@@ -41,11 +43,14 @@ for (const needle of nativeDocNeedles) {
 const flowDocNeedles = [
   'npm run test:flows:ios:contract',
   'npm run test:flows:android:contract',
+  'npm run test:flows:android:contract:jvm',
   'npm run test:flows:ios',
   'npm run test:flows:android',
   'npm run test:flows:native',
   'platforms/ios/SlopshellIOSUITests/Resources/flow-fixtures.json',
   'platforms/android/app/src/androidTest/assets/flow-fixtures.json',
+  'android-flow-contract',
+  'ios-flow-contract',
 ];
 
 for (const needle of flowDocNeedles) {
@@ -56,6 +61,20 @@ for (const needle of flowDocNeedles) {
 
 if (!workflow.includes('npm run test:native-docs')) {
   errors.push('workflow must run npm run test:native-docs');
+}
+
+const workflowNeedles = [
+  'android-flow-contract:',
+  'ios-flow-contract:',
+  'npm run test:flows:android:contract:jvm',
+  'npm run test:flows:ios:contract',
+  'macos-latest',
+];
+
+for (const needle of workflowNeedles) {
+  if (!workflow.includes(needle)) {
+    errors.push(`workflow must mention ${needle}`);
+  }
 }
 
 if (errors.length > 0) {

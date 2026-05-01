@@ -73,3 +73,46 @@ jobs:
           name: slopshell-test-reports
           path: .slopshell/artifacts/test-reports
           if-no-files-found: error
+
+  android-flow-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Android shared flow contract
+        run: npm run test:flows:android:contract:jvm
+
+  ios-flow-contract:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: Run iOS shared flow contract
+        run: npm run test:flows:ios:contract

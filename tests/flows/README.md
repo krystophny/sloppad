@@ -98,7 +98,8 @@ Native flow contract runners consume generated fixtures derived from the same YA
 
 - `node ./scripts/sync-native-flow-fixtures.mjs` refreshes the checked-in native fixtures.
 - `npm run test:flows:ios:contract` runs the Swift flow contract suite in `platforms/ios`.
-- `npm run test:flows:android:contract` runs the Android model/contract suites in `platforms/android`.
+- `npm run test:flows:android:contract` runs the Android model/contract suites in `platforms/android` (requires the Android SDK).
+- `npm run test:flows:android:contract:jvm` runs only the JVM-only flow contract suite under `platforms/android/flow-contracts` and is the path that hosted CI uses (no Android SDK needed).
 - `npm run test:flows:ios` runs the iOS simulator UI harness on `faepmac1`.
 - `npm run test:flows:android` runs the Android emulator UI harness locally.
 - `npm run test:flows:native` runs the full validation path: fixture sync, shared web flows, both native contract suites, Android UI, and iOS UI.
@@ -106,6 +107,23 @@ Native flow contract runners consume generated fixtures derived from the same YA
 The iOS contract runner is a Swift package. Run it on a machine with Swift
 available; for this repo the documented macOS host is `faepmac1`. The full iOS
 UI run is performed there through `./scripts/test-native-flows.sh`.
+
+CI coverage in `.github/workflows/test-reports.yml` runs three required jobs in
+parallel on every pull request and on push to `main`:
+
+- the `reports` job (ubuntu-latest) executes `npm run test:flows` for the web
+  Playwright adapter.
+- the `android-flow-contract` job (ubuntu-latest) executes
+  `npm run test:flows:android:contract:jvm`, proving that the shared flows
+  drive the Kotlin/JVM `FlowRunner` against the generated fixture for Android.
+- the `ios-flow-contract` job (macos-latest) executes
+  `npm run test:flows:ios:contract`, proving that the shared flows drive the
+  Swift `FlowRunner` against the generated fixture for iOS.
+
+Each job prints `<platform> PASS <flow_name>` per shared flow so the CI log
+makes per-platform parity obvious. UI-harness runs against simulators and
+emulators stay in `./scripts/test-native-flows.sh` because hosted CI cannot run
+those without dedicated mobile infrastructure.
 
 The generated fixture files live in the native test bundles and UI harness assets:
 

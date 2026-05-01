@@ -40,6 +40,39 @@ if (uploadStep?.if !== expectedUploadGate) {
   errors.push(`expected upload step gate ${expectedUploadGate}, got ${JSON.stringify(uploadStep?.if)}`);
 }
 
+function requireFlowJob({ jobName, runsOn, stepName, scriptCommand }) {
+  const job = workflow?.jobs?.[jobName];
+  if (!job) {
+    errors.push(`expected ${jobName} job`);
+    return;
+  }
+  if (job['runs-on'] !== runsOn) {
+    errors.push(`expected ${jobName} to run on ${runsOn}, got ${JSON.stringify(job['runs-on'])}`);
+  }
+  const jobSteps = Array.isArray(job.steps) ? job.steps : [];
+  if (!jobSteps.some((step) => step?.name === stepName)) {
+    errors.push(`${jobName} must include the "${stepName}" step`);
+  }
+  const runCommands = jobSteps.map((step) => step?.run).filter(Boolean);
+  if (!runCommands.some((cmd) => cmd.includes(scriptCommand))) {
+    errors.push(`${jobName} must invoke ${scriptCommand}`);
+  }
+}
+
+requireFlowJob({
+  jobName: 'android-flow-contract',
+  runsOn: 'ubuntu-latest',
+  stepName: 'Run Android shared flow contract',
+  scriptCommand: 'npm run test:flows:android:contract:jvm',
+});
+
+requireFlowJob({
+  jobName: 'ios-flow-contract',
+  runsOn: 'macos-latest',
+  stepName: 'Run iOS shared flow contract',
+  scriptCommand: 'npm run test:flows:ios:contract',
+});
+
 if (errors.length > 0) {
   for (const err of errors) {
     console.error(`[workflow-check] ${err}`);
@@ -47,4 +80,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log('[workflow-check] Test Reports gating is limited to push events on main.');
+console.log('[workflow-check] Test Reports gating is limited to push events on main, with required iOS and Android flow contract jobs.');
