@@ -1,6 +1,9 @@
 import { apiURL } from './paths.js';
+import { openResolvedMarkdownLink } from './canvas-markdown-links.js';
 
 const PANEL_ID = 'canvas-markdown-link-panel';
+
+type RenderCanvas = (event: Record<string, unknown>) => void;
 
 function appState(): Record<string, unknown> {
   const app = (window as unknown as { _slopshellApp?: { getState?: () => Record<string, unknown> } })._slopshellApp;
@@ -46,6 +49,7 @@ interface BacklinkEntry {
   link_type: string;
   link_target: string;
   excerpt?: string;
+  file_url?: string;
 }
 
 interface PanelPayload {
@@ -110,32 +114,113 @@ function emptyNote(text: string): HTMLElement {
   return note;
 }
 
-function renderOutgoingItem(ref: OutgoingRef): HTMLElement {
+function setBlockedReason(item: HTMLElement, reason: string) {
+  item.classList.add('is-blocked');
+  const detail = item.querySelector('.canvas-link-panel-detail');
+  const message = String(reason || '').trim() || 'link blocked';
+  if (detail instanceof HTMLElement) {
+    detail.textContent = message;
+  }
+}
+
+function makeLinkAnchor(label: string): HTMLAnchorElement {
+  const link = document.createElement('a');
+  link.href = '#';
+  link.className = 'canvas-link-panel-target canvas-link-panel-link';
+  link.textContent = label;
+  return link;
+}
+
+function bindResolverClick(
+  anchor: HTMLAnchorElement,
+  item: HTMLElement,
+  load: () => Promise<void>,
+) {
+  anchor.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    if (anchor.dataset.loading === '1') return;
+    anchor.dataset.loading = '1';
+    item.classList.remove('is-blocked');
+    void load()
+      .catch((err) => {
+        setBlockedReason(item, String((err as Error)?.message || err || 'link blocked'));
+      })
+      .finally(() => {
+        delete anchor.dataset.loading;
+      });
+  });
+}
+
+function renderOutgoingItem(
+  ref: OutgoingRef,
+  panelSourcePath: string,
+  renderCanvas: RenderCanvas,
+): HTMLElement {
   const item = document.createElement('li');
   item.className = 'canvas-link-panel-item';
-  if (!ref.ok) item.classList.add('is-blocked');
-  const label = document.createElement('span');
-  label.className = 'canvas-link-panel-target';
-  label.textContent = ref.type === 'wikilink' ? `[[${ref.target}]]` : ref.target;
-  item.appendChild(label);
+  const label = ref.type === 'wikilink' ? `[[${ref.target}]]` : ref.target;
   const detail = document.createElement('span');
   detail.className = 'canvas-link-panel-detail';
   if (ref.ok) {
+    const anchor = makeLinkAnchor(label);
+    item.appendChild(anchor);
     detail.textContent = ref.vault_relative_path || ref.resolved_path || '';
-  } else {
-    detail.textContent = ref.reason || 'broken link';
+    item.appendChild(detail);
+    bindResolverClick(anchor, item, () =>
+      openResolvedMarkdownLink(
+        {
+          ok: true,
+          kind: ref.kind,
+          file_url: ref.file_url,
+          vault_relative_path: ref.vault_relative_path,
+          resolved_path: ref.resolved_path,
+          source_path: panelSourcePath,
+        },
+        renderCanvas,
+      ),
+    );
+    return item;
   }
+  const span = document.createElement('span');
+  span.className = 'canvas-link-panel-target';
+  span.textContent = label;
+  item.appendChild(span);
+  detail.textContent = ref.reason || 'broken link';
   item.appendChild(detail);
+  item.classList.add('is-blocked');
   return item;
 }
 
-function renderBacklinkItem(entry: BacklinkEntry): HTMLElement {
+function renderBacklinkItem(
+  entry: BacklinkEntry,
+  panelSourcePath: string,
+  renderCanvas: RenderCanvas,
+): HTMLElement {
   const item = document.createElement('li');
   item.className = 'canvas-link-panel-item';
-  const label = document.createElement('span');
-  label.className = 'canvas-link-panel-target';
-  label.textContent = entry.source_path;
-  item.appendChild(label);
+  const fileURL = String(entry.file_url || '').trim();
+  if (!fileURL) {
+    const span = document.createElement('span');
+    span.className = 'canvas-link-panel-target';
+    span.textContent = entry.source_path;
+    item.appendChild(span);
+  } else {
+    const anchor = makeLinkAnchor(entry.source_path);
+    item.appendChild(anchor);
+    bindResolverClick(anchor, item, () =>
+      openResolvedMarkdownLink(
+        {
+          ok: true,
+          kind: 'text',
+          file_url: fileURL,
+          vault_relative_path: entry.source_path,
+          resolved_path: entry.source_path,
+          source_path: panelSourcePath,
+        },
+        renderCanvas,
+      ),
+    );
+  }
   if (entry.excerpt) {
     const excerpt = document.createElement('span');
     excerpt.className = 'canvas-link-panel-excerpt';
@@ -151,7 +236,7 @@ function renderBacklinkItem(entry: BacklinkEntry): HTMLElement {
   return item;
 }
 
-function renderPanelContent(panel: HTMLElement, payload: PanelPayload) {
+function renderPanelContent(panel: HTMLElement, payload: PanelPayload, renderCanvas: RenderCanvas) {
   panel.replaceChildren();
   panel.hidden = false;
 
@@ -167,6 +252,7 @@ function renderPanelContent(panel: HTMLElement, payload: PanelPayload) {
     return;
   }
 
+  const sourcePath = String(payload.source_path || '').trim();
   const outgoing = Array.isArray(payload.outgoing) ? payload.outgoing : [];
   const broken = outgoing.filter((ref) => !ref.ok);
   const working = outgoing.filter((ref) => ref.ok);
@@ -178,7 +264,7 @@ function renderPanelContent(panel: HTMLElement, payload: PanelPayload) {
   } else {
     const list = document.createElement('ul');
     list.className = 'canvas-link-panel-list';
-    working.forEach((ref) => list.appendChild(renderOutgoingItem(ref)));
+    working.forEach((ref) => list.appendChild(renderOutgoingItem(ref, sourcePath, renderCanvas)));
     outgoingSection.appendChild(list);
   }
 
@@ -188,7 +274,7 @@ function renderPanelContent(panel: HTMLElement, payload: PanelPayload) {
   } else {
     const list = document.createElement('ul');
     list.className = 'canvas-link-panel-list';
-    broken.forEach((ref) => list.appendChild(renderOutgoingItem(ref)));
+    broken.forEach((ref) => list.appendChild(renderOutgoingItem(ref, sourcePath, renderCanvas)));
     brokenSection.appendChild(list);
   }
 
@@ -198,7 +284,7 @@ function renderPanelContent(panel: HTMLElement, payload: PanelPayload) {
   } else {
     const list = document.createElement('ul');
     list.className = 'canvas-link-panel-list';
-    backlinks.forEach((entry) => list.appendChild(renderBacklinkItem(entry)));
+    backlinks.forEach((entry) => list.appendChild(renderBacklinkItem(entry, sourcePath, renderCanvas)));
     backlinksSection.appendChild(list);
   }
   if (payload.scan_limit_reached) {
@@ -210,7 +296,10 @@ export function clearMarkdownLinkPanel() {
   hidePanel();
 }
 
-export async function renderMarkdownLinkPanelForCanvasEvent(event: { kind?: string; path?: string } | null | undefined) {
+export async function renderMarkdownLinkPanelForCanvasEvent(
+  event: { kind?: string; path?: string } | null | undefined,
+  renderCanvas: RenderCanvas,
+) {
   if (!event || event.kind !== 'text_artifact') {
     hidePanel();
     return;
@@ -224,10 +313,10 @@ export async function renderMarkdownLinkPanelForCanvasEvent(event: { kind?: stri
     hidePanel();
     return;
   }
-  await renderMarkdownLinkPanel(activeWorkspaceID(), path);
+  await renderMarkdownLinkPanel(activeWorkspaceID(), path, renderCanvas);
 }
 
-export async function renderMarkdownLinkPanel(workspaceID: string, sourcePath: string) {
+export async function renderMarkdownLinkPanel(workspaceID: string, sourcePath: string, renderCanvas: RenderCanvas) {
   const cleanSource = String(sourcePath || '').trim();
   if (!cleanSource) {
     hidePanel();
@@ -246,18 +335,18 @@ export async function renderMarkdownLinkPanel(workspaceID: string, sourcePath: s
     if (panel.dataset.sourcePath !== cleanSource) return;
     if (!resp.ok) {
       const detail = (await resp.text()).trim() || `HTTP ${resp.status}`;
-      renderPanelContent(panel, { ok: false, source_path: cleanSource, error: detail });
+      renderPanelContent(panel, { ok: false, source_path: cleanSource, error: detail }, renderCanvas);
       return;
     }
     const payload = (await resp.json()) as PanelPayload;
     if (panel.dataset.sourcePath !== cleanSource) return;
-    renderPanelContent(panel, payload);
+    renderPanelContent(panel, payload, renderCanvas);
   } catch (err) {
     if (panel.dataset.sourcePath !== cleanSource) return;
     renderPanelContent(panel, {
       ok: false,
       source_path: cleanSource,
       error: String((err as Error)?.message || err || 'links unavailable'),
-    });
+    }, renderCanvas);
   }
 }

@@ -48,6 +48,16 @@
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.95em;
 }
+.canvas-link-panel-link {
+  color: var(--accent, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.canvas-link-panel-link:hover,
+.canvas-link-panel-link:focus {
+  text-decoration: none;
+  outline: none;
+}
 .canvas-link-panel-detail {
   color: var(--fg-muted, #64748b);
   font-size: 0.85em;

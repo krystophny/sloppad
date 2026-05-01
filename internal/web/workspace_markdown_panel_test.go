@@ -137,9 +137,16 @@ func TestWorkspaceMarkdownLinkPanelBacklinksAndPersonalExclusion(t *testing.T) {
 	if alice.Excerpt == "" || !strings.Contains(alice.Excerpt, "Alice mentions") {
 		t.Fatalf("alice excerpt = %q", alice.Excerpt)
 	}
+	wantAliceURL := "/api/workspaces/" + itoa(workspace.ID) + "/markdown-link/file?path=brain%2Fpeople%2Falice.md"
+	if alice.FileURL != wantAliceURL {
+		t.Fatalf("alice file_url = %q, want %q", alice.FileURL, wantAliceURL)
+	}
 	bob, ok := bySource["brain/people/bob.md"]
 	if !ok || bob.LinkType != "wikilink" || bob.LinkTarget != "active" {
 		t.Fatalf("bob backlink = %+v", bob)
+	}
+	if bob.FileURL == "" || !strings.Contains(bob.FileURL, "brain%2Fpeople%2Fbob.md") {
+		t.Fatalf("bob file_url = %q", bob.FileURL)
 	}
 	for _, link := range panel.Backlinks {
 		if strings.Contains(link.SourcePath, "personal/") {
@@ -148,6 +155,46 @@ func TestWorkspaceMarkdownLinkPanelBacklinksAndPersonalExclusion(t *testing.T) {
 		if strings.Contains(link.SourcePath, vaultRoot) || filepath.IsAbs(link.SourcePath) {
 			t.Fatalf("backlink leaked absolute path: %+v", link)
 		}
+	}
+}
+
+func TestWorkspaceMarkdownLinkPanelBacklinkFileURLServesNote(t *testing.T) {
+	vaultRoot, _ := configureWorkPersonalGuardrail(t)
+	brainRoot := filepath.Join(vaultRoot, "brain")
+	if err := os.MkdirAll(filepath.Join(brainRoot, "topics"), 0o755); err != nil {
+		t.Fatalf("mkdir topics: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(brainRoot, "people"), 0o755); err != nil {
+		t.Fatalf("mkdir people: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(brainRoot, "topics", "active.md"), []byte("# Active"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	aliceBody := "Alice mentions [the topic](../topics/active.md)."
+	if err := os.WriteFile(filepath.Join(brainRoot, "people", "alice.md"), []byte(aliceBody), 0o644); err != nil {
+		t.Fatalf("write alice: %v", err)
+	}
+
+	app := newAuthedTestApp(t)
+	workspace, err := app.store.CreateWorkspace("Work brain", brainRoot, store.SphereWork)
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	panel := requestMarkdownLinkPanel(t, app, workspace.ID, "topics/active.md")
+	if !panel.OK || len(panel.Backlinks) != 1 {
+		t.Fatalf("panel = %+v", panel)
+	}
+	fileURL := panel.Backlinks[0].FileURL
+	if fileURL == "" {
+		t.Fatalf("backlink missing file_url: %+v", panel.Backlinks[0])
+	}
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodGet, fileURL, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("file_url GET status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Body.String(); got != aliceBody {
+		t.Fatalf("file_url body = %q, want %q", got, aliceBody)
 	}
 }
 

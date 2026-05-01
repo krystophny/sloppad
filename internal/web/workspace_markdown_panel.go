@@ -35,6 +35,7 @@ type workspaceMarkdownBacklink struct {
 	LinkType   string `json:"link_type"`
 	LinkTarget string `json:"link_target"`
 	Excerpt    string `json:"excerpt,omitempty"`
+	FileURL    string `json:"file_url,omitempty"`
 }
 
 type workspaceMarkdownLinkPanel struct {
@@ -197,6 +198,7 @@ func collectMarkdownBacklinks(workspace store.Workspace, sourceRel string) ([]wo
 				LinkType:   ref.Type,
 				LinkTarget: ref.Target,
 				Excerpt:    extractMarkdownLinkExcerpt(text, ref.Target),
+				FileURL:    workspaceMarkdownLinkFileURL(workspace, fileVaultRel),
 			})
 			break
 		}

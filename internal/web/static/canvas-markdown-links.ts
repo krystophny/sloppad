@@ -99,7 +99,7 @@ function showMarkdownLinkBlocked(link, reasonRaw) {
   note.textContent = ` ${reason}`;
 }
 
-async function openResolvedMarkdownLink(resolution, renderCanvas) {
+export async function openResolvedMarkdownLink(resolution, renderCanvas) {
   const link = resolution?.link || resolution || {};
   const kind = String(link.kind || 'text').trim();
   const path = String(link.vault_relative_path || link.resolved_path || '').trim();

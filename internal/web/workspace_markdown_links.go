@@ -24,6 +24,14 @@ type workspaceMarkdownLinkResolution struct {
 	Kind              string `json:"kind,omitempty"`
 }
 
+func workspaceMarkdownLinkFileURL(workspace store.Workspace, vaultRelative string) string {
+	clean := strings.TrimSpace(vaultRelative)
+	if clean == "" {
+		return ""
+	}
+	return "/api/workspaces/" + workspaceIDStr(workspace.ID) + "/markdown-link/file?path=" + url.QueryEscape(clean)
+}
+
 func brainWorkspaceRoots(workspace store.Workspace) (string, string, error) {
 	root := absoluteCleanPath(workspace.DirPath)
 	if root == "" {
@@ -234,7 +242,7 @@ func resolveWorkspaceMarkdownLink(workspace store.Workspace, sourceRaw, targetRa
 			result.Kind = "folder"
 		} else {
 			result.Kind = markdownLinkKind(candidate)
-			result.FileURL = "/api/workspaces/" + workspaceIDStr(workspace.ID) + "/markdown-link/file?path=" + url.QueryEscape(vaultRel)
+			result.FileURL = workspaceMarkdownLinkFileURL(workspace, vaultRel)
 		}
 		result.OK = true
 		result.ResolvedPath = vaultRel

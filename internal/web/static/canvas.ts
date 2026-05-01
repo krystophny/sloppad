@@ -823,7 +823,7 @@ export function renderCanvas(event) {
     }
     hydrateVisualTextArtifactImages(e.text, String(event?.path || '').trim(), currentCanvasSessionID());
     hydrateMarkdownArtifactLinks(e.text, event, renderCanvas);
-    void renderMarkdownLinkPanelForCanvasEvent(event);
+    void renderMarkdownLinkPanelForCanvasEvent(event, renderCanvas);
     const textKey = canvasEventPageKey(event);
     const keepIndex = canvasPageState.kind === 'text' && canvasPageState.key === textKey
       ? canvasPageState.pageIndex
