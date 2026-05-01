@@ -1,8 +1,6 @@
 package web
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,16 +43,6 @@ type brainCanvasBinding struct {
 	URL      string `json:"url,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Ref      string `json:"ref,omitempty"`
-}
-
-// brainCanvasEdge is reserved for future typed-relation promotion (#738) and
-// kept here so the on-disk format already conforms to JSON Canvas.
-type brainCanvasEdge struct {
-	ID       string `json:"id"`
-	From     string `json:"fromNode"`
-	To       string `json:"toNode"`
-	Label    string `json:"label,omitempty"`
-	Relation string `json:"relation,omitempty"`
 }
 
 type brainCanvasDocument struct {
@@ -181,11 +169,7 @@ func writeBrainCanvasDocument(path string, doc brainCanvasDocument) error {
 }
 
 func newBrainCanvasNodeID() string {
-	buf := make([]byte, brainCanvasNodeIDByteSize)
-	if _, err := rand.Read(buf); err != nil {
-		return ""
-	}
-	return "card-" + hex.EncodeToString(buf)
+	return newBrainCanvasID("card", brainCanvasNodeIDByteSize)
 }
 
 func clampBrainCanvasDimension(value, fallback float64) float64 {

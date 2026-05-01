@@ -350,6 +350,7 @@ func (a *App) deleteBrainCanvasCard(workspace store.Workspace, name, nodeID stri
 		return errors.New("card not found")
 	}
 	doc.Nodes = append(doc.Nodes[:idx], doc.Nodes[idx+1:]...)
+	doc.Edges = pruneBrainCanvasEdgesForNode(doc.Edges, nodeID)
 	return writeBrainCanvasDocument(canvasPath, doc)
 }
 
@@ -458,11 +459,7 @@ func (a *App) handleBrainCanvasCardPatch(w http.ResponseWriter, r *http.Request)
 	}
 	view, err := a.patchBrainCanvasCard(workspace, brainCanvasNameFromQuery(r), chi.URLParam(r, "node_id"), req)
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, err.Error(), brainCanvasMutationStatus(err))
 		return
 	}
 	writeJSON(w, view)
@@ -477,11 +474,7 @@ func (a *App) handleBrainCanvasCardDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := a.deleteBrainCanvasCard(workspace, brainCanvasNameFromQuery(r), chi.URLParam(r, "node_id")); err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, err.Error(), brainCanvasMutationStatus(err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -497,11 +490,7 @@ func (a *App) handleBrainCanvasCardOpen(w http.ResponseWriter, r *http.Request) 
 	}
 	open, err := a.openBrainCanvasCard(workspace, brainCanvasNameFromQuery(r), chi.URLParam(r, "node_id"))
 	if err != nil {
-		status := http.StatusBadRequest
-		if strings.Contains(err.Error(), "not found") {
-			status = http.StatusNotFound
-		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, err.Error(), brainCanvasMutationStatus(err))
 		return
 	}
 	writeJSON(w, open)

@@ -63,6 +63,9 @@ Runtime and chat session management:
 - `PATCH /api/workspaces/{workspace_id}/brain-canvas/cards/{node_id}`
 - `DELETE /api/workspaces/{workspace_id}/brain-canvas/cards/{node_id}`
 - `GET /api/workspaces/{workspace_id}/brain-canvas/cards/{node_id}/open`
+- `POST /api/workspaces/{workspace_id}/brain-canvas/edges`
+- `POST /api/workspaces/{workspace_id}/brain-canvas/edges/{edge_id}/promote`
+- `DELETE /api/workspaces/{workspace_id}/brain-canvas/edges/{edge_id}`
 - `GET /api/workspaces/{workspace_id}/companion/config`
 - `PUT /api/workspaces/{workspace_id}/companion/config`
 - `GET /api/workspaces/{workspace_id}/companion/state`
