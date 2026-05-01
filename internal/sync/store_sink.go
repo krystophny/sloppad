@@ -29,6 +29,17 @@ func (s *StoreSink) UpsertItem(_ context.Context, item store.Item, binding store
 	return s.createBoundItem(account, existingBinding, item, binding, target)
 }
 
+func (s *StoreSink) UpsertItemFromSource(_ context.Context, item store.Item, binding store.ExternalBinding) (store.Item, error) {
+	account, existingBinding, existingItem, target, err := s.resolveItemTarget(binding)
+	if err != nil {
+		return store.Item{}, err
+	}
+	if existingItem != nil {
+		return s.applyBoundItemUpdate(account, existingBinding, *existingItem, item, binding, target)
+	}
+	return s.createBoundItem(account, existingBinding, item, binding, target)
+}
+
 func (s *StoreSink) updateBoundItem(account store.ExternalAccount, existingBinding store.ExternalBinding, existing store.Item, incoming store.Item, binding store.ExternalBinding, target assignment) (store.Item, error) {
 	shouldRecordDrift, err := s.shouldRecordItemDrift(existing, existingBinding, incoming, binding)
 	if err != nil {
@@ -44,6 +55,10 @@ func (s *StoreSink) updateBoundItem(account store.ExternalAccount, existingBindi
 		}
 		return existing, nil
 	}
+	return s.applyBoundItemUpdate(account, existingBinding, existing, incoming, binding, target)
+}
+
+func (s *StoreSink) applyBoundItemUpdate(account store.ExternalAccount, existingBinding store.ExternalBinding, existing store.Item, incoming store.Item, binding store.ExternalBinding, target assignment) (store.Item, error) {
 	update, err := s.itemUpdate(account, incoming, target)
 	if err != nil {
 		return store.Item{}, err
@@ -356,13 +371,17 @@ func (s *StoreSink) shouldRecordItemDrift(local store.Item, existing store.Exter
 	if strings.TrimSpace(upstream.State) == "" || local.State == upstream.State {
 		return false, nil
 	}
+	hasProtectedDrift, err := s.store.HasLocalExternalBindingDrift(existing.ID, local.State)
+	if err != nil {
+		return false, err
+	}
+	if hasProtectedDrift {
+		return true, nil
+	}
 	if !remoteRevisionChanged(existing.RemoteUpdatedAt, incoming.RemoteUpdatedAt) {
 		return false, nil
 	}
-	if storeTimeAfter(local.UpdatedAt, existing.LastSyncedAt) {
-		return true, nil
-	}
-	return s.store.HasLocalExternalBindingDrift(existing.ID, local.State)
+	return storeTimeAfter(local.UpdatedAt, existing.LastSyncedAt), nil
 }
 
 func remoteRevisionChanged(oldRevision, newRevision *string) bool {

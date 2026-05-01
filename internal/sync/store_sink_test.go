@@ -218,8 +218,20 @@ func TestStoreSinkReopensDismissedStateDriftOnNewRemoteRevision(t *testing.T) {
 		t.Fatalf("ResolveExternalBindingDrift(dismiss) error: %v", err)
 	}
 
-	upsertTodoistRemoteState(t, sink, account, "remote-redrift", "Deferred upstream task", store.ItemStateDeferred, "2026-03-08T10:10:00Z")
+	upsertTodoistRemoteState(t, sink, account, "remote-redrift", "Closed upstream task", store.ItemStateDone, "2026-03-08T10:05:00Z")
 	got, err := s.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem(same revision) error: %v", err)
+	}
+	if got.State != store.ItemStateWaiting {
+		t.Fatalf("same-revision local item state = %q, want waiting preserved", got.State)
+	}
+	if drifts = unresolvedDrifts(t, s); len(drifts) != 0 {
+		t.Fatalf("same-revision drift count = %d, want 0", len(drifts))
+	}
+
+	upsertTodoistRemoteState(t, sink, account, "remote-redrift", "Deferred upstream task", store.ItemStateDeferred, "2026-03-08T10:10:00Z")
+	got, err = s.GetItem(item.ID)
 	if err != nil {
 		t.Fatalf("GetItem() error: %v", err)
 	}

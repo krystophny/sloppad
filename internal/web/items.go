@@ -428,17 +428,6 @@ func (a *App) reingestTodoistDrift(ctx context.Context, account store.ExternalAc
 	return err
 }
 
-func (a *App) reingestEmailDrift(ctx context.Context, account store.ExternalAccount, drift store.ExternalBindingDrift) error {
-	if drift.ObjectType != emailBindingObjectType {
-		return unsupportedExternalBindingDriftReingest(drift)
-	}
-	if a.emailRefreshes != nil {
-		a.emailRefreshes.add(account.ID, drift.RemoteID)
-	}
-	_, err := a.syncEmailAccount(ctx, account)
-	return err
-}
-
 func unsupportedExternalBindingDriftReingest(drift store.ExternalBindingDrift) error {
 	return fmt.Errorf("reingest_source does not support %s %s drift", drift.Provider, drift.ObjectType)
 }
