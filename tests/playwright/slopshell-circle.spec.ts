@@ -190,27 +190,31 @@ test('corner placement persists across reloads', async ({ page }) => {
 });
 
 test.describe('mobile hit targets', () => {
-  test.use({ viewport: { width: 375, height: 667 } });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  test('right edge strip does not steal live, silent, or tool taps', async ({ page }) => {
+  test('touch taps reach live, silent, fast, and tool segments', async ({ page }) => {
     await waitReady(page);
     await switchToTestProject(page);
     await clearLog(page);
 
-    await page.locator('#slopshell-circle-dot').click();
+    await page.locator('#slopshell-circle-dot').tap();
     await expect(page.locator('#slopshell-circle')).toHaveAttribute('data-state', 'expanded');
 
-    await page.locator('#slopshell-circle-segment-meeting').click();
+    await page.locator('#slopshell-circle-segment-dialogue').tap();
+    await expect(page.locator('#slopshell-circle-segment-dialogue')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Dialogue');
+
+    await page.locator('#slopshell-circle-segment-meeting').tap();
     await expect(page.locator('#slopshell-circle-segment-meeting')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#edge-top-models .edge-live-status')).toContainText('Meeting');
 
-    await page.locator('#slopshell-circle-segment-silent').click();
+    await page.locator('#slopshell-circle-segment-silent').tap();
     await expect(page.locator('#slopshell-circle-segment-silent')).toHaveAttribute('aria-pressed', 'true');
 
-    await page.locator('#slopshell-circle-segment-fast').click();
+    await page.locator('#slopshell-circle-segment-fast').tap();
     await expect(page.locator('#slopshell-circle-segment-fast')).toHaveAttribute('aria-pressed', 'true');
 
-    await page.locator('#slopshell-circle-segment-ink').click();
+    await page.locator('#slopshell-circle-segment-ink').tap();
     await expect(page.locator('#slopshell-circle-segment-ink')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.locator('#slopshell-circle-dot')).toHaveAttribute('data-tool', 'ink');
 
@@ -218,6 +222,5 @@ test.describe('mobile hit targets', () => {
     expect(log.some((entry: any) => entry?.type === 'api_fetch' && entry?.action === 'live_policy' && entry?.payload?.policy === 'meeting')).toBe(true);
     expect(log.some((entry: any) => entry?.type === 'api_fetch' && entry?.action === 'runtime_preferences' && entry?.payload?.silent_mode === true)).toBe(true);
     expect(log.some((entry: any) => entry?.type === 'api_fetch' && entry?.action === 'runtime_preferences' && entry?.payload?.fast_mode === true)).toBe(true);
-
   });
 });
