@@ -433,7 +433,9 @@ export async function fetchItemSidebarProjectItemReview(filters = state.itemSide
 }
 
 export async function fetchItemSidebarProjectItems() {
-  const reviews = await fetchItemSidebarProjectItemReview();
+  const reviews = await fetchItemSidebarProjectItemReview({
+    all_spheres: Boolean(state.itemSidebarFilters?.all_spheres),
+  });
   return reviews.map((row) => ({
     id: row.id,
     title: row.title,
