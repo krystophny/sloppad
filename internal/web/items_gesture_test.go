@@ -356,6 +356,150 @@ func TestItemGestureCompleteOnMarkdownBackedItemValidatesAfterWriteThrough(t *te
 	}
 }
 
+func TestItemGestureUndoRevertsMarkdownSyncBack(t *testing.T) {
+	app := newAuthedTestApp(t)
+	source := "markdown"
+	ref := "brain/commitments/example.md"
+	sphere := store.SphereWork
+	item, err := app.store.CreateItem("Markdown undo", store.ItemOptions{
+		State:     store.ItemStateNext,
+		Source:    &source,
+		SourceRef: &ref,
+		Sphere:    &sphere,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	calls := []capturedMCPCall{}
+	mcp := newGTDStatusMCPServer(t, &calls, false)
+	app.localMCPEndpoint = mcpEndpoint{httpURL: mcp.URL}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/gesture", map[string]any{
+		"action": "complete",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("complete status = %d: %s", rr.Code, rr.Body.String())
+	}
+	payload := decodeJSONDataResponse(t, rr)
+	if payload["markdown_sync_back"] != true {
+		t.Fatalf("markdown_sync_back = %#v, want true", payload["markdown_sync_back"])
+	}
+	undo, _ := payload["undo"].(map[string]any)
+	if undo["markdown_sync_back"] != true {
+		t.Fatalf("undo.markdown_sync_back = %#v, want true", undo["markdown_sync_back"])
+	}
+	if undo["state"] != store.ItemStateNext {
+		t.Fatalf("undo.state = %#v, want %q", undo["state"], store.ItemStateNext)
+	}
+
+	rrUndo := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/gesture/undo", map[string]any{
+		"undo": undo,
+	})
+	if rrUndo.Code != http.StatusOK {
+		t.Fatalf("undo status = %d: %s", rrUndo.Code, rrUndo.Body.String())
+	}
+	wantCalls := []string{gtdParseTool, gtdSetStatusTool, gtdParseTool, gtdSetStatusTool}
+	if got := callNames(calls); !reflect.DeepEqual(got, wantCalls) {
+		t.Fatalf("MCP calls = %#v, want %#v", got, wantCalls)
+	}
+	if calls[1].Args["status"] != "closed" {
+		t.Fatalf("forward set_status status = %#v, want closed", calls[1].Args["status"])
+	}
+	if calls[3].Args["status"] != store.ItemStateNext {
+		t.Fatalf("undo set_status status = %#v, want %q", calls[3].Args["status"], store.ItemStateNext)
+	}
+	if calls[3].Args["path"] != ref {
+		t.Fatalf("undo set_status path = %#v, want %q", calls[3].Args["path"], ref)
+	}
+	got, err := app.store.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if got.State != store.ItemStateNext {
+		t.Fatalf("after undo state = %q, want %q", got.State, store.ItemStateNext)
+	}
+}
+
+func TestItemGestureUndoRevertsMarkdownDelegateSyncBack(t *testing.T) {
+	app := newAuthedTestApp(t)
+	source := "markdown"
+	ref := "brain/commitments/delegate.md"
+	actor, err := app.store.CreateActor("Robin", store.ActorKindHuman)
+	if err != nil {
+		t.Fatalf("CreateActor: %v", err)
+	}
+	item, err := app.store.CreateItem("Markdown delegate undo", store.ItemOptions{
+		State:     store.ItemStateInbox,
+		Source:    &source,
+		SourceRef: &ref,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	calls := []capturedMCPCall{}
+	mcp := newGTDStatusMCPServer(t, &calls, false)
+	app.localMCPEndpoint = mcpEndpoint{httpURL: mcp.URL}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/gesture", map[string]any{
+		"action":   "delegate",
+		"actor_id": actor.ID,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delegate status = %d: %s", rr.Code, rr.Body.String())
+	}
+	payload := decodeJSONDataResponse(t, rr)
+	undo, _ := payload["undo"].(map[string]any)
+	if undo["markdown_sync_back"] != true {
+		t.Fatalf("undo.markdown_sync_back = %#v, want true", undo["markdown_sync_back"])
+	}
+
+	rrUndo := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/gesture/undo", map[string]any{
+		"undo": undo,
+	})
+	if rrUndo.Code != http.StatusOK {
+		t.Fatalf("undo status = %d: %s", rrUndo.Code, rrUndo.Body.String())
+	}
+	if got := callNames(calls); len(got) != 4 {
+		t.Fatalf("MCP calls = %#v, want 4 (parse,set,parse,set)", got)
+	}
+	if calls[1].Args["status"] != store.ItemStateWaiting {
+		t.Fatalf("forward set_status = %#v, want %q", calls[1].Args["status"], store.ItemStateWaiting)
+	}
+	if calls[3].Args["status"] != store.ItemStateInbox {
+		t.Fatalf("undo set_status = %#v, want %q", calls[3].Args["status"], store.ItemStateInbox)
+	}
+	got, err := app.store.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem: %v", err)
+	}
+	if got.State != store.ItemStateInbox {
+		t.Fatalf("state = %q, want %q", got.State, store.ItemStateInbox)
+	}
+	if got.ActorID != nil {
+		t.Fatalf("actor_id = %v, want nil", got.ActorID)
+	}
+}
+
+func TestItemGestureUndoSkipsMarkdownWhenFlagFalse(t *testing.T) {
+	app := newAuthedTestApp(t)
+	item := mustCreateGestureItem(t, app, "Plain undo", store.ItemOptions{State: store.ItemStateNext})
+
+	mcp := newGTDStatusMCPServer(t, &[]capturedMCPCall{}, false)
+	app.localMCPEndpoint = mcpEndpoint{httpURL: mcp.URL}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/"+itoa(item.ID)+"/gesture", map[string]any{
+		"action": "complete",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("complete status = %d: %s", rr.Code, rr.Body.String())
+	}
+	payload := decodeJSONDataResponse(t, rr)
+	undo, _ := payload["undo"].(map[string]any)
+	if _, present := undo["markdown_sync_back"]; present {
+		t.Fatalf("undo.markdown_sync_back present for non-markdown item: %#v", undo)
+	}
+}
+
 func TestItemGestureDeferOnMarkdownBackedItemValidatesAfterWriteThrough(t *testing.T) {
 	app := newAuthedTestApp(t)
 	source := "markdown"

@@ -38,21 +38,31 @@ type itemGestureRequest struct {
 
 // itemGestureUndo is the snapshot returned with every gesture and accepted by
 // the undo endpoint. Capturing prior state plus any executed sync-back lets
-// the frontend reverse the local overlay AND any upstream archive that ran.
+// the frontend reverse the local overlay AND any upstream side-effect that
+// ran (email archive, brain.gtd.set_status markdown write-through).
 type itemGestureUndo struct {
-	State            string  `json:"state"`
-	ActorID          *int64  `json:"actor_id,omitempty"`
-	VisibleAfter     *string `json:"visible_after,omitempty"`
-	FollowUpAt       *string `json:"follow_up_at,omitempty"`
-	EmailSyncBackRan bool    `json:"email_sync_back,omitempty"`
+	State               string  `json:"state"`
+	ActorID             *int64  `json:"actor_id,omitempty"`
+	VisibleAfter        *string `json:"visible_after,omitempty"`
+	FollowUpAt          *string `json:"follow_up_at,omitempty"`
+	EmailSyncBackRan    bool    `json:"email_sync_back,omitempty"`
+	MarkdownSyncBackRan bool    `json:"markdown_sync_back,omitempty"`
+}
+
+// gestureSyncBack records which write-through paths ran for a single gesture
+// so the undo handler can reverse exactly the side-effects that happened.
+type gestureSyncBack struct {
+	Markdown bool
+	Email    bool
 }
 
 type itemGestureResult struct {
-	Item             store.Item      `json:"item"`
-	Action           string          `json:"action"`
-	DropMode         string          `json:"drop_mode,omitempty"`
-	EmailSyncBackRan bool            `json:"email_sync_back,omitempty"`
-	Undo             itemGestureUndo `json:"undo"`
+	Item                store.Item      `json:"item"`
+	Action              string          `json:"action"`
+	DropMode            string          `json:"drop_mode,omitempty"`
+	EmailSyncBackRan    bool            `json:"email_sync_back,omitempty"`
+	MarkdownSyncBackRan bool            `json:"markdown_sync_back,omitempty"`
+	Undo                itemGestureUndo `json:"undo"`
 }
 
 func (a *App) handleItemGesture(w http.ResponseWriter, r *http.Request) {
@@ -81,11 +91,12 @@ func (a *App) handleItemGesture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAPIData(w, http.StatusOK, map[string]any{
-		"item":            result.Item,
-		"action":          result.Action,
-		"drop_mode":       result.DropMode,
-		"email_sync_back": result.EmailSyncBackRan,
-		"undo":            result.Undo,
+		"item":               result.Item,
+		"action":             result.Action,
+		"drop_mode":          result.DropMode,
+		"email_sync_back":    result.EmailSyncBackRan,
+		"markdown_sync_back": result.MarkdownSyncBackRan,
+		"undo":               result.Undo,
 	})
 }
 
@@ -130,9 +141,9 @@ func (a *App) applyItemGesture(ctx context.Context, item store.Item, action stri
 
 func (a *App) gestureComplete(ctx context.Context, item store.Item, snapshot itemGestureUndo) (itemGestureResult, int, error) {
 	if item.State == store.ItemStateDone {
-		return a.gestureSnapshotResult(item, gestureActionComplete, "", false, snapshot), http.StatusOK, nil
+		return a.gestureSnapshotResult(item, gestureActionComplete, "", gestureSyncBack{}, snapshot), http.StatusOK, nil
 	}
-	syncRan, status, err := a.gestureWriteThroughClose(ctx, item)
+	sync, status, err := a.gestureWriteThroughClose(ctx, item)
 	if err != nil {
 		return itemGestureResult{}, status, err
 	}
@@ -143,24 +154,27 @@ func (a *App) gestureComplete(ctx context.Context, item store.Item, snapshot ite
 	if err != nil {
 		return itemGestureResult{}, itemResponseErrorStatus(err), err
 	}
-	snapshot.EmailSyncBackRan = syncRan
-	return a.gestureSnapshotResult(updated, gestureActionComplete, "", syncRan, snapshot), http.StatusOK, nil
+	snapshot.EmailSyncBackRan = sync.Email
+	snapshot.MarkdownSyncBackRan = sync.Markdown
+	return a.gestureSnapshotResult(updated, gestureActionComplete, "", sync, snapshot), http.StatusOK, nil
 }
 
 func (a *App) gestureDrop(ctx context.Context, item store.Item, snapshot itemGestureUndo, dropUpstream bool) (itemGestureResult, int, error) {
 	mode := dropModeForItem(item, dropUpstream)
-	syncRan := false
+	var sync gestureSyncBack
 	if item.State != store.ItemStateDone {
 		if mode == gestureDropModeUpstream {
 			ran, status, err := a.gestureWriteThroughClose(ctx, item)
 			if err != nil {
 				return itemGestureResult{}, status, err
 			}
-			syncRan = ran
+			sync = ran
 		} else {
-			if _, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDone); err != nil {
+			mdRan, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDone)
+			if err != nil {
 				return itemGestureResult{}, status, err
 			}
+			sync.Markdown = mdRan
 		}
 		if err := a.store.UpdateItemState(item.ID, store.ItemStateDone); err != nil {
 			return itemGestureResult{}, itemResponseErrorStatus(err), err
@@ -170,8 +184,9 @@ func (a *App) gestureDrop(ctx context.Context, item store.Item, snapshot itemGes
 	if err != nil {
 		return itemGestureResult{}, itemResponseErrorStatus(err), err
 	}
-	snapshot.EmailSyncBackRan = syncRan
-	return a.gestureSnapshotResult(updated, gestureActionDrop, mode, syncRan, snapshot), http.StatusOK, nil
+	snapshot.EmailSyncBackRan = sync.Email
+	snapshot.MarkdownSyncBackRan = sync.Markdown
+	return a.gestureSnapshotResult(updated, gestureActionDrop, mode, sync, snapshot), http.StatusOK, nil
 }
 
 func (a *App) gestureDefer(item store.Item, snapshot itemGestureUndo, rawFollowUp string) (itemGestureResult, int, error) {
@@ -179,7 +194,8 @@ func (a *App) gestureDefer(item store.Item, snapshot itemGestureUndo, rawFollowU
 	if err != nil {
 		return itemGestureResult{}, http.StatusBadRequest, err
 	}
-	if _, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDeferred); err != nil {
+	mdRan, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDeferred)
+	if err != nil {
 		return itemGestureResult{}, status, err
 	}
 	if err := a.store.UpdateItem(item.ID, store.ItemUpdate{
@@ -193,7 +209,8 @@ func (a *App) gestureDefer(item store.Item, snapshot itemGestureUndo, rawFollowU
 	if err != nil {
 		return itemGestureResult{}, itemResponseErrorStatus(err), err
 	}
-	return a.gestureSnapshotResult(updated, gestureActionDefer, "", false, snapshot), http.StatusOK, nil
+	snapshot.MarkdownSyncBackRan = mdRan
+	return a.gestureSnapshotResult(updated, gestureActionDefer, "", gestureSyncBack{Markdown: mdRan}, snapshot), http.StatusOK, nil
 }
 
 func (a *App) gestureDelegate(item store.Item, snapshot itemGestureUndo, req itemGestureRequest) (itemGestureResult, int, error) {
@@ -218,7 +235,8 @@ func (a *App) gestureDelegate(item store.Item, snapshot itemGestureUndo, req ite
 		}
 		update.FollowUpAt = stringPointer(follow)
 	}
-	if _, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateWaiting); err != nil {
+	mdRan, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateWaiting)
+	if err != nil {
 		return itemGestureResult{}, status, err
 	}
 	if err := a.store.UpdateItem(item.ID, update); err != nil {
@@ -228,23 +246,28 @@ func (a *App) gestureDelegate(item store.Item, snapshot itemGestureUndo, req ite
 	if err != nil {
 		return itemGestureResult{}, itemResponseErrorStatus(err), err
 	}
-	return a.gestureSnapshotResult(updated, gestureActionDelegate, "", false, snapshot), http.StatusOK, nil
+	snapshot.MarkdownSyncBackRan = mdRan
+	return a.gestureSnapshotResult(updated, gestureActionDelegate, "", gestureSyncBack{Markdown: mdRan}, snapshot), http.StatusOK, nil
 }
 
 // gestureWriteThroughClose handles the close path for both markdown-backed
 // items (validated brain.gtd.set_status) and external-backed items (todoist
-// complete + email archive). It returns whether email archive ran so undo
-// can move the message back, the HTTP status to return on error, and any
-// error that should abort the gesture.
-func (a *App) gestureWriteThroughClose(ctx context.Context, item store.Item) (bool, int, error) {
-	if ran, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDone); err != nil || ran {
-		return false, status, err
-	}
-	syncRan, err := a.runItemGestureUpstreamComplete(ctx, item)
+// complete + email archive). It returns which write-through paths ran so undo
+// can reverse exactly the side-effects that happened, the HTTP status to
+// return on error, and any error that should abort the gesture.
+func (a *App) gestureWriteThroughClose(ctx context.Context, item store.Item) (gestureSyncBack, int, error) {
+	mdRan, status, err := a.gestureWriteThroughMarkdown(item, store.ItemStateDone)
 	if err != nil {
-		return false, http.StatusBadGateway, err
+		return gestureSyncBack{}, status, err
 	}
-	return syncRan, http.StatusOK, nil
+	if mdRan {
+		return gestureSyncBack{Markdown: true}, http.StatusOK, nil
+	}
+	emailRan, err := a.runItemGestureUpstreamComplete(ctx, item)
+	if err != nil {
+		return gestureSyncBack{}, http.StatusBadGateway, err
+	}
+	return gestureSyncBack{Email: emailRan}, http.StatusOK, nil
 }
 
 // gestureWriteThroughMarkdown writes a state change through to the source
@@ -260,7 +283,7 @@ func (a *App) gestureWriteThroughMarkdown(item store.Item, targetState string) (
 	if !ok {
 		return false, http.StatusOK, nil
 	}
-	status, err := gtdStatusForGestureState(targetState)
+	status, err := gtdStatusForLocalState(targetState)
 	if err != nil {
 		return false, http.StatusBadRequest, err
 	}
@@ -270,30 +293,30 @@ func (a *App) gestureWriteThroughMarkdown(item store.Item, targetState string) (
 	return true, http.StatusOK, nil
 }
 
-// gtdStatusForGestureState maps the local item state a gesture is about to
-// commit into the brain.gtd.set_status status vocabulary. The set is
-// deliberately small: gestures only ever transition into closed, deferred, or
-// waiting on the brain side; the local store retains the richer state ladder.
-func gtdStatusForGestureState(targetState string) (string, error) {
-	switch targetState {
+// gtdStatusForLocalState maps an item's local state into the brain.gtd
+// status vocabulary used by brain.gtd.set_status. Forward gestures only ever
+// pass done/deferred/waiting; undo passes any prior state. The local store
+// retains a richer state ladder than brain.gtd, hence the mapping.
+func gtdStatusForLocalState(localState string) (string, error) {
+	switch localState {
 	case store.ItemStateDone:
 		return "closed", nil
-	case store.ItemStateDeferred:
-		return store.ItemStateDeferred, nil
-	case store.ItemStateWaiting:
-		return store.ItemStateWaiting, nil
+	case store.ItemStateInbox, store.ItemStateNext, store.ItemStateWaiting,
+		store.ItemStateDeferred, store.ItemStateSomeday, store.ItemStateReview:
+		return localState, nil
 	default:
-		return "", fmt.Errorf("gesture cannot route state %q through brain.gtd.set_status", targetState)
+		return "", fmt.Errorf("cannot map state %q to brain.gtd status", localState)
 	}
 }
 
-func (a *App) gestureSnapshotResult(item store.Item, action, dropMode string, syncRan bool, snapshot itemGestureUndo) itemGestureResult {
+func (a *App) gestureSnapshotResult(item store.Item, action, dropMode string, sync gestureSyncBack, snapshot itemGestureUndo) itemGestureResult {
 	return itemGestureResult{
-		Item:             item,
-		Action:           action,
-		DropMode:         dropMode,
-		EmailSyncBackRan: syncRan,
-		Undo:             snapshot,
+		Item:                item,
+		Action:              action,
+		DropMode:            dropMode,
+		EmailSyncBackRan:    sync.Email,
+		MarkdownSyncBackRan: sync.Markdown,
+		Undo:                snapshot,
 	}
 }
 
@@ -377,6 +400,12 @@ func (a *App) handleItemGestureUndo(w http.ResponseWriter, r *http.Request) {
 		writeItemStoreError(w, err)
 		return
 	}
+	if req.Undo.MarkdownSyncBackRan {
+		if status, err := a.revertGestureMarkdownSyncBack(item, prev); err != nil {
+			writeAPIError(w, status, err.Error())
+			return
+		}
+	}
 	if req.Undo.EmailSyncBackRan {
 		if err := a.syncRemoteEmailItemState(r.Context(), item, store.ItemStateInbox); err != nil {
 			writeAPIError(w, http.StatusBadGateway, err.Error())
@@ -400,6 +429,29 @@ func (a *App) handleItemGestureUndo(w http.ResponseWriter, r *http.Request) {
 	writeAPIData(w, http.StatusOK, map[string]any{
 		"item": updated,
 	})
+}
+
+// revertGestureMarkdownSyncBack reverses the brain.gtd.set_status write-through
+// the forward gesture executed, so undo restores the source markdown alongside
+// the local overlay row. The target is recomputed from the current item rather
+// than stashed in the snapshot because gtdStatusTarget is deterministic in the
+// item's source/sphere/artifact, none of which the gesture mutates.
+func (a *App) revertGestureMarkdownSyncBack(item store.Item, priorState string) (int, error) {
+	target, ok, err := a.gtdStatusTarget(item)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	if !ok {
+		return http.StatusOK, nil
+	}
+	status, err := gtdStatusForLocalState(priorState)
+	if err != nil {
+		return http.StatusBadRequest, err
+	}
+	if _, _, err := a.setBrainGTDStatus(target, itemGTDStatusRequest{}, status); err != nil {
+		return http.StatusBadGateway, err
+	}
+	return http.StatusOK, nil
 }
 
 func normalizeRequiredRFC3339(value string) (string, error) {
