@@ -190,6 +190,70 @@ func TestItemReviewDriftQueueAndActions(t *testing.T) {
 	}
 }
 
+func TestItemDriftActionsResolveQueueEntries(t *testing.T) {
+	for _, action := range []string{"keep_local", "reingest_source", "dismiss"} {
+		t.Run(action, func(t *testing.T) {
+			app := newAuthedTestApp(t)
+			drift := seedDriftReviewFixture(t, app)
+
+			rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/drift/"+strconv.FormatInt(drift.ID, 10)+"/"+action, nil)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s status = %d, want 200: %s", action, rr.Code, rr.Body.String())
+			}
+			drifts, err := app.store.ListUnresolvedExternalBindingDrifts(store.ItemListFilter{})
+			if err != nil {
+				t.Fatalf("ListUnresolvedExternalBindingDrifts() error: %v", err)
+			}
+			if len(drifts) != 0 {
+				t.Fatalf("unresolved drift count after %s = %d, want 0", action, len(drifts))
+			}
+		})
+	}
+}
+
+func TestDismissedDriftReappearsOnlyAfterUpstreamRevisionChanges(t *testing.T) {
+	app := newAuthedTestApp(t)
+	drift := seedDriftReviewFixture(t, app)
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPost, "/api/items/drift/"+strconv.FormatInt(drift.ID, 10)+"/dismiss", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dismiss status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	binding, err := app.store.GetBindingByRemote(drift.AccountID, drift.Provider, drift.ObjectType, drift.RemoteID)
+	if err != nil {
+		t.Fatalf("GetBindingByRemote() error: %v", err)
+	}
+	item, err := app.store.GetItem(*drift.ItemID)
+	if err != nil {
+		t.Fatalf("GetItem() error: %v", err)
+	}
+	upstream := item
+	upstream.State = store.ItemStateDone
+	if _, err := app.store.RecordExternalBindingDrift(binding, item, upstream); err != nil {
+		t.Fatalf("RecordExternalBindingDrift(same revision) error: %v", err)
+	}
+	drifts, err := app.store.ListUnresolvedExternalBindingDrifts(store.ItemListFilter{})
+	if err != nil {
+		t.Fatalf("ListUnresolvedExternalBindingDrifts(same revision) error: %v", err)
+	}
+	if len(drifts) != 0 {
+		t.Fatalf("same upstream revision reappeared with %d drifts, want 0", len(drifts))
+	}
+
+	nextRemoteAt := "2026-03-08T10:10:00Z"
+	binding.RemoteUpdatedAt = &nextRemoteAt
+	if _, err := app.store.RecordExternalBindingDrift(binding, item, upstream); err != nil {
+		t.Fatalf("RecordExternalBindingDrift(new revision) error: %v", err)
+	}
+	drifts, err = app.store.ListUnresolvedExternalBindingDrifts(store.ItemListFilter{})
+	if err != nil {
+		t.Fatalf("ListUnresolvedExternalBindingDrifts(new revision) error: %v", err)
+	}
+	if len(drifts) != 1 {
+		t.Fatalf("new upstream revision drift count = %d, want 1", len(drifts))
+	}
+}
+
 // Section drill-down filter on the list endpoint scopes results to the
 // targeted subset (project items / people / drift / dedup), so the sidebar
 // rows behave as drill-down filters rather than placeholder buttons.
