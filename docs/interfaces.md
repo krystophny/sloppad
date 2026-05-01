@@ -168,6 +168,7 @@ Domain model API:
 - `GET /api/items/deferred`
 - `GET /api/items/someday`
 - `GET /api/items/review`
+- `GET /api/items/projects`
 - `GET /api/items/done`
 - `GET /api/items/counts`
 - `POST /api/items/sync/github`
