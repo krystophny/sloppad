@@ -126,7 +126,7 @@ export function unlockAudioContext() {
 );
 
 export function initRuntimeUi() {
-  state.activeSphere = readPersistedActiveSphere();
+  state.activeSphere = readPersistedActiveSphere() || state.activeSphere;
   const surfaceToggle = document.getElementById('surface-toggle');
   if (surfaceToggle instanceof HTMLButtonElement) {
     surfaceToggle.addEventListener('click', () => {
@@ -389,9 +389,11 @@ export function normalizeActiveSphere(raw) {
 
 export function readPersistedActiveSphere() {
   try {
-    return normalizeActiveSphere(window.localStorage.getItem(ACTIVE_SPHERE_STORAGE_KEY) || 'private');
+    const raw = String(window.localStorage.getItem(ACTIVE_SPHERE_STORAGE_KEY) || '').trim().toLowerCase();
+    if (raw !== 'work' && raw !== 'private') return '';
+    return raw;
   } catch (_) {
-    return 'private';
+    return '';
   }
 }
 
@@ -430,7 +432,7 @@ export function applyRuntimePreferences(runtime) {
   state.interaction.tool = normalizeInteractionTool(runtime?.tool || 'pointer');
   state.interaction.toolPinned = false;
   state.interaction.conversation = interactionConversationMode();
-  state.activeSphere = normalizeActiveSphere(readPersistedActiveSphere() || runtime?.active_sphere || state.activeSphere);
+  state.activeSphere = normalizeActiveSphere(runtime?.active_sphere || readPersistedActiveSphere() || state.activeSphere);
   persistActiveSpherePreference(state.activeSphere);
   syncInteractionBodyState();
   renderEdgeTopProjects();
@@ -465,7 +467,7 @@ export async function updateRuntimePreferences(patch) {
     state.interaction.toolPinned = true;
   }
   state.interaction.conversation = interactionConversationMode();
-  state.activeSphere = normalizeActiveSphere(readPersistedActiveSphere() || payload?.active_sphere || state.activeSphere);
+  state.activeSphere = normalizeActiveSphere(payload?.active_sphere || readPersistedActiveSphere() || state.activeSphere);
   persistActiveSpherePreference(state.activeSphere);
   applyTurnRuntimePreferences(payload);
   syncInteractionBodyState();

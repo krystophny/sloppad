@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sloppy-org/slopshell/internal/store"
 	"github.com/sloppy-org/slopshell/internal/todoist"
@@ -142,8 +143,8 @@ func TestClassifyAndExecuteSystemActionSyncTodoist(t *testing.T) {
 	if item.WorkspaceID == nil || *item.WorkspaceID != workspace.ID {
 		t.Fatalf("item workspace_id = %#v, want %d", item.WorkspaceID, workspace.ID)
 	}
-	if item.State != store.ItemStateInbox {
-		t.Fatalf("item state = %q, want %q", item.State, store.ItemStateInbox)
+	if item.State != store.ItemStateNext {
+		t.Fatalf("item state = %q, want %q", item.State, store.ItemStateNext)
 	}
 	if item.Sphere != store.SpherePrivate {
 		t.Fatalf("item sphere = %q, want %q", item.Sphere, store.SpherePrivate)
@@ -170,6 +171,64 @@ func TestClassifyAndExecuteSystemActionSyncTodoist(t *testing.T) {
 	}
 	if binding.ItemID == nil || *binding.ItemID != item.ID {
 		t.Fatalf("binding item_id = %#v, want %d", binding.ItemID, item.ID)
+	}
+}
+
+func TestClassifyAndExecuteSystemActionSyncTodoistMapsStartAndDeadline(t *testing.T) {
+	app := newAuthedTestApp(t)
+	app.intentLLMURL = ""
+
+	startDate := time.Now().UTC().AddDate(0, 0, 2).Format("2006-01-02")
+	deadlineDate := time.Now().UTC().AddDate(0, 0, 7).Format("2006-01-02")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/projects":
+			writeTodoistJSON(t, w, []map[string]any{{"id": "proj-1", "name": "Admin"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks":
+			writeTodoistJSON(t, w, []map[string]any{{
+				"id":         "task-1",
+				"content":    "Review proposal",
+				"project_id": "proj-1",
+				"due":        map[string]any{"date": startDate},
+				"deadline":   map[string]any{"date": deadlineDate},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	createTodoistTestAccount(t, app, "Personal Todoist", server.URL)
+	project, err := app.ensureDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ensure default project: %v", err)
+	}
+	session, err := app.store.GetOrCreateChatSession(project.WorkspacePath)
+	if err != nil {
+		t.Fatalf("chat session: %v", err)
+	}
+
+	if _, _, handled := app.classifyAndExecuteSystemAction(context.Background(), session.ID, session, "sync todoist"); !handled {
+		t.Fatal("expected sync command to be handled")
+	}
+
+	item, err := app.store.GetItemBySource(store.ExternalProviderTodoist, "task:task-1")
+	if err != nil {
+		t.Fatalf("GetItemBySource() error: %v", err)
+	}
+	wantStart := startDate + "T09:00:00Z"
+	wantDue := deadlineDate + "T23:59:59Z"
+	if item.State != store.ItemStateDeferred {
+		t.Fatalf("item state = %q, want %q", item.State, store.ItemStateDeferred)
+	}
+	if item.VisibleAfter == nil || *item.VisibleAfter != wantStart {
+		t.Fatalf("visible_after = %v, want %q", item.VisibleAfter, wantStart)
+	}
+	if item.FollowUpAt == nil || *item.FollowUpAt != wantStart {
+		t.Fatalf("follow_up_at = %v, want %q", item.FollowUpAt, wantStart)
+	}
+	if item.DueAt == nil || *item.DueAt != wantDue {
+		t.Fatalf("due_at = %v, want %q", item.DueAt, wantDue)
 	}
 }
 

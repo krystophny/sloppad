@@ -110,7 +110,7 @@ func todoistTaskFollowUpAt(task todoist.Task) *string {
 	if task.Due.DateTime != nil {
 		value := strings.TrimSpace(*task.Due.DateTime)
 		if value != "" {
-			return &value
+			return normalizedTodoistTimestamp(value)
 		}
 	}
 	if value := strings.TrimSpace(task.Due.Date); value != "" {
@@ -118,6 +118,33 @@ func todoistTaskFollowUpAt(task todoist.Task) *string {
 		return &followUp
 	}
 	return nil
+}
+
+func todoistTaskDueAt(task todoist.Task) *string {
+	if task.Deadline == nil {
+		return nil
+	}
+	value := strings.TrimSpace(task.Deadline.Date)
+	if value == "" {
+		return nil
+	}
+	due := value + "T23:59:59Z"
+	return &due
+}
+
+func normalizedTodoistTimestamp(raw string) *string {
+	clean := strings.TrimSpace(raw)
+	if clean == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		parsed, err := time.Parse(layout, clean)
+		if err == nil {
+			value := parsed.UTC().Format(time.RFC3339Nano)
+			return &value
+		}
+	}
+	return &clean
 }
 
 func todoistEnabledAccounts(accounts []store.ExternalAccount, sphere string) []store.ExternalAccount {
@@ -246,19 +273,24 @@ func (a *App) persistTodoistTask(account store.ExternalAccount, task todoist.Tas
 		return store.Item{}, errors.New("todoist task content is required")
 	}
 	followUpAt := todoistTaskFollowUpAt(task)
-	desiredState := todoistItemState(task)
+	dueAt := todoistTaskDueAt(task)
+	desiredState := todoistItemState(task, time.Now())
 	if existing, err := a.store.GetItemBySource(source, sourceRef); err == nil {
-		return a.updatePersistedTodoistTask(existing, account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt)
+		return a.updatePersistedTodoistTask(existing, account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt, dueAt)
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return store.Item{}, err
 	}
-	return a.createPersistedTodoistTask(account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt)
+	return a.createPersistedTodoistTask(account, task, comments, mapping, projectName, projectNames, title, source, sourceRef, desiredState, followUpAt, dueAt)
 }
 
-func (a *App) updatePersistedTodoistTask(existing store.Item, account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt *string) (store.Item, error) {
+func (a *App) updatePersistedTodoistTask(existing store.Item, account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt, dueAt *string) (store.Item, error) {
+	state := desiredState
 	updates := store.ItemUpdate{
-		Title:      &title,
-		FollowUpAt: followUpAt,
+		Title:        &title,
+		State:        todoistStateUpdate(existing.State, state),
+		VisibleAfter: todoistTimeUpdate(followUpAt),
+		FollowUpAt:   todoistTimeUpdate(followUpAt),
+		DueAt:        todoistTimeUpdate(dueAt),
 	}
 	if mapping != nil {
 		updates.WorkspaceID = mappedWorkspaceUpdate(mapping)
@@ -277,19 +309,14 @@ func (a *App) updatePersistedTodoistTask(existing store.Item, account store.Exte
 	if err != nil {
 		return store.Item{}, err
 	}
-	switch {
-	case desiredState == store.ItemStateDone && item.State != store.ItemStateDone:
-		if err := a.store.CompleteItemBySource(source, sourceRef); err != nil {
+	if existing.State == store.ItemStateDone && desiredState != store.ItemStateDone {
+		if err := a.store.SyncItemStateBySource(source, sourceRef, desiredState); err != nil {
 			return store.Item{}, err
 		}
-	case desiredState == store.ItemStateInbox && item.State == store.ItemStateDone:
-		if err := a.store.SyncItemStateBySource(source, sourceRef, store.ItemStateInbox); err != nil {
+		item, err = a.store.GetItem(existing.ID)
+		if err != nil {
 			return store.Item{}, err
 		}
-	}
-	item, err = a.store.GetItem(existing.ID)
-	if err != nil {
-		return store.Item{}, err
 	}
 	if err := a.syncTodoistTaskArtifact(item, task, projectNames, comments); err != nil {
 		return store.Item{}, err
@@ -304,13 +331,15 @@ func (a *App) updatePersistedTodoistTask(existing store.Item, account store.Exte
 	return item, nil
 }
 
-func (a *App) createPersistedTodoistTask(account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt *string) (store.Item, error) {
+func (a *App) createPersistedTodoistTask(account store.ExternalAccount, task todoist.Task, comments []todoist.Comment, mapping *store.ExternalContainerMapping, projectName string, projectNames map[string]string, title, source, sourceRef, desiredState string, followUpAt, dueAt *string) (store.Item, error) {
 	opts := store.ItemOptions{
-		State:      desiredState,
-		Sphere:     &account.Sphere,
-		FollowUpAt: followUpAt,
-		Source:     &source,
-		SourceRef:  &sourceRef,
+		State:        desiredState,
+		Sphere:       &account.Sphere,
+		VisibleAfter: followUpAt,
+		FollowUpAt:   followUpAt,
+		DueAt:        dueAt,
+		Source:       &source,
+		SourceRef:    &sourceRef,
 	}
 	if mapping != nil && mapping.WorkspaceID != nil {
 		opts.WorkspaceID = mapping.WorkspaceID
@@ -330,6 +359,34 @@ func (a *App) createPersistedTodoistTask(account store.ExternalAccount, task tod
 		return store.Item{}, err
 	}
 	return item, nil
+}
+
+func todoistTimeUpdate(value *string) *string {
+	if value != nil {
+		return value
+	}
+	empty := ""
+	return &empty
+}
+
+func todoistStateUpdate(current, desired string) *string {
+	if desired == "" || current == desired {
+		return nil
+	}
+	switch desired {
+	case store.ItemStateDone:
+		return &desired
+	case store.ItemStateNext, store.ItemStateDeferred:
+		switch current {
+		case store.ItemStateInbox, store.ItemStateNext, store.ItemStateDeferred:
+			return &desired
+		}
+	case store.ItemStateInbox:
+		if current == store.ItemStateDone {
+			return &desired
+		}
+	}
+	return nil
 }
 
 func (a *App) upsertTodoistTaskBinding(accountID int64, taskID string, itemID int64, projectName string) error {

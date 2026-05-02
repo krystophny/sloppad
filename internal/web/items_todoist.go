@@ -30,11 +30,22 @@ func todoistTaskIDFromSourceRef(raw string) string {
 	return clean
 }
 
-func todoistItemState(task todoist.Task) string {
+func todoistItemState(task todoist.Task, now time.Time) string {
 	if task.IsCompleted {
 		return store.ItemStateDone
 	}
-	return store.ItemStateInbox
+	followUpAt := todoistTaskFollowUpAt(task)
+	if followUpAt == nil {
+		return store.ItemStateNext
+	}
+	followUp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(*followUpAt))
+	if err != nil {
+		return store.ItemStateNext
+	}
+	if followUp.After(now.UTC()) {
+		return store.ItemStateDeferred
+	}
+	return store.ItemStateNext
 }
 
 func todoistCommentMeta(comments []todoist.Comment) []map[string]any {

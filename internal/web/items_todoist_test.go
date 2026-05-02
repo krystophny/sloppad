@@ -73,7 +73,7 @@ func TestItemCreateTodoistBackedItemCreatesRemoteTask(t *testing.T) {
 		t.Fatalf("create due_datetime = %q, want %q", got, followUpAt)
 	}
 
-	item := mustFirstItemByState(t, app, store.ItemStateInbox)
+	item := mustFirstItemByState(t, app, store.ItemStateNext)
 	if item.SourceRef == nil || *item.SourceRef != "task:task-99" {
 		t.Fatalf("item source_ref = %v, want task:task-99", item.SourceRef)
 	}

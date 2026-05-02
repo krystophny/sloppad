@@ -133,7 +133,7 @@ export const state = {
   defaultWorkspaceId: '',
   serverActiveProjectId: '',
   activeWorkspaceId: '',
-  activeSphere: 'private',
+  activeSphere: 'work',
   workspaceFocus: {
     anchor: null,
     focus: null,
