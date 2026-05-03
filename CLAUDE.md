@@ -29,7 +29,7 @@ Do not scan source or docs unless the runtime command fails or the request is ab
 Current runtime shape:
 - `slopshell server` is the web/UI runtime. It embeds the sloptools MCP and binds it to a Unix domain socket (mode 0600, parent dir 0700) — there is no loopback TCP MCP listener.
 - The MCP socket path defaults to `$XDG_RUNTIME_DIR/sloppy/mcp.sock` on Linux and `$HOME/Library/Caches/sloppy/mcp.sock` on macOS. Override with `--mcp-socket` or `SLOPSHELL_MCP_SOCKET`.
-- The helpy MCP for web search/fetch is spawned as a stdio subprocess (`helpy mcp-stdio`). No socket is exposed; disable with `SLOPSHELL_HELPY_BIN=off`.
+- The helpy MCP for web search/fetch runs as a private Unix-socket daemon (`helpy mcp-serve --unix-socket ...`), defaulting to `$XDG_RUNTIME_DIR/sloppy/helpy.sock` on Linux and `$HOME/Library/Caches/sloppy/helpy.sock` on macOS. Disable with `SLOPSHELL_HELPY_SOCKET=off`.
 - External agents register exactly two MCP servers: `sloppy` and `helpy`.
 - Do not register `slopshell` as an agent MCP server; the local socket is private runtime/control transport only.
 
@@ -43,7 +43,7 @@ Supported loopback sidecars and helpers:
 
 Non-runtime notes:
 - No separate `slopshell-mcp.service` sidecar is part of the current model.
-- No Helpy runtime is part of Slopshell.
+- Slopshell uses the separate `helpy-mcp.service` daemon for web/search tools.
 - `scripts/install.sh` wires `SLOPSHELL_INTENT_LLM_URL=http://127.0.0.1:8081` for `slopshell-web.service`.
 - Current Qwen profile defaults in code are `qwen3.5-9b` with profile options `qwen3.5-9b,qwen3.5-4b`.
 - Keep the local `:8081` runtime reasoning-capable and WebUI-enabled; `slopshell` disables thinking per request where the fast path needs it.
@@ -173,10 +173,10 @@ Environment toggles:
 - `SLOPSHELL_INTENT_LLM_PROFILE` selects the active local routing profile (default `qwen3.5-9b`)
 - `SLOPSHELL_INTENT_LLM_PROFILE_OPTIONS` exposes selectable local routing profiles (default `qwen3.5-9b,qwen3.5-4b`)
 - `SLOPSHELL_STT_URL=off` disables STT sidecar usage
-- `SLOPSHELL_HELPY_BIN` selects the helpy binary path. User service installers
-  prefer `$HOME/.local/bin/helpy` when present, then `helpy` from `PATH`; set it
-  to `off` to disable spawning the helpy stdio MCP for `web_search` /
-  `web_fetch`. `SLOPSHELL_HELPY_ARGS` overrides the args (default `mcp-stdio`).
+- `SLOPSHELL_HELPY_SOCKET` overrides the helpy runtime unix socket path
+  (default `$XDG_RUNTIME_DIR/sloppy/helpy.sock` on Linux and
+  `$HOME/Library/Caches/sloppy/helpy.sock` on macOS); set it to `off` to
+  disable helpy-backed `web_search` / `web_fetch` tools in Slopshell.
 - `SLOPSHELL_MCP_SOCKET` overrides the embedded sloptools unix socket path
   (default `$XDG_RUNTIME_DIR/sloppy/mcp.sock`).
 - `SLOPSHELL_BRAIN_WORK_ROOT` and `SLOPSHELL_BRAIN_PRIVATE_ROOT` point the

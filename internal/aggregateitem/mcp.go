@@ -1,16 +1,15 @@
 package aggregateitem
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sloppy-org/slopshell/internal/mcpclient"
 )
 
 const (
@@ -22,8 +21,7 @@ const (
 )
 
 type Client struct {
-	endpoint mcpEndpoint
-	client   *http.Client
+	client *mcpclient.Client
 }
 
 type BindRequest struct {
@@ -74,23 +72,19 @@ type SetStatusRequest struct {
 	TodoistListID string
 }
 
-type mcpEndpoint struct {
-	socket  string
-	httpURL string
-}
-
 func NewClient(rawEndpoint string, client *http.Client) (*Client, error) {
-	ep, err := parseEndpoint(rawEndpoint)
+	ep, err := mcpclient.ParseEndpoint(rawEndpoint)
 	if err != nil {
 		return nil, err
 	}
-	if !ep.ok() {
-		return nil, errors.New("aggregate item MCP endpoint is required")
+	mcp, err := mcpclient.New(ep, client, 20*time.Second)
+	if err != nil {
+		if strings.Contains(err.Error(), "not configured") {
+			return nil, errors.New("aggregate item MCP endpoint is required")
+		}
+		return nil, err
 	}
-	if client == nil {
-		client = ep.httpClient(20 * time.Second)
-	}
-	return &Client{endpoint: ep, client: client}, nil
+	return &Client{client: mcp}, nil
 }
 
 func (c *Client) Bind(ctx context.Context, req BindRequest) (map[string]any, error) {
@@ -227,34 +221,7 @@ func (c *Client) call(ctx context.Context, name string, arguments map[string]any
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	payload := map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name":      name,
-			"arguments": arguments,
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint.url("/mcp"), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("MCP call failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
-	}
-	return decodeMCPResponse(resp.Body, name)
+	return c.client.CallTool(ctx, name, arguments)
 }
 
 func sourceBindingsArg(bindings []SourceBinding) ([]map[string]any, error) {
@@ -321,28 +288,6 @@ func cleanBinding(binding map[string]any) map[string]any {
 	return clean
 }
 
-func decodeMCPResponse(body io.Reader, tool string) (map[string]any, error) {
-	var envelope map[string]any
-	if err := json.NewDecoder(body).Decode(&envelope); err != nil {
-		return nil, err
-	}
-	if rpcErr, ok := envelope["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("MCP error: %v", rpcErr["message"])
-	}
-	result, _ := envelope["result"].(map[string]any)
-	if result == nil {
-		return nil, errors.New("MCP call failed: missing result")
-	}
-	if isErr, _ := result["isError"].(bool); isErr {
-		return nil, fmt.Errorf("MCP tool %q failed: %s", tool, resultErrorText(result))
-	}
-	structured, _ := result["structuredContent"].(map[string]any)
-	if structured == nil {
-		return nil, errors.New("MCP call failed: missing structuredContent")
-	}
-	return structured, nil
-}
-
 func decodeStructuredField[T any](structured map[string]any, key string) (T, error) {
 	var out T
 	raw, ok := structured[key]
@@ -357,71 +302,6 @@ func decodeStructuredField[T any](structured map[string]any, key string) (T, err
 		return out, err
 	}
 	return out, nil
-}
-
-func resultErrorText(result map[string]any) string {
-	content, _ := result["content"].([]any)
-	for _, item := range content {
-		entry, _ := item.(map[string]any)
-		if entry == nil {
-			continue
-		}
-		if text := strings.TrimSpace(fmt.Sprint(entry["text"])); text != "" && text != "<nil>" {
-			return text
-		}
-	}
-	return "remote tool returned error"
-}
-
-func parseEndpoint(raw string) (mcpEndpoint, error) {
-	s := strings.TrimSpace(raw)
-	switch {
-	case s == "":
-		return mcpEndpoint{}, nil
-	case strings.HasPrefix(s, "unix:"):
-		path := strings.TrimPrefix(strings.TrimPrefix(s, "unix:"), "//")
-		if path == "" {
-			return mcpEndpoint{}, errors.New("empty unix socket path")
-		}
-		return mcpEndpoint{socket: path}, nil
-	case strings.HasPrefix(s, "/"):
-		return mcpEndpoint{socket: s}, nil
-	case strings.HasPrefix(s, "http://"), strings.HasPrefix(s, "https://"):
-		return mcpEndpoint{httpURL: strings.TrimRight(strings.TrimSuffix(s, "/mcp"), "/")}, nil
-	default:
-		return mcpEndpoint{}, fmt.Errorf("unrecognized MCP endpoint: %q", s)
-	}
-}
-
-func (e mcpEndpoint) ok() bool {
-	return strings.TrimSpace(e.socket) != "" || strings.TrimSpace(e.httpURL) != ""
-}
-
-func (e mcpEndpoint) url(route string) string {
-	if !strings.HasPrefix(route, "/") {
-		route = "/" + route
-	}
-	if e.socket != "" {
-		return "http://unix" + route
-	}
-	return strings.TrimRight(e.httpURL, "/") + route
-}
-
-func (e mcpEndpoint) httpClient(timeout time.Duration) *http.Client {
-	if e.socket == "" {
-		return &http.Client{Timeout: timeout}
-	}
-	socket := e.socket
-	return &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", socket)
-			},
-			ResponseHeaderTimeout: timeout,
-		},
-	}
 }
 
 func addString(args map[string]any, key, value string) {

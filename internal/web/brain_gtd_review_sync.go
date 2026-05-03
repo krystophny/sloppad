@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,11 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/sloppy-org/slopshell/internal/mcpclient"
 	"github.com/sloppy-org/slopshell/internal/store"
 	tabsync "github.com/sloppy-org/slopshell/internal/sync"
 )
@@ -109,8 +107,8 @@ func brainGTDSyncEnabled() bool {
 	}
 }
 
-func defaultFetchBrainGTDReviewList(_ *App, ctx context.Context, sphere string) (brainGTDReviewList, error) {
-	result, err := sloptoolsBrainGTDCall(ctx, brainGTDReviewListTool, map[string]interface{}{
+func defaultFetchBrainGTDReviewList(app *App, ctx context.Context, sphere string) (brainGTDReviewList, error) {
+	result, err := sloptoolsBrainGTDCall(app, ctx, brainGTDReviewListTool, map[string]interface{}{
 		"sphere":  sphere,
 		"limit":   10000,
 		"sources": []string{"markdown", "tasks"},
@@ -122,8 +120,8 @@ func defaultFetchBrainGTDReviewList(_ *App, ctx context.Context, sphere string) 
 	return out, decodeBrainGTDToolResult(result, &out)
 }
 
-func defaultFetchBrainGTDCommitmentList(_ *App, ctx context.Context, sphere string) (brainGTDCommitmentList, error) {
-	result, err := sloptoolsBrainGTDCall(ctx, brainGTDListTool, map[string]interface{}{
+func defaultFetchBrainGTDCommitmentList(app *App, ctx context.Context, sphere string) (brainGTDCommitmentList, error) {
+	result, err := sloptoolsBrainGTDCall(app, ctx, brainGTDListTool, map[string]interface{}{
 		"sphere": sphere,
 	})
 	if err != nil {
@@ -133,44 +131,38 @@ func defaultFetchBrainGTDCommitmentList(_ *App, ctx context.Context, sphere stri
 	return out, decodeBrainGTDToolResult(result, &out)
 }
 
-func sloptoolsBrainGTDCall(ctx context.Context, tool string, args map[string]interface{}) (map[string]interface{}, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	callCtx, cancel := context.WithTimeout(ctx, sourceSyncCommandTimeout)
-	defer cancel()
-	body, err := json.Marshal(args)
+func sloptoolsBrainGTDCall(app *App, ctx context.Context, tool string, args map[string]interface{}) (map[string]interface{}, error) {
+	client, err := localMCPClient(app)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(callCtx, sloptoolsBinary(), "tools", "call", tool, "--args", string(body))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if callCtx.Err() != nil {
-			return nil, callCtx.Err()
-		}
-		return nil, fmt.Errorf("%s failed: %w: %s", tool, err, strings.TrimSpace(stderr.String()))
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", tool, err)
-	}
-	return result, nil
+	callCtx, cancel := context.WithTimeout(contextOrBackground(ctx), sourceSyncCommandTimeout)
+	defer cancel()
+	return client.CallTool(callCtx, tool, args)
 }
 
-func sloptoolsBinary() string {
-	if bin := strings.TrimSpace(os.Getenv("SLOPSHELL_SLOPTOOLS_BIN")); bin != "" {
-		return bin
+func localMCPClient(app *App) (*mcpclient.Client, error) {
+	endpoint := mcpEndpoint{}
+	if app != nil {
+		endpoint = app.localMCPEndpoint
+	} else {
+		parsed, err := parseEndpoint(defaultLocalMCPSocket())
+		if err != nil {
+			return nil, err
+		}
+		endpoint = parsed
 	}
-	if bin, err := exec.LookPath("sloptools"); err == nil {
-		return bin
+	if !endpoint.ok() {
+		return nil, errors.New("local MCP endpoint is not configured")
 	}
-	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		return filepath.Join(home, ".local", "bin", "sloptools")
+	return mcpclient.New(endpoint.clientEndpoint(), nil, sourceSyncCommandTimeout)
+}
+
+func contextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
 	}
-	return "sloptools"
+	return ctx
 }
 
 func decodeBrainGTDToolResult(result map[string]interface{}, target any) error {

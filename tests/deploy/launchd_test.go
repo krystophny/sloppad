@@ -39,7 +39,7 @@ var expectedPlists = []struct {
 	{
 		file:   "io.slopshell.web.plist",
 		label:  "io.slopshell.web",
-		tokens: []string{"@@BIN_PATH@@", "@@PROJECT_DIR@@", "@@WEB_DATA_DIR@@", "@@SLOPSHELL_INTENT_LLM_URL@@"},
+		tokens: []string{"@@BIN_PATH@@", "@@PROJECT_DIR@@", "@@WEB_DATA_DIR@@", "@@SLOPSHELL_INTENT_LLM_URL@@", "@@SLOPSHELL_HELPY_SOCKET@@"},
 	},
 }
 
@@ -158,6 +158,7 @@ func TestLaunchdTemplateTokenSubstitution(t *testing.T) {
 		"@@VOXTYPE_BIN@@":           "/tmp/voxtype",
 		"@@SLOPSHELL_WEB_HOST@@":       "127.0.0.1",
 		"@@SLOPSHELL_INTENT_LLM_URL@@": "http://127.0.0.1:8081",
+		"@@SLOPSHELL_HELPY_SOCKET@@":   "/tmp/helpy.sock",
 	}
 
 	for _, tc := range expectedPlists {

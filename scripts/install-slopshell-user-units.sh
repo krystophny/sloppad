@@ -42,20 +42,16 @@ VOXTYPE_PATH=""
 BIN_PATH=""
 WEB_DATA_DIR=""
 
-resolve_helpy_bin() {
-  if [ -n "${SLOPSHELL_HELPY_BIN:-}" ]; then
-    printf '%s' "$SLOPSHELL_HELPY_BIN"
+resolve_helpy_socket() {
+  if [ -n "${SLOPSHELL_HELPY_SOCKET:-}" ]; then
+    printf '%s' "$SLOPSHELL_HELPY_SOCKET"
     return 0
   fi
-  if [ -x "$HOME/.local/bin/helpy" ]; then
-    printf '%s' "$HOME/.local/bin/helpy"
+  if [ "$PLATFORM" = "Darwin" ]; then
+    printf '%s' "$HOME/Library/Caches/sloppy/helpy.sock"
     return 0
   fi
-  if command -v helpy >/dev/null 2>&1; then
-    command -v helpy
-    return 0
-  fi
-  printf 'helpy'
+  printf '%%t/sloppy/helpy.sock'
 }
 
 install_sls_binary() {
@@ -69,6 +65,20 @@ install_sls_binary() {
   fi
   if ! printf ':%s:' "$PATH" | grep -Fq ":${sls_bin_dir}:"; then
     log "${sls_bin_dir} is not in PATH; add it to your shell profile to use sls"
+  fi
+}
+
+install_slopshell_binary() {
+  local bin_dir
+  bin_dir="${SLOPSHELL_BIN_DIR:-${HOME}/.local/bin}"
+  BIN_PATH="${bin_dir}/slopshell"
+  log "Building slopshell binary -> ${BIN_PATH}"
+  mkdir -p "$bin_dir"
+  if ! (cd "$REPO_ROOT" && go build -o "$BIN_PATH" ./cmd/slopshell); then
+    fail "go build failed for slopshell"
+  fi
+  if ! printf ':%s:' "$PATH" | grep -Fq ":${bin_dir}:"; then
+    log "${bin_dir} is not in PATH; add it to your shell profile to use slopshell"
   fi
 }
 
@@ -205,7 +215,7 @@ install_linux() {
   local unit_src="$REPO_ROOT/deploy/systemd/user"
   local unit_dst="$HOME/.config/systemd/user"
   local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
-  local helpy_bin
+  local helpy_socket
   local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
   local -a core_units=(
     slopshell-codex-app-server.service
@@ -215,8 +225,9 @@ install_linux() {
   )
   local -a optional_units=()
 
+  install_slopshell_binary
   install_sls_binary
-  helpy_bin="$(resolve_helpy_bin)"
+  helpy_socket="$(resolve_helpy_socket)"
   mkdir -p "$unit_dst"
   for f in "$unit_src"/*.service; do
     local base
@@ -225,10 +236,11 @@ install_linux() {
       continue
     fi
     sed -e "s|@@REPO_ROOT@@|${REPO_ROOT}|g" \
+        -e "s|@@BIN_PATH@@|${BIN_PATH}|g" \
         -e "s|@@LLAMA_SERVER_BIN@@|${LLAMA_SERVER_BIN_RESOLVED}|g" \
         -e "s|@@SLOPSHELL_WEB_HOST@@|${web_host}|g" \
         -e "s|@@SLOPSHELL_INTENT_LLM_URL@@|${effective_llm_url}|g" \
-        -e "s|@@SLOPSHELL_HELPY_BIN@@|${helpy_bin}|g" \
+        -e "s|@@SLOPSHELL_HELPY_SOCKET@@|${helpy_socket}|g" \
         "$f" > "$unit_dst/$base"
   done
   if [ -n "$REUSE_LLM_URL" ]; then
@@ -238,6 +250,7 @@ install_linux() {
 
   # Disable legacy units
   systemctl --user disable --now \
+    slopshell.service \
     slopshell-dev-watch.path \
     slopshell-mcp.service \
     slopshell-voxtype-mcp.service \
@@ -338,6 +351,7 @@ install_macos() {
   local piper_model_dir piper_venv_dir llm_source_dir
   local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
   local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
+  local helpy_socket
 
   [ -d "$plist_src" ] || fail "launchd templates not found: $plist_src"
 
@@ -352,6 +366,7 @@ install_macos() {
   CODEX_PATH="$(command -v codex 2>/dev/null || true)"
   VOXTYPE_PATH="$(command -v voxtype 2>/dev/null || echo voxtype)"
   WEB_DATA_DIR="${data_root}/web-data"
+  helpy_socket="$(resolve_helpy_socket)"
   piper_model_dir="${HOME}/.local/share/slopshell-piper-tts/models"
   piper_venv_dir="${HOME}/.local/share/slopshell-piper-tts/venv"
   llm_source_dir="${data_root}/llm/vllm-mlx"
@@ -413,6 +428,7 @@ install_macos() {
       -e "s|@@STT_SETUP_SCRIPT@@|${REPO_ROOT}/scripts/setup-voxtype-stt.sh|g" \
       -e "s|@@VOXTYPE_BIN@@|${VOXTYPE_PATH}|g" \
       -e "s|@@SLOPSHELL_INTENT_LLM_URL@@|${effective_llm_url}|g" \
+      -e "s|@@SLOPSHELL_HELPY_SOCKET@@|${helpy_socket}|g" \
       "$src" > "$dst"
     log "Installed plist: $dst"
   done

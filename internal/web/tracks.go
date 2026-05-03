@@ -275,7 +275,7 @@ func defaultBrainGTDFocusCall(ctx context.Context, sphere string, updates map[st
 	for key, value := range updates {
 		args[key] = value
 	}
-	result, err := sloptoolsBrainGTDCall(ctx, "brain.gtd.focus", args)
+	result, err := sloptoolsBrainGTDCall(nil, ctx, "brain.gtd.focus", args)
 	if err != nil {
 		return brainGTDFocus{}, err
 	}

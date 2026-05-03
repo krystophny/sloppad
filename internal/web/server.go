@@ -67,10 +67,7 @@ type App struct {
 	localProjectDir               string
 	localMCPSocket                string
 	localMCPEndpoint              mcpEndpoint
-	helpyBin                      string
-	helpyArgs                     []string
-	helpyMu                       sync.Mutex
-	helpy                         *helpyStdioClient
+	helpyEndpoint                 mcpEndpoint
 	appServerURL                  string
 	appServerModel                string
 	appServerSparkReasoningEffort string
@@ -216,16 +213,6 @@ func New(dataDir, localProjectDir, localMCPSocket, appServerURL, model, ttsURL, 
 	if strings.EqualFold(resolvedAssistantLLMModel, "off") {
 		resolvedAssistantLLMModel = ""
 	}
-	helpyBin := strings.TrimSpace(os.Getenv("SLOPSHELL_HELPY_BIN"))
-	helpyArgs := []string{"mcp-stdio"}
-	if strings.EqualFold(helpyBin, "off") {
-		helpyBin = ""
-	} else if helpyBin == "" {
-		helpyBin = "helpy"
-	}
-	if extra := strings.TrimSpace(os.Getenv("SLOPSHELL_HELPY_ARGS")); extra != "" {
-		helpyArgs = strings.Fields(extra)
-	}
 	resolvedLocalMCPSocket := strings.TrimSpace(localMCPSocket)
 	if resolvedLocalMCPSocket == "" {
 		resolvedLocalMCPSocket = strings.TrimSpace(os.Getenv("SLOPSHELL_MCP_SOCKET"))
@@ -237,6 +224,17 @@ func New(dataDir, localProjectDir, localMCPSocket, appServerURL, model, ttsURL, 
 	if mcpErr != nil {
 		cleanup()
 		return nil, mcpErr
+	}
+	resolvedHelpySocket := strings.TrimSpace(os.Getenv("SLOPSHELL_HELPY_SOCKET"))
+	if strings.EqualFold(resolvedHelpySocket, "off") {
+		resolvedHelpySocket = ""
+	} else if resolvedHelpySocket == "" {
+		resolvedHelpySocket = defaultHelpySocket()
+	}
+	resolvedHelpyEndpoint, helpyErr := parseEndpoint(resolvedHelpySocket)
+	if helpyErr != nil {
+		cleanup()
+		return nil, helpyErr
 	}
 	resolvedIntentLLMURL := strings.TrimSpace(os.Getenv("SLOPSHELL_INTENT_LLM_URL"))
 	if strings.EqualFold(resolvedIntentLLMURL, "off") {
@@ -341,8 +339,7 @@ func New(dataDir, localProjectDir, localMCPSocket, appServerURL, model, ttsURL, 
 		localProjectDir:               localProjectDir,
 		localMCPSocket:                resolvedLocalMCPEndpoint.socket,
 		localMCPEndpoint:              resolvedLocalMCPEndpoint,
-		helpyBin:                      helpyBin,
-		helpyArgs:                     helpyArgs,
+		helpyEndpoint:                 resolvedHelpyEndpoint,
 		appServerURL:                  appServerURL,
 		appServerModel:                resolvedModel,
 		appServerSparkReasoningEffort: resolvedSparkReasoningEffort,
@@ -673,6 +670,7 @@ func (a *App) handleRuntime(w http.ResponseWriter, r *http.Request) {
 		"version":                     "0.2.1",
 		"dev_mode":                    a.devRuntime,
 		"local_mcp_socket":            a.localMCPSocket,
+		"helpy_socket":                a.helpyEndpoint.socket,
 		"app_server_url":              a.appServerURL,
 		"app_server_model":            a.appServerModel,
 		"app_server_reasoning_effort": sparkReasoningEffort,
@@ -933,6 +931,9 @@ func (a *App) start(host string, port int, certFile, keyFile string) error {
 		if a.localMCPSocket != "" {
 			fmt.Printf("  local MCP:     unix:%s (mode 0600)\n", a.localMCPSocket)
 		}
+	}
+	if a.helpyEndpoint.socket != "" {
+		fmt.Printf("  helpy MCP:     unix:%s (mode 0600)\n", a.helpyEndpoint.socket)
 	}
 	var err error
 	if certFile != "" && keyFile != "" {

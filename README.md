@@ -96,7 +96,7 @@ AI surface.
 slopshell bootstrap --workspace-dir .
 ./scripts/setup-slopshell-mcp.sh
 sloptools mcp-server --workspace-dir . --data-dir ~/.local/share/sloppy
-helpy mcp-stdio
+helpy mcp-serve --unix-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/helpy.sock"
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --mcp-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock" --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --mcp-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/mcp.sock" --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```

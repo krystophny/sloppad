@@ -21,7 +21,7 @@ func newAuthedTestApp(t *testing.T) *App {
 	t.Helper()
 	t.Setenv("SLOPSHELL_BACKGROUND_SYNC", "off")
 	t.Setenv("SLOPSHELL_BRAIN_GTD_SYNC", "off")
-	t.Setenv("SLOPSHELL_HELPY_BIN", "off")
+	t.Setenv("SLOPSHELL_HELPY_SOCKET", "off")
 	app, err := New(t.TempDir(), "", "", "", "", "", "", false)
 	if err != nil {
 		t.Fatalf("new app: %v", err)

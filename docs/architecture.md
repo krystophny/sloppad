@@ -16,6 +16,7 @@ described here are private Slopshell runtime interfaces.
 
 Runtime stack:
 - `slopshell-web.service` runs the Go monolith (`slopshell server`)
+- `helpy-mcp.service` runs the private helpy runtime daemon on `unix:$XDG_RUNTIME_DIR/sloppy/helpy.sock`
 - `slopshell-codex-app-server.service` runs Codex app-server
 - `slopshell-piper-tts.service` runs Piper TTS API on loopback
 - `slopshell-llm.service` runs the Qwen3 0.6B local coordinator on loopback (`/v1/chat/completions`)

@@ -161,20 +161,12 @@ have_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
-resolve_helpy_bin() {
-    if [ -n "${SLOPSHELL_HELPY_BIN:-}" ]; then
-        printf '%s' "$SLOPSHELL_HELPY_BIN"
+resolve_helpy_socket() {
+    if [ -n "${SLOPSHELL_HELPY_SOCKET:-}" ]; then
+        printf '%s' "$SLOPSHELL_HELPY_SOCKET"
         return 0
     fi
-    if [ -x "$HOME/.local/bin/helpy" ]; then
-        printf '%s' "$HOME/.local/bin/helpy"
-        return 0
-    fi
-    if have_cmd helpy; then
-        command -v helpy
-        return 0
-    fi
-    printf 'helpy'
+    printf '%%t/sloppy/helpy.sock'
 }
 
 voxtype_supports_stt_service() {
@@ -951,16 +943,16 @@ UNIT
     fi
 
     local effective_llm_url="${REUSE_LLM_URL:-http://127.0.0.1:8081}"
-    local helpy_bin
+    local helpy_socket
     local web_host="${SLOPSHELL_WEB_HOST:-127.0.0.1}"
     local web_mcp_args="--mcp-socket %t/sloppy/mcp.sock"
-    helpy_bin="$(resolve_helpy_bin)"
+    helpy_socket="$(resolve_helpy_socket)"
 
     cat >"${systemd_dir}/slopshell-web.service" <<UNIT
 [Unit]
 Description=Slopshell Web UI
-After=network.target slopshell-codex-app-server.service slopshell-piper-tts.service
-Wants=slopshell-codex-app-server.service slopshell-piper-tts.service
+After=network.target slopshell-codex-app-server.service slopshell-piper-tts.service helpy-mcp.service
+Wants=slopshell-codex-app-server.service slopshell-piper-tts.service helpy-mcp.service
 
 [Service]
 Type=simple
@@ -968,7 +960,7 @@ Environment=SLOPSHELL_INTENT_LLM_URL=${effective_llm_url}
 Environment=SLOPSHELL_INTENT_LLM_MODEL=local
 Environment=SLOPSHELL_INTENT_LLM_PROFILE=qwen3.5-9b
 Environment=SLOPSHELL_INTENT_LLM_PROFILE_OPTIONS=qwen3.5-9b,qwen3.5-4b
-Environment=SLOPSHELL_HELPY_BIN=${helpy_bin}
+Environment=SLOPSHELL_HELPY_SOCKET=${helpy_socket}
 Environment=SLOPSHELL_ASSISTANT_LLM_URL=${effective_llm_url}
 Environment=SLOPSHELL_ASSISTANT_LLM_MODEL=local
 Environment=SLOPSHELL_BRAIN_GTD_SYNC=on
@@ -986,6 +978,7 @@ install_services_linux() {
     have_cmd systemctl || fail "systemctl is required for Linux service setup"
     write_systemd_units
     run_cmd systemctl --user daemon-reload
+    run_cmd systemctl --user disable --now slopshell.service >/dev/null 2>&1 || true
     if [ -n "$REUSE_LLM_URL" ]; then
         run_cmd systemctl --user disable --now slopshell-llm.service slopshell-codex-llm.service >/dev/null 2>&1 || true
     fi
@@ -1141,6 +1134,7 @@ remove_linux_services() {
     systemd_dir="${HOME}/.config/systemd/user"
     if have_cmd systemctl; then
         run_cmd systemctl --user disable --now \
+            slopshell.service \
             slopshell-web.service slopshell-piper-tts.service slopshell-codex-app-server.service \
             slopshell-llm.service slopshell-codex-llm.service >/dev/null 2>&1 || true
         run_cmd systemctl --user daemon-reload >/dev/null 2>&1 || true

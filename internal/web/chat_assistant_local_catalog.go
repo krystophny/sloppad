@@ -23,9 +23,8 @@ type localAssistantExecutableTool struct {
 	InternalName string
 	DefaultArgs  map[string]any
 	Definition   map[string]any
-	// WebTool indicates this tool comes from the helpy stdio MCP (web search,
-	// web fetch). Routed through the shared helpy subprocess instead of the
-	// workspace sloptools unix-socket endpoint.
+	// WebTool indicates this tool comes from the helpy runtime MCP daemon
+	// (web search, web fetch), not the workspace sloppy endpoint.
 	WebTool bool
 }
 
@@ -46,16 +45,17 @@ func (a *App) buildLocalAssistantToolCatalog(state localAssistantTurnState, fami
 	for _, tool := range localAssistantCoreTools(state, family) {
 		out.add(tool)
 	}
-	// Web tools are always available when the helpy stdio MCP is reachable, so
+	// Web tools are always available when the helpy runtime MCP is reachable, so
 	// the model can decide to search/fetch on any turn (same pattern as Claude
 	// Code, Codex CLI, and OpenCode: expose the tools, let the model pick).
 	if a.helpyEnabled() {
 		webTools, err := a.listHelpyTools()
 		if err != nil {
-			return localAssistantToolCatalog{}, err
-		}
-		for _, tool := range localAssistantWebMCPTools(webTools) {
-			out.add(tool)
+			log.Printf("helpy tools/list failed (%v); proceeding without web MCP tools", err)
+		} else {
+			for _, tool := range localAssistantWebMCPTools(webTools) {
+				out.add(tool)
+			}
 		}
 	}
 	if family == localAssistantToolFamilyNone || !state.mcpEndpoint.ok() {

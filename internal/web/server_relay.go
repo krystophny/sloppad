@@ -1,13 +1,9 @@
 package web
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	"github.com/sloppy-org/slopshell/internal/mcpclient"
 	"github.com/sloppy-org/slopshell/internal/serve"
 )
 
@@ -72,131 +69,35 @@ func (a *App) mcpToolsCall(ep mcpEndpoint, name string, arguments map[string]int
 	return mcpToolsCallEndpoint(ep, name, arguments)
 }
 
-type mcpListedTool struct {
-	Name        string
-	Description string
-	InputSchema map[string]any
-}
-
 func mcpToolsListEndpoint(ep mcpEndpoint) ([]mcpListedTool, error) {
-	if !ep.ok() {
-		return nil, errors.New("MCP list: endpoint not configured")
+	client, err := mcpclient.New(ep.clientEndpoint(), nil, mcpToolsCallTimeout)
+	if err != nil {
+		return nil, err
 	}
-	payload := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]interface{}{}}
-	b, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), mcpToolsCallTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.HTTPURL("/mcp"), bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cachedHTTPClientForEndpoint(ep, mcpToolsCallTimeout).Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return nil, fmt.Errorf("MCP list timed out after %s", mcpToolsCallTimeout)
-		}
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("MCP list failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var out map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	if e, ok := out["error"].(map[string]any); ok {
-		return nil, fmt.Errorf("MCP error: %v", e["message"])
-	}
-	result, _ := out["result"].(map[string]any)
-	if result == nil {
-		return nil, errors.New("MCP list failed: missing result")
-	}
-	rawTools, _ := result["tools"].([]any)
-	tools := make([]mcpListedTool, 0, len(rawTools))
-	for _, raw := range rawTools {
-		obj, _ := raw.(map[string]any)
-		if obj == nil {
-			continue
-		}
-		schema, _ := obj["inputSchema"].(map[string]any)
-		tools = append(tools, mcpListedTool{
-			Name:        strings.TrimSpace(fmt.Sprint(obj["name"])),
-			Description: strings.TrimSpace(fmt.Sprint(obj["description"])),
-			InputSchema: schema,
-		})
-	}
-	return tools, nil
+	return client.ListTools(ctx)
 }
 
 func mcpToolsCallEndpoint(ep mcpEndpoint, name string, arguments map[string]interface{}) (map[string]interface{}, error) {
-	if !ep.ok() {
-		return nil, errors.New("MCP call: endpoint not configured")
+	client, err := mcpclient.New(ep.clientEndpoint(), nil, mcpToolsCallTimeout)
+	if err != nil {
+		return nil, err
 	}
-	payload := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]interface{}{"name": name, "arguments": arguments}}
-	b, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), mcpToolsCallTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep.HTTPURL("/mcp"), bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := cachedHTTPClientForEndpoint(ep, mcpToolsCallTimeout).Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return nil, fmt.Errorf("MCP call timed out after %s", mcpToolsCallTimeout)
-		}
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("MCP call failed: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	var out map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	if e, ok := out["error"].(map[string]interface{}); ok {
-		return nil, fmt.Errorf("MCP error: %v", e["message"])
-	}
-	result, _ := out["result"].(map[string]interface{})
-	if isErr, _ := result["isError"].(bool); isErr {
-		return nil, fmt.Errorf("MCP tool %q failed: %s", name, mcpResultErrorText(result))
-	}
-	sc, _ := result["structuredContent"].(map[string]interface{})
-	if sc == nil {
-		return nil, errors.New("MCP call failed: missing structuredContent")
-	}
-	return sc, nil
+	return client.CallTool(ctx, name, arguments)
 }
 
 func mcpResultErrorText(result map[string]interface{}) string {
 	if result == nil {
 		return "unknown error"
 	}
-	content, _ := result["content"].([]interface{})
-	parts := make([]string, 0, len(content))
-	for _, item := range content {
-		entry, _ := item.(map[string]interface{})
-		if entry == nil {
-			continue
-		}
-		text := strings.TrimSpace(fmt.Sprint(entry["text"]))
-		if text == "" || text == "<nil>" {
-			continue
-		}
-		parts = append(parts, text)
+	typed := make(map[string]any, len(result))
+	for key, value := range result {
+		typed[key] = value
 	}
-	if len(parts) == 0 {
-		return "unknown error"
-	}
-	return strings.Join(parts, " | ")
+	return mcpclient.ResultErrorText(typed)
 }
 
 func checkWSOrigin(r *http.Request) bool {
