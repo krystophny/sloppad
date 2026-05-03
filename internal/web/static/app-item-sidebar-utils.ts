@@ -616,7 +616,7 @@ export async function performItemSidebarProjectItemLink(item, projectItemID, pro
     }
     state.itemSidebarActiveItemID = itemID;
     await loadItemSidebarView(state.itemSidebarView);
-    showStatus(`linked to ${String(projectTitle || '').trim() || 'project item'}`);
+    showStatus(`linked to ${String(projectTitle || '').trim() || 'project'}`);
     return true;
   } catch (err) {
     showStatus(`project link failed: ${String(err?.message || err || 'unknown error')}`);
@@ -629,7 +629,7 @@ export async function showItemSidebarProjectItemMenu(item, x, y) {
     const itemID = Number(item?.id || 0);
     const projectItems = (await fetchItemSidebarProjectItems()).filter((entry) => entry.id !== itemID);
     if (projectItems.length === 0) {
-      showStatus('no project items available');
+      showStatus('no projects available');
       return false;
     }
     showItemSidebarMenu(projectItems.map((projectItem) => ({
@@ -897,8 +897,8 @@ function itemSidebarSharedEntries(item, x, y) {
       onClick: () => showItemSidebarWorkspaceMenu(item, x, y),
     },
     {
-      label: 'Project item...',
-      action: 'project_item',
+      label: 'Project...',
+      action: 'project',
       onClick: () => showItemSidebarProjectItemMenu(item, x, y),
     },
     ...itemSidebarSourceEntries(item),

@@ -142,7 +142,7 @@ async function submitCapture(): Promise<void> {
     if (projectRaw) {
       const projectID = Number(projectRaw);
       if (!Number.isFinite(projectID) || projectID <= 0) {
-        setError('Project item id must be a positive integer.');
+        setError('Project id must be a positive integer.');
         return;
       }
       payload.project_item_id = projectID;

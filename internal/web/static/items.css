@@ -65,7 +65,8 @@
   border: 0;
   border-right: 1px solid #d1d5db;
   border-radius: 0;
-  padding: 0.52rem 0.2rem;
+  min-height: 44px;
+  padding: 0.62rem 0.2rem;
   background: transparent;
   color: #111827;
   font-size: 0.73rem;
@@ -106,7 +107,8 @@
   border-bottom: 1px solid #d1d5db;
   border-radius: 0;
   text-align: left;
-  padding: 0.42rem 0.6rem;
+  min-height: 44px;
+  padding: 0.58rem 0.6rem;
   color: #111827;
   background: #ffffff;
   display: flex;
@@ -275,6 +277,19 @@
   letter-spacing: 0.04em;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 767px) {
+  .sidebar-tab,
+  .pr-file-item,
+  .item-sidebar-menu-item {
+    min-height: 48px;
+  }
+
+  .pr-file-item {
+    padding-top: 0.68rem;
+    padding-bottom: 0.68rem;
+  }
 }
 
 .item-sidebar-menu {

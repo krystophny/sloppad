@@ -106,7 +106,7 @@ export async function openResolvedMarkdownLink(resolution, renderCanvas) {
   const title = path || 'Linked note';
   const sourcePath = sourceContextPathForResolution(path, kind);
   const sourceNotePath = String(link.source_path || '').trim();
-  if (sourcePath && isBrainWorkspaceProject(currentWorkspaceProject()) && !isBrainRelativeVaultPath(path)) {
+  if (!link.stay_in_workspace && sourcePath && isBrainWorkspaceProject(currentWorkspaceProject()) && !isBrainRelativeVaultPath(path)) {
     const linkedWorkspacePath = resolveLinkedWorkspacePath(sourcePath);
     await startAgentHereAtPath(linkedWorkspacePath, currentWorkspaceID(), sourceNotePath);
     return;

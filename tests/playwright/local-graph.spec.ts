@@ -11,7 +11,7 @@ async function waitReady(page: Page) {
 }
 
 async function seedBrainWorkspace(page: Page) {
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     (window as any).__setProjects([
       {
         id: 'brain',
@@ -30,6 +30,7 @@ async function seedBrainWorkspace(page: Page) {
         run_state: { active_turns: 0, queued_turns: 0, is_working: false, status: 'idle' },
       },
     ], 'brain');
+    await (window as any)._slopshellApp?.fetchProjects?.();
     const state = (window as any)._slopshellApp?.getState?.();
     if (state) {
       state.activeWorkspaceId = 'brain';
@@ -112,6 +113,40 @@ test('local graph renders, filters, and opens nodes', async ({ page }) => {
   await page.locator('.canvas-local-graph-node', { hasText: 'task-7' }).click();
   await expect(page.locator('#canvas-text')).toContainText('Type: source');
   await expect(page.locator('#canvas-text')).toContainText('Source: todoist');
+});
+
+test('backlinks open in the current brain workspace', async ({ page }) => {
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/canvas.js');
+    (window as any).__mockMarkdownLinkPanel = {
+      ok: true,
+      source_path: 'topics/active.md',
+      outgoing: [],
+      broken_count: 0,
+      backlinks: [
+        {
+          source_path: 'people/alice.md',
+          link_type: 'wikilink',
+          link_target: 'active',
+          file_url: '/api/workspaces/brain/markdown-link/file?path=people%2Falice.md',
+        },
+      ],
+    };
+    (window as any).__mockMarkdownLinkFileText = '# Alice\n\nBacklink opened in brain';
+    (window as any).__harnessLog.length = 0;
+    mod.renderCanvas({
+      event_id: 'backlink-current-workspace',
+      kind: 'text_artifact',
+      title: 'topics/active.md',
+      path: 'topics/active.md',
+      text: '# Active',
+    });
+  });
+
+  await page.locator('#canvas-markdown-link-panel .canvas-link-panel-link', { hasText: 'people/alice.md' }).click();
+  await expect(page.locator('#canvas-text')).toContainText('Backlink opened in brain');
+  const log = await page.evaluate(() => (window as any).__harnessLog.slice());
+  expect(log.some((entry: any) => entry.type === 'api_fetch' && entry.action === 'project_create')).toBe(false);
 });
 
 test('local graph loads for active entity and non-markdown artifact roots', async ({ page }) => {

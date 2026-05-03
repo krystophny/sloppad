@@ -20,6 +20,7 @@
   border: 1px solid #111827;
   background: #ffffff;
   color: #111827;
+  min-height: 44px;
   padding: 0.36rem 0.5rem;
   font-size: 0.78rem;
   font-weight: 700;
@@ -83,6 +84,7 @@
 .sidebar-capture-btn {
   flex: 1 1 auto;
   width: 100%;
+  min-height: 44px;
   justify-content: center;
 }
 
@@ -97,7 +99,8 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.42rem 0.6rem;
+  min-height: 44px;
+  padding: 0.52rem 0.6rem;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -138,7 +141,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.36rem 0.7rem;
+  min-height: 44px;
+  padding: 0.52rem 0.7rem;
   border: 0;
   border-bottom: 1px solid #e5e7eb;
   border-radius: 0;
@@ -202,6 +206,7 @@
   border: 1px solid #111827;
   background: #ffffff;
   color: #111827;
+  min-height: 44px;
   padding: 0.18rem 0.42rem;
   font-size: 0.74rem;
   font-weight: 600;
@@ -237,6 +242,14 @@
   }
   .sidebar-source-pill {
     font-size: 0.7rem;
+    min-height: 48px;
     padding: 0.14rem 0.36rem;
+  }
+
+  .sidebar-sphere-btn,
+  .sidebar-capture-btn,
+  .sidebar-secondary-toggle,
+  .sidebar-secondary-row {
+    min-height: 48px;
   }
 }

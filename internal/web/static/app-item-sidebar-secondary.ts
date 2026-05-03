@@ -324,7 +324,7 @@ export function renderSidebarTabs(list) {
   }
   bindSidebarTabActivation(activeButton, openProjectItemTab);
   tabs.appendChild(activeButton);
-  ITEM_SIDEBAR_VIEWS.forEach((view) => {
+  ITEM_SIDEBAR_VIEWS.filter((view) => view !== 'inbox').forEach((view) => {
     const count = Number(state.itemSidebarCounts?.[view] || 0);
     const current = !projectItemTabActive() && state.fileSidebarMode !== 'workspace' && state.itemSidebarView === view;
     if (count <= 0 && !current) return;

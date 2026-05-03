@@ -6,12 +6,8 @@ import {
   isHorizontalSwipeIntent,
 } from './app-swipe.js';
 import {
-  deadlineBadge,
   deadlineLevelForItem,
   filterProjectItemsForSidebarView,
-  formatDateBadge,
-  projectDeadlineBadges,
-  projectItemChildBadges,
 } from './app-item-sidebar-projects.js';
 
 const { marked, apiURL, wsURL, renderCanvas, clearCanvas, getLocationFromSelection, clearLineHighlight, escapeHtml, sanitizeHtml, getActiveArtifactTitle, getActiveTextEventId, getPreviousArtifactText, getUiState, setUiMode, showIndicatorMode, hideIndicator, showTextInput, hideTextInput, showOverlay, hideOverlay, updateOverlay, isOverlayVisible, isTextInputVisible, isRecording, setRecording, getInputAnchor, setInputAnchor, getAnchorFromPoint, buildContextPrefix, getLastInputPosition, setLastInputPosition, configureLiveSession, getLiveSessionSnapshot, handleLiveSessionMessage, isLiveSessionListenActive, LIVE_SESSION_HOTWORD_DEFAULT, LIVE_SESSION_MODE_DIALOGUE, LIVE_SESSION_MODE_MEETING, onLiveSessionTTSPlaybackComplete, cancelLiveSessionListen, startLiveSession, stopLiveSession, initHotword, startHotwordMonitor, stopHotwordMonitor, isHotwordActive, onHotwordDetected, setHotwordThreshold, setHotwordAudioContext, getPreRollAudio, getHotwordMicStream, initVAD, ensureVADLoaded, float32ToWav } = env;
@@ -37,7 +33,6 @@ const fetchItemSidebarPeopleDashboard = (...args) => refs.fetchItemSidebarPeople
 const fetchItemSidebarPersonDashboard = (...args) => refs.fetchItemSidebarPersonDashboard(...args);
 const fetchItemSidebarDedupReview = (...args) => refs.fetchItemSidebarDedupReview(...args);
 const isDedupCandidateGroup = (...args) => refs.isDedupCandidateGroup(...args);
-const dedupCandidateBadges = (...args) => refs.dedupCandidateBadges(...args);
 const renderDedupCandidateRow = (...args) => refs.renderDedupCandidateRow(...args);
 const openPersonOpenLoops = (...args) => refs.openPersonOpenLoops(...args);
 const openSidebarArtifactItem = (...args) => refs.openSidebarArtifactItem(...args);
@@ -276,7 +271,7 @@ export async function openProjectItemQueue(item) {
     section: '',
   };
   await loadItemSidebarView('next', nextFilters);
-  showStatus(`project item: ${String(item?.title || '').trim() || projectItemID}`);
+  showStatus(`project: ${String(item?.title || '').trim() || projectItemID}`);
   return true;
 }
 
@@ -312,22 +307,6 @@ export async function openSidebarItem(item) {
   if (opened && isMobileViewport()) {
     closeEdgePanels();
   }
-}
-
-export function itemKindLabel(item) {
-  if (isDedupCandidateGroup(item)) return 'dedup';
-  if (isDriftSidebarItem(item)) return 'drift';
-  if (String(item?.kind || '').trim().toLowerCase() === 'person_dashboard') return 'person';
-  if (String(item?.kind || '').trim().toLowerCase() === 'project') return 'project item';
-  const artifactKind = String(item?.artifact_kind || '').trim().toLowerCase();
-  if (artifactKind === 'idea_note') return 'idea';
-  if (artifactKind === 'email' || artifactKind === 'email_thread' || artifactKind === 'email_draft') return 'email';
-  if (artifactKind === 'github_pr') return 'review';
-  if (artifactKind === 'github_issue') return 'task';
-  if (artifactKind === 'plan_note') return 'task';
-  const source = itemSourceLabel(item);
-  if (source === 'github') return 'task';
-  return 'task';
 }
 
 export function itemIconForRow(item) {
@@ -370,89 +349,6 @@ export function formatSidebarTimestamp(value) {
   const parsed = parseSidebarTimestamp(value);
   if (parsed === null) return '';
   return `${new Date(parsed).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-}
-
-function driftStateSummary(label, stateValue, updatedAt) {
-  const stateText = String(stateValue || '').trim() || label;
-  const timestamp = formatSidebarTimestamp(updatedAt);
-  return timestamp ? `${label} ${stateText} @ ${timestamp}` : `${label} ${stateText}`;
-}
-
-export function buildItemSidebarSubtitle(item) {
-  if (isDedupCandidateGroup(item)) {
-    const reasoning = String(item?.reasoning || '').trim();
-    return reasoning || 'probable duplicate group awaiting review';
-  }
-  if (isDriftSidebarItem(item)) {
-    const local = driftStateSummary('local', item?.local_state, item?.local_updated_at);
-    const upstream = driftStateSummary('upstream', item?.upstream_state, item?.upstream_updated_at);
-    const binding = String(item?.source_binding || '').trim();
-    const container = String(item?.source_container || '').trim();
-    return [local, upstream, binding, container ? `container ${container}` : ''].filter(Boolean).join(' · ');
-  }
-  if (String(item?.kind || '').trim().toLowerCase() === 'project') {
-    const nextTitle = String(item?.next_action?.title || '').trim();
-    if (nextTitle) return `Next: ${nextTitle}`;
-  }
-  const parts = [];
-  const artifactTitle = String(item?.artifact_title || '').trim();
-  if (artifactTitle) parts.push(artifactTitle);
-  const actorName = String(item?.actor_name || '').trim();
-  if (actorName) parts.push(actorName);
-  return parts.join(' · ');
-}
-
-export function buildItemSidebarBadges(item) {
-  const badges = [];
-  const kind = itemKindLabel(item);
-  if (kind) badges.push(kind);
-  if (isDedupCandidateGroup(item)) return badges.concat(dedupCandidateBadges(item));
-  if (isDriftSidebarItem(item)) {
-    const links = Array.isArray(item?.project_item_links) ? item.project_item_links : [];
-    return badges.concat(links.map((link) => `project item: ${String(link)}`));
-  }
-  if (String(item?.kind || '').trim().toLowerCase() === 'person_dashboard') {
-    return badges.concat(personOpenLoopBadges(item));
-  }
-  if (String(item?.kind || '').trim().toLowerCase() === 'project') {
-    return badges.concat(projectItemChildBadges(item), projectDeadlineBadges(item));
-  }
-  const projectTitle = String(item?.project_item_title || '').trim();
-  const projectID = Number(item?.project_item_id || 0);
-  if (projectTitle) {
-    badges.push(`project ${projectTitle}`);
-  } else if (Number.isFinite(projectID) && projectID > 0) {
-    badges.push(`project #${Math.trunc(projectID)}`);
-  }
-  const start = formatDateBadge('start', item?.follow_up_at || item?.visible_after);
-  if (start) badges.push(start);
-  const due = deadlineBadge(item?.due_at);
-  if (due) badges.push(due);
-  const source = itemSourceLabel(item);
-  if (source) badges.push(source);
-  const artifactKind = normalizeDisplayText(item?.artifact_kind).toLowerCase();
-  if (artifactKind && artifactKind !== kind) badges.push(artifactKind);
-  return badges.filter((badge, index, all) => badge && all.indexOf(badge) === index);
-}
-
-function personOpenLoopBadges(item) {
-  const counts = item && typeof item === 'object' && item.counts && typeof item.counts === 'object'
-    ? item.counts
-    : {};
-  const count = (field) => {
-    const value = Number(counts[field] || 0);
-    return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
-  };
-  const badges = [
-    `waiting ${count('waiting_on_them')}`,
-    `owed ${count('i_owe_them')}`,
-    `closed ${count('recently_closed')}`,
-  ];
-  const diagnostics = Array.isArray(item?.diagnostics) ? item.diagnostics : [];
-  if (diagnostics.some((entry) => String(entry || '').trim().startsWith('needs_person_note:'))) {
-    badges.push('needs person note');
-  }
-  return badges;
 }
 
 export function renderSidebarRow({
@@ -707,7 +603,6 @@ function renderPersonDashboard(list, dashboard) {
       icon: 'symbol',
       iconText: '!',
       label: diagnostics.join('; '),
-      badges: ['diagnostic'],
       onClick: () => {},
     }));
   }
@@ -716,7 +611,7 @@ function renderPersonDashboard(list, dashboard) {
   renderPersonOpenLoopRows(list, 'Recently closed', dashboard.recently_closed);
   const projectItems = Array.isArray(dashboard?.project_items) ? dashboard.project_items : [];
   if (projectItems.length > 0) {
-    renderPersonOpenLoopRows(list, 'Project items', projectItems);
+    renderPersonOpenLoopRows(list, 'Projects', projectItems);
   }
   return true;
 }
@@ -724,7 +619,7 @@ function renderPersonDashboard(list, dashboard) {
 function renderEmptyItemSidebarList(list) {
   const section = String(state.itemSidebarFilters?.section || '').trim().toLowerCase();
   let emptyLabel = `No ${sidebarTabLabel(state.itemSidebarView).toLowerCase()} items.`;
-  if (section === 'project_items') emptyLabel = 'No project items.';
+  if (section === 'project_items') emptyLabel = 'No active projects.';
   if (section === 'people') emptyLabel = 'No people with open loops.';
   if (section === 'dedup') emptyLabel = 'No duplicate candidates.';
   list.appendChild(renderSidebarRow({

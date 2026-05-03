@@ -1,10 +1,10 @@
 .canvas-link-panel {
   border-top: 1px solid var(--border, #e2e8f0);
   background: var(--bg-elevated, #f8fafc);
-  padding: 0.75rem 1rem;
-  max-height: 35%;
+  padding: 0.55rem 0.75rem;
+  max-height: min(28%, 14rem);
   overflow-y: auto;
-  font-size: 0.9em;
+  font-size: 0.84em;
   flex-shrink: 0;
 }
 .canvas-link-panel[hidden] {
@@ -16,7 +16,7 @@
   margin-bottom: 0.5rem;
 }
 .canvas-link-panel-section {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.45rem;
 }
 .canvas-link-panel-heading {
   font-size: 0.85em;
@@ -30,11 +30,21 @@
   padding: 0;
 }
 .canvas-link-panel-item {
-  padding: 0.25rem 0;
+  padding: 0.18rem 0;
   border-bottom: 1px solid var(--border-faint, #edf2f7);
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.15rem;
+}
+
+@media (max-width: 767px) {
+  .canvas-link-panel {
+    max-height: min(22vh, 10rem);
+  }
+
+  .canvas-link-panel-excerpt {
+    display: none;
+  }
 }
 .canvas-link-panel-item.is-blocked .canvas-link-panel-target {
   color: #9f1239;

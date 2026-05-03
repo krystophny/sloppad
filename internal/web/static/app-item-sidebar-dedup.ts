@@ -4,8 +4,6 @@ import { apiURL } from './app-env.js';
 const { refs, state } = context;
 
 const renderSidebarRow = (...args) => refs.renderSidebarRow(...args);
-const buildItemSidebarSubtitle = (...args) => refs.buildItemSidebarSubtitle(...args);
-const buildItemSidebarBadges = (...args) => refs.buildItemSidebarBadges(...args);
 const formatSidebarAge = (...args) => refs.formatSidebarAge(...args);
 const showStatus = (...args) => refs.showStatus(...args);
 const loadItemSidebarView = (...args) => refs.loadItemSidebarView(...args);
@@ -16,24 +14,11 @@ export function isDedupCandidateGroup(item) {
     && ['action', 'project'].includes(String(item?.kind || '').trim().toLowerCase());
 }
 
-export function dedupCandidateBadges(item) {
-  const kind = String(item?.kind || '').trim().toLowerCase() === 'project' ? 'project item' : 'action';
-  const stateText = String(item?.state || '').trim().replace(/_/g, ' ') || 'open';
-  const confidence = Number(item?.confidence || 0);
-  const detector = String(item?.detector || '').trim();
-  const badges = [kind, stateText];
-  if (Number.isFinite(confidence) && confidence > 0) badges.push(`confidence ${Math.round(confidence * 100)}%`);
-  if (detector) badges.push(detector);
-  return badges;
-}
-
 export function renderDedupCandidateRow(group) {
   const row = renderSidebarRow({
     icon: 'symbol',
     iconText: '=',
     label: dedupCandidateLabel(group),
-    subtitle: buildItemSidebarSubtitle(group),
-    badges: buildItemSidebarBadges(group),
     meta: formatSidebarAge(group?.detected_at),
     active: Number(group?.id || 0) === Number(state.itemSidebarActiveItemID || 0),
     item: group,
@@ -46,7 +31,7 @@ export function renderDedupCandidateRow(group) {
 }
 
 function dedupCandidateLabel(group) {
-  const kind = String(group?.kind || '').trim().toLowerCase() === 'project' ? 'Project-item duplicate' : 'Action duplicate';
+  const kind = String(group?.kind || '').trim().toLowerCase() === 'project' ? 'Project duplicate' : 'Action duplicate';
   const items = Array.isArray(group?.items) ? group.items : [];
   const outcome = String(group?.outcome || '').trim();
   return outcome ? `${kind}: ${outcome}` : `${kind} (${items.length} items)`;

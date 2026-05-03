@@ -35,8 +35,14 @@ async function seedSectionFixture(
 async function openInbox(page: Page) {
   await page.locator('#edge-left-tap').click();
   await expect(page.locator('#pr-file-pane')).toHaveClass(/is-open/);
-  await page.locator('.sidebar-tab', { hasText: 'Inbox' }).click();
-  await expect(page.locator('.sidebar-tab.is-active')).toContainText('Inbox');
+  await page.evaluate(async () => {
+    const mod = await import('../../internal/web/static/app-item-sidebar-ui.js');
+    await mod.openItemSidebarView('inbox', { section: '' });
+  });
+  await expect.poll(async () => page.evaluate(() => {
+    const state = (window as any)._slopshellApp?.getState?.() || {};
+    return String(state.itemSidebarView || '');
+  })).toBe('inbox');
 }
 
 test.describe('compact sidebar navigation (#746)', () => {
@@ -78,9 +84,10 @@ test.describe('compact sidebar navigation (#746)', () => {
     expect(layout).not.toBeNull();
     expect(layout?.primaryTop).toBeLessThanOrEqual((layout?.tabsTop || 0));
     expect(layout?.filesLabel).toEqual(expect.arrayContaining(['Active', 'Files']));
+    expect(layout?.filesLabel.filter((label) => label.startsWith('Inbox'))).toHaveLength(0);
   });
 
-  test('project items are reachable as a first-level tab', async ({ page }) => {
+  test('projects are reachable as a first-level tab', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 760 });
     await waitReady(page);
     await seedSectionFixture(page, { projectItemsOpen: 2 });
@@ -200,7 +207,7 @@ test.describe('compact sidebar navigation (#746)', () => {
     })).toBe('');
   });
 
-  test('project item section stays title-only and opens a child-action queue', async ({ page }) => {
+  test('project section stays title-only and opens a child-action queue', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
     await seedSectionFixture(page, {
@@ -270,7 +277,7 @@ test.describe('compact sidebar navigation (#746)', () => {
     await expect(page.locator('#pr-file-list')).not.toContainText('Unlinked next action');
   });
 
-  test('project item section has a clear empty state', async ({ page }) => {
+  test('project section has a clear empty state', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
     await seedSectionFixture(page, { projectItemsOpen: 0 });
@@ -287,7 +294,7 @@ test.describe('compact sidebar navigation (#746)', () => {
     await openInbox(page);
     await page.locator('.sidebar-tab', { hasText: 'Active' }).click();
 
-    await expect(page.locator('#pr-file-list .pr-file-item')).toContainText('No project items.');
+    await expect(page.locator('#pr-file-list .pr-file-item')).toContainText('No active projects.');
   });
 
   test('people section lists open-loop counts and drills into per-person queues', async ({ page }) => {
@@ -344,7 +351,7 @@ test.describe('compact sidebar navigation (#746)', () => {
     await expect(page.locator('#pr-file-list')).toContainText('Waiting on them (1)');
     await expect(page.locator('#pr-file-list')).toContainText('I owe them (1)');
     await expect(page.locator('#pr-file-list')).toContainText('Recently closed (1)');
-    await expect(page.locator('#pr-file-list')).toContainText('Project items (1)');
+    await expect(page.locator('#pr-file-list')).toContainText('Projects (1)');
     await expect(page.locator('#pr-file-list')).toContainText('Ada collaboration outcome');
   });
 
@@ -388,7 +395,7 @@ test.describe('compact sidebar navigation (#746)', () => {
     })).toBe('');
   });
 
-  test('does not conflate project items with the active workspace pin', async ({ page }) => {
+  test('does not conflate projects with the active workspace pin', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await waitReady(page);
     await seedSectionFixture(page, { projectItemsOpen: 5, recentMeetings: 0 });
@@ -433,6 +440,7 @@ test.describe('compact sidebar navigation (#746)', () => {
         captureTop: captureRect.top,
         sphereWidth: sphereRect.width,
         captureLabel: capture.textContent?.trim() || '',
+        minTabHeight: Math.min(...Array.from(document.querySelectorAll('.sidebar-tab, .pr-file-item')).map((el) => (el as HTMLElement).getBoundingClientRect().height)),
       };
     });
     expect(layout).not.toBeNull();
@@ -440,5 +448,6 @@ test.describe('compact sidebar navigation (#746)', () => {
     expect(layout?.pinBottom).toBeLessThanOrEqual((layout?.captureTop || 0) + 1);
     expect(layout?.sphereWidth).toBeGreaterThan(0);
     expect(layout?.captureLabel).toMatch(/Capture/i);
+    expect(layout?.minTabHeight).toBeGreaterThanOrEqual(47);
   });
 });

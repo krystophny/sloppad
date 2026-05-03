@@ -247,6 +247,7 @@ function renderBacklinkItem(
           vault_relative_path: entry.source_path,
           resolved_path: entry.source_path,
           source_path: panelSourcePath,
+          stay_in_workspace: true,
         },
         renderCanvas,
       ),

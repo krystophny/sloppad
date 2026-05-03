@@ -278,7 +278,7 @@ export const state = {
   },
   sidebarEdgeTapAt: 0,
   toolPalettePosition: null,
-  itemSidebarView: 'inbox',
+  itemSidebarView: 'next',
   itemSidebarFilters: {
     all_spheres: false,
     source: '',
@@ -288,7 +288,7 @@ export const state = {
     actor_id: null,
     project_item_id: null,
     workspace_unassigned: false,
-    section: '',
+    section: 'project_items',
     due_before: '',
     due_after: '',
     follow_up_before: '',
