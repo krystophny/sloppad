@@ -157,6 +157,18 @@ Utterance filtering (server-side in `internal/stt/transcribe.go`):
 - Slopshell does not require direct credentials to producer systems.
 - Producer endpoint authority remains outside Slopshell.
 - Slopshell stores local auth/session state in SQLite under web data dir.
+- Slopshell SQLite is a projection/runtime store: it may persist workspaces,
+  normalized items/artifacts/actors, external bindings and drift records,
+  batch/watch state, chat/canvas/runtime state, push registrations, and
+  Slopshell-local auth/session records.
+- `external_accounts.config_json` may store non-secret provider config such as
+  usernames, hosts, file paths, credential references, sync cursors, and other
+  rebuildable runtime settings, but it must never store raw passwords, tokens,
+  cookies, backend session state, authorization headers, or other secret
+  material.
+- Synced remote artifacts must keep metadata and bounded previews only; full
+  upstream mail/task bodies are not canonical Slopshell state and must be
+  re-fetched from the backend when needed.
 - Private runtime routes are not mounted on the web listener and stay on the private Unix socket.
 - Slopshell is UI/runtime only; backend/domain authority lives in `sloptools` (`sloppy`) and `helpy`.
 

@@ -163,7 +163,11 @@ func (a *App) mailDraftPolishContext(artifactID int64) string {
 	if subject := strings.TrimSpace(stringAny(meta["subject"])); subject != "" {
 		lines = append(lines, "Subject: "+subject)
 	}
-	if body := strings.TrimSpace(stringAny(meta["body"])); body != "" {
+	body := strings.TrimSpace(stringAny(meta["body"]))
+	if body == "" {
+		body = strings.TrimSpace(stringAny(meta["snippet"]))
+	}
+	if body != "" {
 		if len(body) > 1000 {
 			body = body[:1000] + "..."
 		}

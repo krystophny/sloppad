@@ -112,6 +112,14 @@ func validateExternalAccountConfigKey(path, key string) error {
 		return fmt.Errorf("external account config cannot store %s", fullKey)
 	case strings.Contains(cleanKey, "secret"):
 		return fmt.Errorf("external account config cannot store %s", fullKey)
+	case strings.Contains(cleanKey, "cookie"):
+		return fmt.Errorf("external account config cannot store %s", fullKey)
+	case strings.Contains(cleanKey, "session"):
+		return fmt.Errorf("external account config cannot store %s", fullKey)
+	case strings.Contains(cleanKey, "authorization"):
+		return fmt.Errorf("external account config cannot store %s", fullKey)
+	case strings.Contains(cleanKey, "api_key"), strings.Contains(cleanKey, "apikey"):
+		return fmt.Errorf("external account config cannot store %s", fullKey)
 	case strings.Contains(cleanKey, "token") && !strings.Contains(cleanKey, "file") && !strings.Contains(cleanKey, "path"):
 		return fmt.Errorf("external account config cannot store %s", fullKey)
 	default:

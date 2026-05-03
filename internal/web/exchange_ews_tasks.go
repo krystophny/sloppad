@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sloppy-org/slopshell/internal/ews"
+	"github.com/sloppy-org/slopshell/internal/projection"
 	"github.com/sloppy-org/slopshell/internal/store"
 )
 
@@ -123,7 +124,9 @@ func exchangeEWSTaskMetaJSON(task ews.Task) (string, error) {
 	payload := map[string]any{
 		"subject": task.Subject,
 		"status":  task.Status,
-		"body":    task.Body,
+	}
+	if summary := projection.PreviewText(task.Body); summary != "" {
+		payload["summary"] = summary
 	}
 	if task.StartDate != nil && !task.StartDate.IsZero() {
 		payload["start"] = task.StartDate.UTC().Format(time.RFC3339)

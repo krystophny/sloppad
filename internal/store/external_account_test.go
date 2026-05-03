@@ -117,6 +117,9 @@ func TestExternalAccountStoreRejectsInvalidConfigAndIdentity(t *testing.T) {
 	if _, err := s.CreateExternalAccount(SphereWork, ExternalProviderGmail, "Mail", map[string]any{"oauth_token": "raw-token"}); err == nil {
 		t.Fatal("expected token config rejection")
 	}
+	if _, err := s.CreateExternalAccount(SphereWork, ExternalProviderGmail, "Mail", map[string]any{"session_cookie": "raw-cookie"}); err == nil {
+		t.Fatal("expected cookie config rejection")
+	}
 	first, err := s.CreateExternalAccount(SphereWork, ExternalProviderGmail, "Mail", map[string]any{"username": "mail@example.com"})
 	if err != nil {
 		t.Fatalf("CreateExternalAccount(first) error: %v", err)
@@ -127,6 +130,9 @@ func TestExternalAccountStoreRejectsInvalidConfigAndIdentity(t *testing.T) {
 	badSphere := "office"
 	if err := s.UpdateExternalAccount(first.ID, ExternalAccountUpdate{Sphere: &badSphere}); err == nil {
 		t.Fatal("expected invalid update sphere error")
+	}
+	if err := s.UpdateExternalAccount(first.ID, ExternalAccountUpdate{Config: map[string]any{"authorization_header": "Bearer raw-token"}}); err == nil {
+		t.Fatal("expected authorization config rejection on update")
 	}
 }
 

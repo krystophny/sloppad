@@ -545,8 +545,8 @@ func TestMailDraftSendAppendsToThread(t *testing.T) {
 	if sent := stringAny(lastMsg["sent"]); sent != "true" {
 		t.Fatalf("last message sent = %q, want true", sent)
 	}
-	if body := stringAny(lastMsg["body"]); body != "Here is my reply" {
-		t.Fatalf("last message body = %q, want 'Here is my reply'", body)
+	if snippet := stringAny(lastMsg["snippet"]); snippet != "Here is my reply" {
+		t.Fatalf("last message snippet = %q, want 'Here is my reply'", snippet)
 	}
 	mc, _ := threadMetaParsed["message_count"].(float64)
 	if mc != 2 {

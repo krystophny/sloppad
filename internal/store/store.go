@@ -256,7 +256,10 @@ CREATE TABLE IF NOT EXISTS participant_room_state (
 	if err := s.migrateParticipantSessionWorkspaceKey(); err != nil {
 		return err
 	}
-	return s.migrateChatSessionWorkspaceKey()
+	if err := s.migrateChatSessionWorkspaceKey(); err != nil {
+		return err
+	}
+	return s.migrateProjectionBoundary()
 }
 
 func (s *Store) migrateChatMessageColumns() error {

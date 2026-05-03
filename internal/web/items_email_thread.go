@@ -173,11 +173,8 @@ func emailThreadMetaJSON(threadID string, messages []emailPersistedMessage) (str
 		if !persisted.Message.Date.IsZero() {
 			record["date"] = persisted.Message.Date.UTC().Format(time.RFC3339)
 		}
-		if snippet := strings.TrimSpace(persisted.Message.Snippet); snippet != "" {
+		if snippet := emailMessagePreview(persisted.Message); snippet != "" {
 			record["snippet"] = snippet
-		}
-		if body := emailMessageBody(persisted.Message); body != "" {
-			record["body"] = body
 		}
 		messagePayload = append(messagePayload, record)
 	}

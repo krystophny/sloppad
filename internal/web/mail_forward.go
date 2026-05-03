@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sloppy-org/slopshell/internal/email"
+	"github.com/sloppy-org/slopshell/internal/projection"
 	"github.com/sloppy-org/slopshell/internal/store"
 )
 
@@ -168,9 +169,11 @@ func (a *App) appendSentMessageToThread(ctx mailDraftContext) {
 		"sender":     firstNonEmpty(ctx.config.FromAddress, ctx.config.SMTPUsername, ctx.config.Username),
 		"recipients": ctx.meta.To,
 		"subject":    ctx.meta.Subject,
-		"body":       ctx.body,
 		"date":       time.Now().Format("2006-01-02 15:04"),
 		"sent":       "true",
+	}
+	if snippet := projection.PreviewText(ctx.body); snippet != "" {
+		sentMessage["snippet"] = snippet
 	}
 	messages = append(messages, sentMessage)
 	meta["messages"] = messages

@@ -1212,8 +1212,8 @@ func TestSyncEmailAccountCreatesThreadArtifactsAndLinksEmailItems(t *testing.T) 
 	if !ok {
 		t.Fatalf("thread first message = %#v", messages[0])
 	}
-	if got := strFromAny(firstMessage["body"]); got != "Please review the contract summary." {
-		t.Fatalf("thread first message body = %q, want contract summary", got)
+	if got := strFromAny(firstMessage["snippet"]); got != "Please review the contract summary." {
+		t.Fatalf("thread first message snippet = %q, want contract summary", got)
 	}
 
 	item, err := app.store.GetItemBySource(store.ExternalProviderGmail, "message:gmail-1")
@@ -1389,8 +1389,8 @@ func TestSyncEmailAccountOnlyCreatesInboxItemsForFollowUpMessages(t *testing.T) 
 	if err := json.Unmarshal([]byte(strFromPointer(artifacts[0].MetaJSON)), &emailMeta); err != nil {
 		t.Fatalf("Unmarshal(email meta) error: %v", err)
 	}
-	if got := strFromAny(emailMeta["body"]); got != body {
-		t.Fatalf("email body = %q, want %q", got, body)
+	if got := strFromAny(emailMeta["snippet"]); got != body {
+		t.Fatalf("email snippet = %q, want %q", got, body)
 	}
 }
 

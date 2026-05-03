@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sloppy-org/slopshell/internal/email"
+	"github.com/sloppy-org/slopshell/internal/projection"
 	"github.com/sloppy-org/slopshell/internal/providerdata"
 	"github.com/sloppy-org/slopshell/internal/store"
 	tabsync "github.com/sloppy-org/slopshell/internal/sync"
@@ -484,17 +485,17 @@ func emailMessageContainerRef(message *providerdata.EmailMessage, mappings []sto
 	return &ref
 }
 
-func emailMessageBody(message *providerdata.EmailMessage) string {
+func emailMessagePreview(message *providerdata.EmailMessage) string {
 	if message == nil {
 		return ""
 	}
+	if snippet := strings.TrimSpace(message.Snippet); snippet != "" {
+		return projection.PreviewText(snippet)
+	}
 	if message.BodyText != nil {
 		if body := strings.TrimSpace(*message.BodyText); body != "" {
-			return body
+			return projection.PreviewText(body)
 		}
-	}
-	if snippet := strings.TrimSpace(message.Snippet); snippet != "" {
-		return snippet
 	}
 	return ""
 }
@@ -512,11 +513,8 @@ func emailArtifactMetaJSON(message *providerdata.EmailMessage, senderActor *stor
 	if !message.Date.IsZero() {
 		payload["date"] = message.Date.UTC().Format(time.RFC3339)
 	}
-	if snippet := strings.TrimSpace(message.Snippet); snippet != "" {
+	if snippet := emailMessagePreview(message); snippet != "" {
 		payload["snippet"] = snippet
-	}
-	if body := emailMessageBody(message); body != "" {
-		payload["body"] = body
 	}
 	if senderActor != nil {
 		payload["sender_actor_id"] = senderActor.ID
