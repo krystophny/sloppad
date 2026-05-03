@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sloppy-org/slopshell/internal/store"
 )
 
 func TestAssistantBackendForTurnRoutesLocalByDefaultAndCodexOnlyForRemoteTurns(t *testing.T) {
@@ -144,6 +146,105 @@ func TestExecuteLocalAssistantShellToolTracksWorkingDirectory(t *testing.T) {
 	}
 	if got := state.currentDir; got != subdir {
 		t.Fatalf("state currentDir = %q, want %q", got, subdir)
+	}
+}
+
+func TestExecuteLocalAssistantBoundMCPToolRefreshesAffectedProjectionRows(t *testing.T) {
+	app := newAuthedTestApp(t)
+	source := store.ExternalProviderMarkdown
+	sourceRef := "brain/commitments/reviewer.md"
+	sphere := store.SphereWork
+	item, err := app.store.CreateItem("Before refresh", store.ItemOptions{
+		State:     store.ItemStateNext,
+		Sphere:    &sphere,
+		Source:    &source,
+		SourceRef: &sourceRef,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem() error: %v", err)
+	}
+	mcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode MCP payload: %v", err)
+		}
+		params, _ := payload["params"].(map[string]any)
+		name := strings.TrimSpace(strFromAny(params["name"]))
+		w.Header().Set("Content-Type", "application/json")
+		switch name {
+		case "brain.gtd.set_status":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{
+					"structuredContent": map[string]any{
+						"status": "closed",
+						"affected": []map[string]any{{
+							"domain":   "brain",
+							"kind":     "gtd_commitment",
+							"provider": "markdown",
+							"id":       sourceRef,
+							"path":     sourceRef,
+							"sphere":   sphere,
+						}},
+					},
+				},
+			})
+		case gtdParseTool:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": map[string]any{
+					"structuredContent": map[string]any{
+						"commitment": map[string]any{
+							"title":  "Refreshed from MCP",
+							"status": "closed",
+							"labels": []string{"track/urgent"},
+						},
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected MCP tool %q", name)
+		}
+	}))
+	defer mcp.Close()
+	state := localAssistantTurnState{
+		workspaceDir: t.TempDir(),
+		mcpEndpoint:  mcpEndpoint{httpURL: mcp.URL},
+	}
+	tool := localAssistantExecutableTool{
+		ModelName:    "local",
+		InternalName: "brain.gtd.set_status",
+		Kind:         localAssistantToolKindMCP,
+	}
+	result, err := app.executeLocalAssistantBoundMCPTool(context.Background(), &state, tool, localAssistantToolCall{
+		ID:   "call-gtd",
+		Name: "brain.gtd.set_status",
+		Arguments: map[string]any{
+			"sphere": sphere,
+			"path":   sourceRef,
+			"status": "closed",
+		},
+	}, map[string]any{
+		"sphere": sphere,
+		"path":   sourceRef,
+		"status": "closed",
+	})
+	if err != nil {
+		t.Fatalf("executeLocalAssistantBoundMCPTool() error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("executeLocalAssistantBoundMCPTool() returned error: %+v", result)
+	}
+	updated, err := app.store.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem() error: %v", err)
+	}
+	if updated.Title != "Refreshed from MCP" {
+		t.Fatalf("item title = %q, want refreshed title", updated.Title)
+	}
+	if updated.Track != "urgent" {
+		t.Fatalf("item track = %q, want urgent", updated.Track)
+	}
+	if updated.State != store.ItemStateDone {
+		t.Fatalf("item state = %q, want %q", updated.State, store.ItemStateDone)
 	}
 }
 

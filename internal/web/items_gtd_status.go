@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -67,7 +68,7 @@ func (a *App) handleItemGTDStatusUpdate(w http.ResponseWriter, r *http.Request) 
 		a.updateLocalGTDStatus(w, r, item, state)
 		return
 	}
-	route, result, err := a.setBrainGTDStatus(target, req, status)
+	route, result, err := a.setBrainGTDStatus(r.Context(), target, req, status)
 	if err != nil {
 		writeAPIError(w, http.StatusBadGateway, err.Error())
 		return
@@ -101,7 +102,7 @@ func (a *App) updateLocalGTDStatus(w http.ResponseWriter, r *http.Request, item 
 	writeAPIData(w, http.StatusOK, map[string]any{"item": item})
 }
 
-func (a *App) setBrainGTDStatus(target gtdStatusTarget, req itemGTDStatusRequest, status string) (gtdStatusRoute, map[string]any, error) {
+func (a *App) setBrainGTDStatus(ctx context.Context, target gtdStatusTarget, req itemGTDStatusRequest, status string) (gtdStatusRoute, map[string]any, error) {
 	route, err := a.readGTDStatusRoute(target)
 	if err != nil {
 		return gtdStatusRoute{}, nil, err
@@ -119,6 +120,9 @@ func (a *App) setBrainGTDStatus(target gtdStatusTarget, req itemGTDStatusRequest
 	}
 	result, err := a.mcpToolsCall(a.localControlEndpoint, gtdSetStatusTool, args)
 	if err != nil {
+		return gtdStatusRoute{}, nil, err
+	}
+	if _, err := a.refreshAffectedResult(ctx, a.localControlEndpoint, gtdSetStatusTool, result); err != nil {
 		return gtdStatusRoute{}, nil, err
 	}
 	return route, result, nil

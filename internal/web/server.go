@@ -440,6 +440,7 @@ func New(dataDir, localProjectDir, localControlSocket, appServerURL, model, ttsU
 	}
 	app.sourceSync = app.newSourceSyncRunner()
 	app.startItemResurfacer()
+	app.startBrainInvalidationWatch()
 	if backgroundSourceSyncEnabled() {
 		app.startSourcePush()
 		app.startSourcePoller()

@@ -2,6 +2,9 @@
 
 > **Legal notice:** Slopshell is provided "as is" and "as available" without warranties, and to the maximum extent permitted by applicable law the authors/contributors accept no liability for damages, data loss, or misuse. You are solely responsible for backups, verification, and safe operation. See [`DISCLAIMER.md`](/DISCLAIMER.md).
 
+> Historical note: This file documents a past release. For the current runtime
+> stack and MCP boundary, use `README.md` and `docs/architecture.md`.
+
 ## Scope
 
 `v0.2.0` publishes the current Daily Workspace runtime, the live `Dialogue` and `Meeting` interaction model, and the provider-routed execution stack that now defines shipped Slopshell behavior.
@@ -16,7 +19,8 @@
 
 ### Runtime and Provider Routing
 
-- The public runtime remains a single `slopshell server` process with loopback-only MCP served alongside the web UI.
+- At that point in time the public runtime remained a single `slopshell server`
+  process with loopback-only MCP served alongside the web UI.
 - Local intent routing remains available through `slopshell-llm.service`, while Spark stays the default app-server model and optional Cerebras and Gemini providers extend execution for broader tasks.
 - Runtime-facing version surfaces are aligned across the CLI binary, web runtime, MCP server, and app-server client/session handshakes.
 

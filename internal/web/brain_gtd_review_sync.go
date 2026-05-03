@@ -92,8 +92,8 @@ func (a *App) syncBrainGTDReviewLists(ctx context.Context) (brainGTDSyncResult, 
 		}
 		total.Imported += imported
 	}
-	if total.Imported > 0 {
-		a.broadcastItemsIngested(total.Imported, store.ExternalProviderMarkdown)
+	if changed := total.Imported + total.Migrated + total.Merged; changed > 0 {
+		a.broadcastItemsIngested(changed, store.ExternalProviderMarkdown)
 	}
 	return total, nil
 }

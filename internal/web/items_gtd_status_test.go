@@ -119,6 +119,48 @@ func TestItemGTDStatusReportsWriteableBindingRoute(t *testing.T) {
 	}
 }
 
+func TestItemGTDStatusRefreshesAffectedCommitmentImmediately(t *testing.T) {
+	app := newAuthedTestApp(t)
+	source := "markdown"
+	ref := "brain/commitments/reviewer.md"
+	sphere := store.SphereWork
+	item, err := app.store.CreateItem("Review feedback", store.ItemOptions{
+		State:     store.ItemStateNext,
+		Sphere:    &sphere,
+		Source:    &source,
+		SourceRef: &ref,
+	})
+	if err != nil {
+		t.Fatalf("CreateItem() error: %v", err)
+	}
+	calls := []capturedMCPCall{}
+	mcp := newGTDStatusRefreshMCPServer(t, &calls)
+	app.localControlEndpoint = mcpEndpoint{httpURL: mcp.URL}
+
+	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/gtd-status", map[string]any{
+		"state": "done",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if got := callNames(calls); !reflect.DeepEqual(got, []string{gtdParseTool, gtdSetStatusTool, gtdParseTool}) {
+		t.Fatalf("MCP calls = %#v", got)
+	}
+	updated, err := app.store.GetItem(item.ID)
+	if err != nil {
+		t.Fatalf("GetItem() error: %v", err)
+	}
+	if updated.Title != "Closed via backend" {
+		t.Fatalf("item title = %q, want refreshed backend title", updated.Title)
+	}
+	if updated.State != store.ItemStateDone {
+		t.Fatalf("item state = %q, want %q", updated.State, store.ItemStateDone)
+	}
+	if updated.Track != "review" {
+		t.Fatalf("item track = %q, want review", updated.Track)
+	}
+}
+
 func newGTDStatusMCPServer(t *testing.T, calls *[]capturedMCPCall, writeable bool) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +190,57 @@ func newGTDStatusMCPServer(t *testing.T, calls *[]capturedMCPCall, writeable boo
 			writeMCPStructuredResult(t, w, map[string]any{
 				"status":        args["status"],
 				"local_overlay": map[string]any{"status": args["status"]},
+			})
+		default:
+			t.Fatalf("unexpected MCP tool %q", name)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newGTDStatusRefreshMCPServer(t *testing.T, calls *[]capturedMCPCall) *httptest.Server {
+	t.Helper()
+	mutated := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode MCP payload: %v", err)
+		}
+		params, _ := payload["params"].(map[string]any)
+		args, _ := params["arguments"].(map[string]any)
+		name, _ := params["name"].(string)
+		*calls = append(*calls, capturedMCPCall{Name: name, Args: args})
+		w.Header().Set("Content-Type", "application/json")
+		switch name {
+		case gtdParseTool:
+			title := "Review feedback"
+			status := "next"
+			labels := []string{}
+			if mutated {
+				title = "Closed via backend"
+				status = "closed"
+				labels = []string{"track/review"}
+			}
+			writeMCPStructuredResult(t, w, map[string]any{
+				"commitment": map[string]any{
+					"title":  title,
+					"status": status,
+					"labels": labels,
+				},
+			})
+		case gtdSetStatusTool:
+			mutated = true
+			writeMCPStructuredResult(t, w, map[string]any{
+				"status": args["status"],
+				"affected": []map[string]any{{
+					"domain":   "brain",
+					"kind":     "gtd_commitment",
+					"provider": "markdown",
+					"id":       "brain/commitments/reviewer.md",
+					"path":     "brain/commitments/reviewer.md",
+					"sphere":   store.SphereWork,
+				}},
 			})
 		default:
 			t.Fatalf("unexpected MCP tool %q", name)

@@ -432,7 +432,7 @@ export function handleChatEvent(payload) {
     return;
   }
 
-  if (type === 'items_ingested') {
+  if (type === 'items_ingested' || type === 'projection_rows_changed') {
     refreshBatchItemSidebar();
     return;
   }

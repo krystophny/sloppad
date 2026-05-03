@@ -746,7 +746,7 @@ func (a *App) executeLocalAssistantBoundMCPTool(ctx context.Context, state *loca
 		return result, nil
 	}
 	result.StructuredContent = structuredContent
-	return result, nil
+	return a.finalizeLocalAssistantMCPResult(ctx, endpoint, tool.InternalName, result)
 }
 
 func localAssistantToolPayloads(result localAssistantToolResult, workspaceID int64) []map[string]any {

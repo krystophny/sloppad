@@ -95,11 +95,14 @@ AI surface.
 ```bash
 slopshell bootstrap --workspace-dir .
 ./scripts/setup-slopshell-mcp.sh
-sloptools mcp-server --project-dir . --data-dir ~/.local/share/sloppy
 helpy mcp-serve --unix-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/helpy.sock"
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --control-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/control.sock" --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --control-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/control.sock" --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 ```
+
+External agents still register `sloppy` and `helpy` as stdio MCP subprocesses.
+`slopshell server` is the UI/runtime process; it uses the private control/helpy
+Unix sockets above and is not itself an agent MCP server.
 
 ## Terminal client: `sls`
 

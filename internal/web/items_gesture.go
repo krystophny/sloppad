@@ -322,7 +322,7 @@ func (a *App) gestureWriteThroughMarkdown(item store.Item, targetState string) (
 	if err != nil {
 		return false, http.StatusBadRequest, err
 	}
-	if _, _, err := a.setBrainGTDStatus(target, itemGTDStatusRequest{}, status); err != nil {
+	if _, _, err := a.setBrainGTDStatus(context.Background(), target, itemGTDStatusRequest{}, status); err != nil {
 		return false, http.StatusBadGateway, err
 	}
 	return true, http.StatusOK, nil
@@ -515,7 +515,7 @@ func (a *App) revertGestureMarkdownSyncBack(item store.Item, priorState string) 
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
-	if _, _, err := a.setBrainGTDStatus(target, itemGTDStatusRequest{}, status); err != nil {
+	if _, _, err := a.setBrainGTDStatus(context.Background(), target, itemGTDStatusRequest{}, status); err != nil {
 		return http.StatusBadGateway, err
 	}
 	return http.StatusOK, nil
