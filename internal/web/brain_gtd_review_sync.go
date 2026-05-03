@@ -132,7 +132,7 @@ func defaultFetchBrainGTDCommitmentList(app *App, ctx context.Context, sphere st
 }
 
 func sloptoolsBrainGTDCall(app *App, ctx context.Context, tool string, args map[string]interface{}) (map[string]interface{}, error) {
-	client, err := localMCPClient(app)
+	client, err := sloptoolsMCPClient(app)
 	if err != nil {
 		return nil, err
 	}
@@ -141,21 +141,22 @@ func sloptoolsBrainGTDCall(app *App, ctx context.Context, tool string, args map[
 	return client.CallTool(callCtx, tool, args)
 }
 
-func localMCPClient(app *App) (*mcpclient.Client, error) {
-	endpoint := mcpEndpoint{}
-	if app != nil {
-		endpoint = app.localControlEndpoint
-	} else {
-		parsed, err := parseEndpoint(defaultLocalControlSocket())
-		if err != nil {
-			return nil, err
-		}
-		endpoint = parsed
+func sloptoolsMCPClient(app *App) (*mcpclient.Client, error) {
+	endpoint, err := sloptoolsEndpointForApp(app)
+	if err != nil {
+		return nil, err
 	}
 	if !endpoint.ok() {
-		return nil, errors.New("local control endpoint is not configured")
+		return nil, errors.New("sloptools MCP endpoint is not configured")
 	}
 	return mcpclient.New(endpoint.clientEndpoint(), nil, sourceSyncCommandTimeout)
+}
+
+func sloptoolsEndpointForApp(app *App) (mcpEndpoint, error) {
+	if app != nil && app.sloptoolsEndpoint.ok() {
+		return app.sloptoolsEndpoint, nil
+	}
+	return parseEndpoint(defaultSloptoolsSocket())
 }
 
 func contextOrBackground(ctx context.Context) context.Context {

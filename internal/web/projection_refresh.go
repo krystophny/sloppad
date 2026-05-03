@@ -226,8 +226,12 @@ func (a *App) refreshAffectedBrainCommitment(ctx context.Context, endpoint mcpEn
 	if sphere == "" {
 		sphere = store.SphereWork
 	}
+	endpoint, err := sloptoolsEndpointForApp(a)
+	if err != nil {
+		return false, err
+	}
 	if !endpoint.ok() {
-		return false, errors.New("MCP endpoint is not configured")
+		return false, errors.New("sloptools MCP endpoint is not configured")
 	}
 	parsed, err := mcpToolsCallEndpoint(endpoint, gtdParseTool, map[string]any{
 		"sphere": sphere,

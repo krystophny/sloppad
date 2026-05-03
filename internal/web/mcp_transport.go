@@ -74,6 +74,10 @@ func defaultLocalControlSocket() string {
 	return mcpclient.DefaultSocketPath("SLOPSHELL_CONTROL_SOCKET", "control.sock")
 }
 
+func defaultSloptoolsSocket() string {
+	return mcpclient.DefaultSocketPath("SLOPSHELL_SLOPPY_SOCKET", "sloptools.sock")
+}
+
 func defaultHelpySocket() string {
 	return mcpclient.DefaultSocketPath("SLOPSHELL_HELPY_SOCKET", "helpy.sock")
 }

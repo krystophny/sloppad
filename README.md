@@ -95,6 +95,7 @@ AI surface.
 ```bash
 slopshell bootstrap --workspace-dir .
 ./scripts/setup-slopshell-mcp.sh
+sloptools server --project-dir "$HOME" --data-dir "$HOME/.local/share/sloppy" --mcp-unix-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/sloptools.sock"
 helpy mcp-serve --unix-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/helpy.sock"
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --control-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/control.sock" --web-host 0.0.0.0 --web-port 8420 --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
 slopshell server --workspace-dir . --data-dir ~/.slopshell-web --control-socket "${XDG_RUNTIME_DIR:-$HOME/.cache}/sloppy/control.sock" --web-host 0.0.0.0 --web-port 8443 --web-cert-file ~/.config/slopshell/certs/slopshell.pem --web-key-file ~/.config/slopshell/certs/slopshell-key.pem --app-server-url ws://127.0.0.1:8787 --tts-url http://127.0.0.1:8424
@@ -155,12 +156,14 @@ go test -tags=e2e ./cmd/sls/...
 
 Slopshell runs with one web runtime plus private local backend/runtime links:
 
-1. `slopshell-web.service` (`slopshell server`, serving the private runtime socket over `--control-socket`)
-3. `slopshell-codex-app-server.service`
-4. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
+1. `sloptools-runtime.service` (`sloptools server --mcp-unix-socket ...`)
+2. `helpy-mcp.service` (`helpy mcp-serve --unix-socket ...`)
+3. `slopshell-web.service` (`slopshell server`, serving the private runtime socket over `--control-socket`)
+4. `slopshell-codex-app-server.service`
+5. TTS sidecar on `127.0.0.1:8424/v1/audio/speech`
    - default: Piper
-5. `slopshell-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
-6. `slopshell-llm.service` (local OpenAI-compatible LLM endpoint at `127.0.0.1:8081/v1/chat/completions`)
+6. `slopshell-stt.service` (voxtype daemon with STT API and push-to-talk, `/v1/audio/transcriptions`)
+7. `slopshell-llm.service` (local OpenAI-compatible LLM endpoint at `127.0.0.1:8081/v1/chat/completions`)
    - macOS default: `vllm-mlx` serving `mlx-community/Qwen3.5-9B-4bit`
    - Linux default: `llama.cpp` serving Qwen3.5 9B GGUF
    - keep the server reasoning-capable and WebUI-enabled; fast non-thinking paths disable thinking per request
@@ -176,6 +179,8 @@ Why TTS remains an HTTP sidecar:
 - Web UI/API listener: `http://localhost:8420` (public-facing)
 - Optional HTTPS listener: add `--web-cert-file <cert.pem> --web-key-file <key.pem>` (for example on `8443`)
 - Private runtime socket: `unix:$XDG_RUNTIME_DIR/sloppy/control.sock` (mode 0600)
+- Sloptools MCP socket: `unix:$XDG_RUNTIME_DIR/sloppy/sloptools.sock` (`SLOPSHELL_SLOPPY_SOCKET`)
+- Helpy MCP socket: `unix:$XDG_RUNTIME_DIR/sloppy/helpy.sock` (`SLOPSHELL_HELPY_SOCKET`)
 - Canvas websocket relay source: `unix:$XDG_RUNTIME_DIR/sloppy/control.sock` (`/ws/canvas`)
 - Codex app-server websocket: `ws://127.0.0.1:8787`
 - TTS endpoint: `http://127.0.0.1:8424/v1/audio/speech`

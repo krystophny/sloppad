@@ -205,6 +205,7 @@ func TestExecuteLocalAssistantBoundMCPToolRefreshesAffectedProjectionRows(t *tes
 		}
 	}))
 	defer mcp.Close()
+	app.sloptoolsEndpoint = mcpEndpoint{httpURL: mcp.URL}
 	state := localAssistantTurnState{
 		workspaceDir: t.TempDir(),
 		mcpEndpoint:  mcpEndpoint{httpURL: mcp.URL},

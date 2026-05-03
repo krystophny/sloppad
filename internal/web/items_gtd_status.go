@@ -107,6 +107,10 @@ func (a *App) setBrainGTDStatus(ctx context.Context, target gtdStatusTarget, req
 	if err != nil {
 		return gtdStatusRoute{}, nil, err
 	}
+	endpoint, err := sloptoolsEndpointForApp(a)
+	if err != nil {
+		return gtdStatusRoute{}, nil, err
+	}
 	args := map[string]any{
 		"sphere":     target.Sphere,
 		"status":     status,
@@ -118,11 +122,11 @@ func (a *App) setBrainGTDStatus(ctx context.Context, target gtdStatusTarget, req
 	} else {
 		args["commitment_id"] = target.CommitmentID
 	}
-	result, err := a.mcpToolsCall(a.localControlEndpoint, gtdSetStatusTool, args)
+	result, err := a.mcpToolsCall(endpoint, gtdSetStatusTool, args)
 	if err != nil {
 		return gtdStatusRoute{}, nil, err
 	}
-	if _, err := a.refreshAffectedResult(ctx, a.localControlEndpoint, gtdSetStatusTool, result); err != nil {
+	if _, err := a.refreshAffectedResult(ctx, endpoint, gtdSetStatusTool, result); err != nil {
 		return gtdStatusRoute{}, nil, err
 	}
 	return route, result, nil
@@ -132,7 +136,11 @@ func (a *App) readGTDStatusRoute(target gtdStatusTarget) (gtdStatusRoute, error)
 	if target.Path == "" {
 		return gtdStatusRoute{Target: "local_overlay"}, nil
 	}
-	result, err := a.mcpToolsCall(a.localControlEndpoint, gtdParseTool, map[string]any{
+	endpoint, err := sloptoolsEndpointForApp(a)
+	if err != nil {
+		return gtdStatusRoute{}, err
+	}
+	result, err := a.mcpToolsCall(endpoint, gtdParseTool, map[string]any{
 		"sphere": target.Sphere,
 		"path":   target.Path,
 	})

@@ -67,6 +67,7 @@ type App struct {
 	localProjectDir               string
 	localControlSocket            string
 	localControlEndpoint          mcpEndpoint
+	sloptoolsEndpoint             mcpEndpoint
 	helpyEndpoint                 mcpEndpoint
 	appServerURL                  string
 	appServerModel                string
@@ -225,6 +226,17 @@ func New(dataDir, localProjectDir, localControlSocket, appServerURL, model, ttsU
 		cleanup()
 		return nil, controlErr
 	}
+	resolvedSloptoolsSocket := strings.TrimSpace(os.Getenv("SLOPSHELL_SLOPPY_SOCKET"))
+	if strings.EqualFold(resolvedSloptoolsSocket, "off") {
+		resolvedSloptoolsSocket = ""
+	} else if resolvedSloptoolsSocket == "" {
+		resolvedSloptoolsSocket = defaultSloptoolsSocket()
+	}
+	resolvedSloptoolsEndpoint, sloppyErr := parseEndpoint(resolvedSloptoolsSocket)
+	if sloppyErr != nil {
+		cleanup()
+		return nil, sloppyErr
+	}
 	resolvedHelpySocket := strings.TrimSpace(os.Getenv("SLOPSHELL_HELPY_SOCKET"))
 	if strings.EqualFold(resolvedHelpySocket, "off") {
 		resolvedHelpySocket = ""
@@ -339,6 +351,7 @@ func New(dataDir, localProjectDir, localControlSocket, appServerURL, model, ttsU
 		localProjectDir:               localProjectDir,
 		localControlSocket:            resolvedLocalControlEndpoint.socket,
 		localControlEndpoint:          resolvedLocalControlEndpoint,
+		sloptoolsEndpoint:             resolvedSloptoolsEndpoint,
 		helpyEndpoint:                 resolvedHelpyEndpoint,
 		appServerURL:                  appServerURL,
 		appServerModel:                resolvedModel,

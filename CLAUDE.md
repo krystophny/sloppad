@@ -29,6 +29,7 @@ Do not scan source or docs unless the runtime command fails or the request is ab
 Current runtime shape:
 - `slopshell server` is the web/UI runtime. It exposes a private runtime/control Unix domain socket (mode 0600, parent dir 0700) for local Slopshell features — there is no loopback TCP MCP listener.
 - The control socket path defaults to `$XDG_RUNTIME_DIR/sloppy/control.sock` on Linux and `$HOME/Library/Caches/sloppy/control.sock` on macOS. Override with `--control-socket` or `SLOPSHELL_CONTROL_SOCKET`.
+- The sloppy MCP for mail/calendar/tasks/GTD runs as a separate private Unix-socket daemon (`sloptools server --mcp-unix-socket ...`), defaulting to `$XDG_RUNTIME_DIR/sloppy/sloptools.sock` on Linux and `$HOME/Library/Caches/sloppy/sloptools.sock` on macOS. Override with `SLOPSHELL_SLOPPY_SOCKET`; set it to `off` only if you intentionally want Slopshell features that depend on sloppy MCP to fail fast.
 - The helpy MCP for web search/fetch runs as a private Unix-socket daemon (`helpy mcp-serve --unix-socket ...`), defaulting to `$XDG_RUNTIME_DIR/sloppy/helpy.sock` on Linux and `$HOME/Library/Caches/sloppy/helpy.sock` on macOS. Disable with `SLOPSHELL_HELPY_SOCKET=off`.
 - External agents register exactly two MCP servers: `sloppy` and `helpy`.
 - Do not register `slopshell` as an agent MCP server; the local socket is private runtime/control transport only.
@@ -116,30 +117,32 @@ Important selectors:
 ## Local Services
 
 Core runtime user units:
+- `sloptools-runtime.service`
+- `helpy-mcp.service`
 - `slopshell-web.service`
 - `slopshell-codex-app-server.service`
 - `slopshell-piper-tts.service`
 - `slopshell-stt.service` (voxtype daemon with STT API and push-to-talk)
 - `slopshell-llm.service`
 
-Note: the sloptools MCP is embedded inside `slopshell-web.service` (unix socket); there is no separate `sloptools.service`.
-
 Quick status:
 
 ```bash
-systemctl --user status slopshell-web.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service --no-pager -n 40
+systemctl --user status sloptools-runtime.service helpy-mcp.service slopshell-web.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service --no-pager -n 40
 ```
 
 Restart core stack:
 
 ```bash
-systemctl --user restart slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service slopshell-web.service
+systemctl --user restart sloptools-runtime.service helpy-mcp.service slopshell-codex-app-server.service slopshell-piper-tts.service slopshell-stt.service slopshell-llm.service slopshell-web.service
 ```
 
 ## Endpoints
 
 - Web: `http://127.0.0.1:8420`
 - Private runtime socket: `unix:$XDG_RUNTIME_DIR/sloppy/control.sock` (mode 0600); `/ws/canvas`, `/files/...`, and an intentionally undocumented private control RPC route are served over the socket via http+unix for Slopshell-local control only.
+- Sloppy MCP socket: `unix:$XDG_RUNTIME_DIR/sloppy/sloptools.sock` (`SLOPSHELL_SLOPPY_SOCKET`)
+- Helpy MCP socket: `unix:$XDG_RUNTIME_DIR/sloppy/helpy.sock` (`SLOPSHELL_HELPY_SOCKET`)
 - App-server: `ws://127.0.0.1:8787`
 - TTS base URL: `http://127.0.0.1:8424` (`/v1/audio/speech`)
 - Intent LLM base URL: `http://127.0.0.1:8081` (Slopshell calls `/v1/chat/completions`)
@@ -173,6 +176,10 @@ Environment toggles:
 - `SLOPSHELL_INTENT_LLM_PROFILE` selects the active local routing profile (default `qwen3.5-9b`)
 - `SLOPSHELL_INTENT_LLM_PROFILE_OPTIONS` exposes selectable local routing profiles (default `qwen3.5-9b,qwen3.5-4b`)
 - `SLOPSHELL_STT_URL=off` disables STT sidecar usage
+- `SLOPSHELL_SLOPPY_SOCKET` overrides the sloppy runtime unix socket path
+  (default `$XDG_RUNTIME_DIR/sloppy/sloptools.sock` on Linux and
+  `$HOME/Library/Caches/sloppy/sloptools.sock` on macOS); set it to `off` only
+  when you intentionally want sloppy-backed runtime features disabled.
 - `SLOPSHELL_HELPY_SOCKET` overrides the helpy runtime unix socket path
   (default `$XDG_RUNTIME_DIR/sloppy/helpy.sock` on Linux and
   `$HOME/Library/Caches/sloppy/helpy.sock` on macOS); set it to `off` to

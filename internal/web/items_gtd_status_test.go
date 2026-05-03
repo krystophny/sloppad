@@ -31,7 +31,7 @@ func TestItemGTDStatusUsesSloptoolsForMarkdownBackedItems(t *testing.T) {
 	}
 	calls := []capturedMCPCall{}
 	mcp := newGTDStatusMCPServer(t, &calls, false)
-	app.localControlEndpoint = mcpEndpoint{httpURL: mcp.URL}
+	app.sloptoolsEndpoint = mcpEndpoint{httpURL: mcp.URL}
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/gtd-status", map[string]any{
 		"state":     "done",
@@ -106,7 +106,7 @@ func TestItemGTDStatusReportsWriteableBindingRoute(t *testing.T) {
 	}
 	calls := []capturedMCPCall{}
 	mcp := newGTDStatusMCPServer(t, &calls, true)
-	app.localControlEndpoint = mcpEndpoint{httpURL: mcp.URL}
+	app.sloptoolsEndpoint = mcpEndpoint{httpURL: mcp.URL}
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/gtd-status", map[string]any{"state": "done"})
 	if rr.Code != http.StatusOK {
@@ -135,7 +135,7 @@ func TestItemGTDStatusRefreshesAffectedCommitmentImmediately(t *testing.T) {
 	}
 	calls := []capturedMCPCall{}
 	mcp := newGTDStatusRefreshMCPServer(t, &calls)
-	app.localControlEndpoint = mcpEndpoint{httpURL: mcp.URL}
+	app.sloptoolsEndpoint = mcpEndpoint{httpURL: mcp.URL}
 
 	rr := doAuthedJSONRequest(t, app.Router(), http.MethodPut, "/api/items/"+itoa(item.ID)+"/gtd-status", map[string]any{
 		"state": "done",
